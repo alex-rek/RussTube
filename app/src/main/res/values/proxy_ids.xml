@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="proxy_off" type="id" />
+    <item name="proxy_http" type="id" />
+    <item name="proxy_socks5" type="id" />
+</resources>
