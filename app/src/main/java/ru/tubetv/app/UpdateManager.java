@@ -4,6 +4,9 @@ import android.content.Context;
 import android.content.pm.PackageInfo;
 import android.os.SystemClock;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
@@ -16,11 +19,13 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 final class UpdateManager {
-    private static final String LATEST_URL =
-            "https://github.com/bolknote/0W-Tube/releases/latest";
-    private static final String USER_AGENT = "0W-Tube/" + BuildConfig.VERSION_NAME + " Android";
+    private static final String RELEASES_URL =
+            "https://api.github.com/repos/alex-rek/RussTube/releases?per_page=20";
+    private static final String DOWNLOAD_PREFIX =
+            "https://github.com/alex-rek/RussTube/releases/download/";
+    private static final String USER_AGENT = "RussTube/" + BuildConfig.VERSION_NAME + " Android";
     private static final int TIMEOUT_MS = 10_000;
-    private static final long CHECK_INTERVAL_MS = 60_000L;
+    private static final long CHECK_INTERVAL_MS = 5 * 60_000L;
     private static final long MAX_APK_SIZE = 150L * 1024L * 1024L;
     private static final ExecutorService EXECUTOR = Executors.newSingleThreadExecutor();
     private static final AtomicBoolean CHECK_RUNNING = new AtomicBoolean();
@@ -63,31 +68,9 @@ final class UpdateManager {
         lastCheckStartedAt = now;
         EXECUTOR.execute(() -> {
             try {
-                HttpURLConnection latest = NetworkProxy.openConnection(LATEST_URL);
-                latest.setInstanceFollowRedirects(false);
-                latest.setRequestMethod("HEAD");
-                latest.setConnectTimeout(TIMEOUT_MS);
-                latest.setReadTimeout(TIMEOUT_MS);
-                latest.setRequestProperty("User-Agent", USER_AGENT);
-                int code;
-                String location;
-                try {
-                    code = latest.getResponseCode();
-                    location = latest.getHeaderField("Location");
-                } finally {
-                    latest.disconnect();
-                }
-                if (code < 300 || code >= 400 || location == null) return;
-                int tag = location.indexOf("/releases/tag/");
-                if (tag < 0) return;
-                String version = cleanVersion(location.substring(tag + "/releases/tag/".length()));
-                int suffix = version.indexOf('?');
-                if (suffix >= 0) version = version.substring(0, suffix);
-                if (!version.matches("[0-9]+(?:\\.[0-9]+){1,3}")) return;
-                if (version.isEmpty() || compareVersions(version, currentVersion(app)) <= 0) return;
-                String base = "https://github.com/bolknote/0W-Tube/releases/download/" + version
-                        + "/0W-Tube-" + version + ".apk";
-                Release release = new Release(version, base, null, base + ".sha256", 0L);
+                Release release = findUpdate(readText(RELEASES_URL, BoundedHttpReader.JSON_LIMIT),
+                        BuildConfig.MOBILE_VARIANT, currentVersion(app));
+                if (release == null) return;
                 cachedUpdate = release;
                 callback.onUpdate(release);
             } catch (Exception ignored) {
@@ -116,8 +99,10 @@ final class UpdateManager {
                 if (!directory.exists() && !directory.mkdirs()) {
                     throw new Exception("Не удалось создать каталог обновления");
                 }
-                partial = new File(directory, "0W-Tube-" + release.version + ".apk.part");
-                File ready = new File(directory, "0W-Tube-" + release.version + ".apk");
+                String filename = (BuildConfig.MOBILE_VARIANT ? "RussTube-Mobile-" : "RussTube-TV-")
+                        + release.version + ".apk";
+                partial = new File(directory, filename + ".part");
+                File ready = new File(directory, filename);
                 if (partial.exists()) partial.delete();
 
                 HttpURLConnection connection = open(release.apkUrl);
@@ -149,7 +134,8 @@ final class UpdateManager {
                 if (!expected.equalsIgnoreCase(actual)) throw new Exception("SHA-256 обновления не совпадает");
                 PackageInfo archive = app.getPackageManager().getPackageArchiveInfo(partial.getAbsolutePath(), 0);
                 if (archive == null || !app.getPackageName().equals(archive.packageName)
-                        || !release.version.equals(cleanVersion(archive.versionName))) {
+                        || !release.version.equals(cleanVersion(archive.versionName))
+                        || archive.versionCode <= BuildConfig.VERSION_CODE) {
                     throw new Exception("Загружен APK другого приложения или версии");
                 }
                 if (ready.exists() && !ready.delete()) throw new Exception("Не удалось заменить старое обновление");
@@ -166,6 +152,54 @@ final class UpdateManager {
     private static String currentVersion(Context context) throws Exception {
         PackageInfo info = context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
         return cleanVersion(info.versionName);
+    }
+
+    static Release findUpdate(String json, boolean mobile, String installedVersion) throws Exception {
+        JSONArray releases = new JSONArray(json);
+        Release newest = null;
+        String prefix = mobile ? "RussTube-Mobile-" : "RussTube-TV-";
+        for (int i = 0; i < releases.length(); i++) {
+            JSONObject entry = releases.optJSONObject(i);
+            if (entry == null || entry.optBoolean("draft")) continue;
+            String tag = entry.optString("tag_name", "");
+            String version = cleanVersion(tag);
+            if (!tag.matches("v[0-9]+(?:\\.[0-9]+){1,3}")
+                    || compareVersions(version, installedVersion) <= 0
+                    || (newest != null && compareVersions(version, newest.version) <= 0)) continue;
+            JSONArray assets = entry.optJSONArray("assets");
+            if (assets == null) continue;
+            for (int j = 0; j < assets.length(); j++) {
+                JSONObject asset = assets.optJSONObject(j);
+                if (asset == null || !"uploaded".equals(asset.optString("state"))) continue;
+                String name = asset.optString("name", "");
+                if (!name.equals(prefix + version + ".apk")
+                        && !name.equals(prefix + version + "-debug.apk")) continue;
+                String url = asset.optString("browser_download_url", "");
+                long size = asset.optLong("size");
+                if (!url.startsWith(DOWNLOAD_PREFIX + tag + "/")
+                        || size <= 0 || size > MAX_APK_SIZE) continue;
+                String digest = normalizeDigest(asset.optString("digest", ""));
+                if (!isDigest(digest)) digest = null;
+                String checksumUrl = null;
+                for (int k = 0; k < assets.length(); k++) {
+                    JSONObject checksum = assets.optJSONObject(k);
+                    if (checksum != null && (name + ".sha256").equals(checksum.optString("name"))
+                            && "uploaded".equals(checksum.optString("state"))) {
+                        String candidate = checksum.optString("browser_download_url", "");
+                        if (candidate.startsWith(DOWNLOAD_PREFIX + tag + "/"))
+                            checksumUrl = candidate;
+                    }
+                }
+                if (digest == null && checksumUrl == null) continue;
+                newest = new Release(version, url, digest, checksumUrl, size);
+                break;
+            }
+        }
+        return newest;
+    }
+
+    private static boolean isDigest(String digest) {
+        return digest != null && digest.matches("[0-9a-f]{64}");
     }
 
     private static int compareVersions(String left, String right) {
@@ -219,7 +253,7 @@ final class UpdateManager {
         connection.setInstanceFollowRedirects(true);
         connection.setConnectTimeout(TIMEOUT_MS);
         connection.setReadTimeout(TIMEOUT_MS);
-        connection.setRequestProperty("Accept", "application/octet-stream,text/plain,*/*");
+        connection.setRequestProperty("Accept", "application/vnd.github+json,application/octet-stream,text/plain,*/*");
         connection.setRequestProperty("User-Agent", USER_AGENT);
         try {
             int code = connection.getResponseCode();

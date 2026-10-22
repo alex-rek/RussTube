@@ -68,6 +68,7 @@ public final class MobileBrowseActivity extends Activity {
     private int generation;
     private int pending;
     private boolean firstResume = true;
+    private UpdateCoordinator updates;
     private boolean skipResumeReload;
     private String searchQuery = "";
     private VideoSort.Mode sortMode = VideoSort.Mode.NEWEST;
@@ -90,6 +91,7 @@ public final class MobileBrowseActivity extends Activity {
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
+        updates = new UpdateCoordinator(this);
         getWindow().setStatusBarColor(BACKGROUND);
         getWindow().setNavigationBarColor(BACKGROUND);
         sortMode = VideoSort.parse(getSharedPreferences("browse", 0)
@@ -606,12 +608,23 @@ public final class MobileBrowseActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        updates.onResume();
         if (firstResume) { firstResume = false; return; }
         if (skipResumeReload) { skipResumeReload = false; render(); return; }
         if (activeChannel != null) showChannel(activeChannel);
         else if (page == Page.HOME || page == Page.HISTORY || page == Page.LIBRARY
                 || page == Page.FAVORITES || page == Page.SUBSCRIPTIONS || page == Page.CHANNELS) show(page);
         else render();
+    }
+
+    @Override protected void onPause() {
+        updates.onPause();
+        super.onPause();
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        updates.onActivityResult(requestCode);
     }
 
     @Override protected void onSaveInstanceState(Bundle state) {
@@ -629,7 +642,7 @@ public final class MobileBrowseActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
-        cancel(); io.shutdownNow(); super.onDestroy();
+        updates.onDestroy(); cancel(); io.shutdownNow(); super.onDestroy();
     }
 
     private interface Load { List<VideoItem> run() throws Exception; }

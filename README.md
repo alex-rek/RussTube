@@ -1,6 +1,6 @@
 # RussTube для Android TV и телефона
 
-RussTube 0.5.1 — поиск и просмотр публичных видео RUTUBE, VK Видео, OK и Дзена. В основе — 0W-Tube. Есть отдельные сборки для Android TV и телефона; телевизионная компоновка адаптирована по вашему проекту [PeerTubeTV](https://github.com/alex-rek/PeerTubeTV).
+RussTube 0.5.2 — поиск и просмотр публичных видео RUTUBE, VK Видео, OK и Дзена. В основе — 0W-Tube. Есть отдельные сборки для Android TV и телефона; телевизионная компоновка адаптирована по вашему проекту [PeerTubeTV](https://github.com/alex-rek/PeerTubeTV).
 
 ## Android TV
 
@@ -64,7 +64,9 @@ sdk.dir=C\:/Users/alex/AppData/Local/Android/Sdk
 adb install -r app/build/outputs/apk/mobile/debug/app-mobile-debug.apk
 ```
 
-Готовые APK: [RussTube для телефона](https://github.com/alex-rek/RussTube/releases/download/v0.5.1/RussTube-Mobile-0.5.1-debug.apk) (`ru.russtube.tv.mobile`) и [RussTubeTV](https://github.com/alex-rek/RussTube/releases/download/v0.5.1/RussTube-TV-0.5.1-debug.apk) (`ru.russtube.tv`); SHA-256 опубликованы рядом с ними в релизе. Минимальный Android 6.0 (API 23). Подпись отладочная; автоматическое обновление из исходного проекта отключено.
+Готовые APK: [RussTube для телефона](https://github.com/alex-rek/RussTube/releases/download/v0.5.2/RussTube-Mobile-0.5.2-debug.apk) (`ru.russtube.tv.mobile`) и [RussTubeTV](https://github.com/alex-rek/RussTube/releases/download/v0.5.2/RussTube-TV-0.5.2-debug.apk) (`ru.russtube.tv`); SHA-256 опубликованы рядом с ними в релизе. Минимальный Android 6.0 (API 23). Подпись отладочная.
+
+Начиная с версии 0.5.2 обе сборки при запуске проверяют публичные релизы этого репозитория, включая предварительные. Когда появится более новая версия с APK для данного устройства, приложение предложит скачать её. После согласия оно сверит SHA-256 и пакет APK, затем откроет системный установщик. Android может попросить разрешить установку из RussTube; окончательное подтверждение установки остаётся за пользователем. При переходе с 0.5.1 версию 0.5.2 нужно установить вручную один раз, поскольку в 0.5.1 проверка обновлений была отключена. Для последующих обновлений требуется та же подпись APK; APK, собранные GitHub Actions с другим отладочным ключом, не подходят для обновления установленной версии.
 
 ## Проверка
 

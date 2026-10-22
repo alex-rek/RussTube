@@ -64,6 +64,7 @@ public final class BrowseActivity extends Activity {
     private final List<String> failed = new ArrayList<>();
     private boolean channelsMode;
     private boolean firstResume = true;
+    private UpdateCoordinator updates;
     private VideoItem activeChannel;
     private VideoSort.Mode sortMode = VideoSort.Mode.NEWEST;
     private Button sortButton;
@@ -92,6 +93,7 @@ public final class BrowseActivity extends Activity {
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
+        updates = new UpdateCoordinator(this);
         sortMode = VideoSort.parse(getSharedPreferences("browse", 0)
                 .getString("video_sort", VideoSort.Mode.NEWEST.name()));
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN
@@ -590,6 +592,7 @@ public final class BrowseActivity extends Activity {
     }
     @Override protected void onResume() {
         super.onResume();
+        updates.onResume();
         if (firstResume) { firstResume = false; return; }
         sortMode = VideoSort.parse(getSharedPreferences("browse", 0)
                 .getString("video_sort", VideoSort.Mode.NEWEST.name()));
@@ -599,7 +602,19 @@ public final class BrowseActivity extends Activity {
         else { if (sortButton != null) sortButton.setText(sortMode.label + "  ▾");
             applySort(); display("Видео не найдены."); }
     }
-    @Override protected void onDestroy() { timer.removeCallbacks(tick); cancel(); io.shutdownNow(); super.onDestroy(); }
+
+    @Override protected void onPause() {
+        updates.onPause();
+        super.onPause();
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        updates.onActivityResult(requestCode);
+    }
+    @Override protected void onDestroy() {
+        updates.onDestroy(); timer.removeCallbacks(tick); cancel(); io.shutdownNow(); super.onDestroy();
+    }
 
     private final class Cards extends BaseAdapter {
         @Override public int getCount() { return items.size(); }
