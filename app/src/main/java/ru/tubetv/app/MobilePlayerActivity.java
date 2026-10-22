@@ -37,6 +37,7 @@ import androidx.core.view.WindowInsetsCompat;
 import androidx.media3.common.C;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
+import androidx.media3.common.VideoSize;
 import androidx.media3.exoplayer.ExoPlayer;
 
 import java.util.ArrayList;
@@ -69,6 +70,7 @@ public final class MobilePlayerActivity extends Activity {
     private ProgressBar loading;
     private TextView errorText;
     private TextView playButton;
+    private TextView fullscreenButton;
     private TextView time;
     private TextView favoriteButton;
     private TextView subscribeButton;
@@ -83,12 +85,17 @@ public final class MobilePlayerActivity extends Activity {
     private boolean recorded;
     private boolean backgroundStarted;
     private boolean autoResume = true;
+    private boolean portraitFullscreen;
+    private int videoWidth;
+    private int videoHeight;
+    private float pixelRatio = 1f;
     private long resumePosition;
     private long knownDuration;
     private long lastSaved;
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
+        if (state != null) portraitFullscreen = state.getBoolean("portrait_fullscreen", false);
         getWindow().setStatusBarColor(BACKGROUND);
         getWindow().setNavigationBarColor(BACKGROUND);
         setVolumeControlStream(AudioManager.STREAM_MUSIC);
@@ -122,9 +129,8 @@ public final class MobilePlayerActivity extends Activity {
         ViewCompat.setOnApplyWindowInsetsListener(root, (view, insets) -> {
             Insets safe = insets.getInsets(WindowInsetsCompat.Type.systemBars()
                     | WindowInsetsCompat.Type.displayCutout());
-            boolean landscape = getResources().getConfiguration().orientation
-                    == Configuration.ORIENTATION_LANDSCAPE;
-            root.setPadding(0, landscape ? 0 : safe.top, 0, landscape ? 0 : safe.bottom);
+            boolean fullscreen = isFullscreen();
+            root.setPadding(0, fullscreen ? 0 : safe.top, 0, fullscreen ? 0 : safe.bottom);
             return insets;
         });
         ViewCompat.requestApplyInsets(root);
@@ -148,8 +154,7 @@ public final class MobilePlayerActivity extends Activity {
 
         videoFrame = new FrameLayout(this) {
             @Override protected void onMeasure(int widthSpec, int heightSpec) {
-                if (getResources().getConfiguration().orientation
-                        == Configuration.ORIENTATION_LANDSCAPE) {
+                if (isFullscreen()) {
                     super.onMeasure(widthSpec, heightSpec);
                     return;
                 }
@@ -159,6 +164,8 @@ public final class MobilePlayerActivity extends Activity {
             }
         };
         videoFrame.setBackgroundColor(Color.BLACK);
+        videoFrame.addOnLayoutChangeListener((view, left, top, right, bottom,
+                oldLeft, oldTop, oldRight, oldBottom) -> fitSurface());
         surface = new MirrorVideoView(this);
         surface.setSurfaceListener(new MirrorVideoView.SurfaceListener() {
             @Override public void onSurfaceAvailable(Surface output) {
@@ -193,7 +200,10 @@ public final class MobilePlayerActivity extends Activity {
         controlRow.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
         time = label("0:00 / 0:00", 12, Color.WHITE);
         time.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
-        controlRow.addView(time, size(100, 42));
+        controlRow.addView(time, new LinearLayout.LayoutParams(0, dp(42), 1));
+        fullscreenButton = addControl(controlRow, "⛶", this::toggleFullscreen);
+        fullscreenButton.setTextSize(26);
+        fullscreenButton.setContentDescription("На весь экран");
         controls.addView(controlRow, size(-1, 46));
         timeline = new SeekBar(this);
         timeline.setMax(1000);
@@ -284,19 +294,49 @@ public final class MobilePlayerActivity extends Activity {
     private void applyOrientation() {
         boolean landscape = getResources().getConfiguration().orientation
                 == Configuration.ORIENTATION_LANDSCAPE;
-        toolbar.setVisibility(landscape ? View.GONE : View.VISIBLE);
-        detailsScroll.setVisibility(landscape ? View.GONE : View.VISIBLE);
-        videoFrame.setLayoutParams(landscape
+        boolean fullscreen = isFullscreen();
+        toolbar.setVisibility(fullscreen ? View.GONE : View.VISIBLE);
+        detailsScroll.setVisibility(fullscreen ? View.GONE : View.VISIBLE);
+        videoFrame.setLayoutParams(fullscreen
                 ? new LinearLayout.LayoutParams(-1, 0, 1)
                 : size(-1, -2));
-        getWindow().getDecorView().setSystemUiVisibility(landscape
+        getWindow().getDecorView().setSystemUiVisibility(fullscreen
                 ? View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
                     | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
                     | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                 : 0);
+        fullscreenButton.setContentDescription(fullscreen
+                ? "Выйти из полноэкранного режима" : "На весь экран");
+        fullscreenButton.setVisibility(landscape ? View.GONE : View.VISIBLE);
+        fullscreenButton.setTextColor(portraitFullscreen ? ACCENT : Color.WHITE);
         ViewCompat.requestApplyInsets(root);
         videoFrame.requestLayout();
+        videoFrame.post(this::fitSurface);
         showControls();
+    }
+
+    private boolean isFullscreen() {
+        return portraitFullscreen || getResources().getConfiguration().orientation
+                == Configuration.ORIENTATION_LANDSCAPE;
+    }
+
+    private void toggleFullscreen() {
+        portraitFullscreen = !portraitFullscreen;
+        applyOrientation();
+    }
+
+    private void fitSurface() {
+        if (videoWidth <= 0 || videoHeight <= 0 || videoFrame.getWidth() <= 0
+                || videoFrame.getHeight() <= 0) return;
+        float width = videoWidth * pixelRatio;
+        float scale = Math.min(videoFrame.getWidth() / width,
+                videoFrame.getHeight() / (float) videoHeight);
+        int fittedWidth = Math.max(1, Math.round(width * scale));
+        int fittedHeight = Math.max(1, Math.round(videoHeight * scale));
+        FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) surface.getLayoutParams();
+        if (params.width == fittedWidth && params.height == fittedHeight) return;
+        surface.setLayoutParams(new FrameLayout.LayoutParams(
+                fittedWidth, fittedHeight, Gravity.CENTER));
     }
 
     @Override public void onConfigurationChanged(Configuration configuration) {
@@ -362,6 +402,12 @@ public final class MobilePlayerActivity extends Activity {
                 }
                 @Override public void onPlayWhenReadyChanged(boolean ready, int reason) {
                     updateScreenAwake();
+                }
+                @Override public void onVideoSizeChanged(VideoSize size) {
+                    videoWidth = size.width;
+                    videoHeight = size.height;
+                    pixelRatio = size.pixelWidthHeightRatio > 0 ? size.pixelWidthHeightRatio : 1f;
+                    videoFrame.post(MobilePlayerActivity.this::fitSurface);
                 }
                 @Override public void onPlayerError(PlaybackException error) {
                     showError("Ошибка воспроизведения: " + error.getErrorCodeName());
@@ -594,6 +640,19 @@ public final class MobilePlayerActivity extends Activity {
     @Override public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         focused = hasFocus; updateScreenAwake();
+    }
+
+    @Override public void onBackPressed() {
+        if (portraitFullscreen && getResources().getConfiguration().orientation
+                == Configuration.ORIENTATION_PORTRAIT) {
+            portraitFullscreen = false;
+            applyOrientation();
+        } else super.onBackPressed();
+    }
+
+    @Override protected void onSaveInstanceState(Bundle state) {
+        state.putBoolean("portrait_fullscreen", portraitFullscreen);
+        super.onSaveInstanceState(state);
     }
 
     @Override protected void onDestroy() {
