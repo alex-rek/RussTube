@@ -395,7 +395,12 @@ public final class MobilePlayerActivity extends Activity {
                         loading.setVisibility(View.GONE);
                         errorText.setVisibility(View.GONE);
                         showControls();
-                    } else if (state == Player.STATE_ENDED) showControls();
+                    } else if (state == Player.STATE_ENDED) {
+                        if (isFullscreen()) {
+                            saveProgress();
+                            finish();
+                        } else showControls();
+                    }
                 }
                 @Override public void onIsPlayingChanged(boolean playing) {
                     updateScreenAwake(); updateProgress(); scheduleHide();

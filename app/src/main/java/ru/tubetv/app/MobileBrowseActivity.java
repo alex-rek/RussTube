@@ -263,7 +263,10 @@ public final class MobileBrowseActivity extends Activity {
             if (position >= items.size()) return;
             VideoItem item = items.get(position);
             if (page == Page.CHANNELS) showChannel(item);
-            else VideoActions.play(this, item);
+            else {
+                skipResumeReload = true;
+                VideoActions.play(this, item);
+            }
         });
         list.setOnItemLongClickListener((parent, view, position, id) -> {
             if (position >= items.size()) return false;
