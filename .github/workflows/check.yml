@@ -17,7 +17,8 @@ jobs:
           set +e
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
           test "${PIPESTATUS[1]}" -eq 0
-      - run: "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
+      - run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
       - run: ./gradlew :app:testMobileDebugUnitTest :app:testTvDebugUnitTest :app:lintMobileDebug :app:lintTvDebug :app:assembleMobileDebug :app:assembleTvDebug --no-daemon
       - uses: actions/upload-artifact@v4
         with:
