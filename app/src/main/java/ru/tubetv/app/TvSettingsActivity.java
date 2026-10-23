@@ -1,6 +1,7 @@
 package ru.tubetv.app;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
@@ -38,9 +39,11 @@ public final class TvSettingsActivity extends Activity {
     private EditText proxyHost, proxyPort, proxyUser, proxyPassword;
     private String proxyType;
     private String draftHost, draftPort, draftUser, draftPassword;
+    private UpdateCoordinator updates;
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
+        updates = new UpdateCoordinator(this);
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN
                 | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
         dashboardRoot = new LinearLayout(this);
@@ -324,6 +327,7 @@ public final class TvSettingsActivity extends Activity {
         section("RussTubeTV " + BuildConfig.VERSION_NAME);
         note("Поиск видео на RUTUBE, VK Видео, OK, Дзене и PeerTube.");
         note("История и подписки хранятся на устройстве.");
+        row("Проверить обновление", "↻", updates::checkNow);
     }
 
     private void section(String value) {
@@ -404,6 +408,26 @@ public final class TvSettingsActivity extends Activity {
     @Override public void onBackPressed() {
         if (category >= 0) closePanel();
         else super.onBackPressed();
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        updates.onResume();
+    }
+
+    @Override protected void onPause() {
+        updates.onPause();
+        super.onPause();
+    }
+
+    @Override protected void onDestroy() {
+        updates.onDestroy();
+        super.onDestroy();
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        updates.onActivityResult(requestCode);
     }
 
     @Override protected void onSaveInstanceState(Bundle state) {

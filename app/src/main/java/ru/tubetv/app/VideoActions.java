@@ -1,7 +1,6 @@
 package ru.tubetv.app;
 
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.content.Intent;
 import android.widget.Toast;
 import android.app.Dialog;
@@ -15,15 +14,15 @@ import android.widget.TextView;
 
 final class VideoActions {
     static void show(Activity activity, VideoItem item, Runnable openChannel) {
+        show(activity, item, openChannel, null);
+    }
+
+    static void show(Activity activity, VideoItem item, Runnable openChannel,
+                     Runnable onFilmsChanged) {
         boolean subscribed = SubscriptionStore.contains(activity, item);
         String name = item.channelName.isEmpty() ? "Канал " + item.channelId : item.channelName;
-        if (item.channelId.isEmpty()) {
-            new AlertDialog.Builder(activity).setTitle(item.title)
-                    .setMessage(item.source + " · Платформа не передала данные канала")
-                    .setPositiveButton("Смотреть", (d, w) -> play(activity, item))
-                    .setNegativeButton("Назад", null).show();
-            return;
-        }
+        boolean hasChannel = !item.channelId.isEmpty();
+        boolean savedFilm = !BuildConfig.MOBILE_VARIANT && SavedFilmsStore.contains(activity, item);
         Dialog dialog = new Dialog(activity);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
         float density = activity.getResources().getDisplayMetrics().density;
@@ -36,28 +35,48 @@ final class VideoActions {
         title.setText(item.title); title.setTextColor(Color.WHITE); title.setTextSize(20);
         title.setMaxLines(3); title.setPadding(0, 0, 0, padding);
         panel.addView(title);
-        String[] labels = {"Смотреть", (subscribed ? "Отписаться от: " : "Подписаться на: ") + name,
-                "Видео канала", "Назад"};
+        java.util.List<String> labels = new java.util.ArrayList<>();
+        java.util.List<Runnable> actions = new java.util.ArrayList<>();
+        labels.add("Смотреть"); actions.add(() -> play(activity, item));
+        if (hasChannel) {
+            labels.add((subscribed ? "Отписаться от: " : "Подписаться на: ") + name);
+            actions.add(() -> {
+                try {
+                    SubscriptionStore.set(activity, item, !subscribed);
+                    Toast.makeText(activity, subscribed ? "Подписка удалена" : "Канал добавлен в подписки",
+                            Toast.LENGTH_SHORT).show();
+                } catch (Exception error) {
+                    Toast.makeText(activity, error.getMessage(), Toast.LENGTH_LONG).show();
+                }
+            });
+            labels.add("Видео канала"); actions.add(openChannel);
+        }
+        if (!BuildConfig.MOBILE_VARIANT) {
+            labels.add(savedFilm ? "Удалить из Фильмов" : "Добавить в Фильмы");
+            actions.add(() -> {
+                try {
+                    SavedFilmsStore.set(activity, item, !savedFilm);
+                    Toast.makeText(activity, savedFilm ? "Удалено из Фильмов" : "Добавлено в Фильмы",
+                            Toast.LENGTH_SHORT).show();
+                    if (onFilmsChanged != null) onFilmsChanged.run();
+                } catch (Exception error) {
+                    Toast.makeText(activity, error.getMessage(), Toast.LENGTH_LONG).show();
+                }
+            });
+        }
+        labels.add("Назад"); actions.add(() -> { });
         Button first = null;
-        for (int i = 0; i < labels.length; i++) {
+        for (int i = 0; i < labels.size(); i++) {
             final int which = i;
             Button action = new Button(activity);
-            action.setText(labels[i]); action.setAllCaps(false); action.setTextColor(Color.WHITE);
+            action.setText(labels.get(i)); action.setAllCaps(false); action.setTextColor(Color.WHITE);
             action.setBackgroundResource(R.drawable.navigation_item);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, Math.round(64 * density));
             params.bottomMargin = Math.round(6 * density); panel.addView(action, params);
             if (first == null) first = action;
             action.setOnClickListener(v -> {
                 dialog.dismiss();
-                if (which == 0) play(activity, item);
-                else if (which == 2) openChannel.run();
-                else if (which == 1) try {
-                        SubscriptionStore.set(activity, item, !subscribed);
-                        Toast.makeText(activity, subscribed ? "Подписка удалена" : "Канал добавлен в подписки",
-                                Toast.LENGTH_SHORT).show();
-                    } catch (Exception error) {
-                        Toast.makeText(activity, error.getMessage(), Toast.LENGTH_LONG).show();
-                    }
+                actions.get(which).run();
                 });
         }
         dialog.setContentView(panel);

@@ -33,6 +33,9 @@ final class UpdateManager {
     private static volatile long lastCheckStartedAt;
 
     interface CheckCallback { void onUpdate(Release release); }
+    interface ManualCheckCallback {
+        void onResult(Release release, String error);
+    }
     interface DownloadCallback {
         void onProgress(int percent);
         void onReady(File apk);
@@ -77,6 +80,21 @@ final class UpdateManager {
                 // An update check must never delay startup or show a network error.
             } finally {
                 CHECK_RUNNING.set(false);
+            }
+        });
+    }
+
+    static void checkNow(Context context, ManualCheckCallback callback) {
+        Context app = context.getApplicationContext();
+        EXECUTOR.execute(() -> {
+            try {
+                Release release = findUpdate(readText(RELEASES_URL, BoundedHttpReader.JSON_LIMIT),
+                        BuildConfig.MOBILE_VARIANT, currentVersion(app));
+                if (release != null) cachedUpdate = release;
+                callback.onResult(release, null);
+            } catch (Exception error) {
+                callback.onResult(null, error.getMessage() == null
+                        ? "Не удалось проверить обновления" : error.getMessage());
             }
         });
     }

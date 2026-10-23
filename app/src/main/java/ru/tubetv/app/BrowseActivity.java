@@ -47,11 +47,11 @@ import java.util.Locale;
 /** Native, D-pad-first browsing shell with a persistent navigation rail. */
 public final class BrowseActivity extends Activity {
     private enum Page { HOME, SEARCH, RECOMMENDATIONS, LIVE, SUBSCRIPTIONS, CHANNELS, HISTORY, POPULAR, FILMS, FAVORITES }
-    private static final Page[] NAV_PAGES = {Page.HOME, Page.POPULAR, Page.FILMS, Page.RECOMMENDATIONS, Page.LIVE,
+    private static final Page[] NAV_PAGES = {Page.HOME, Page.POPULAR, Page.RECOMMENDATIONS, Page.FILMS, Page.LIVE,
             Page.SUBSCRIPTIONS, Page.CHANNELS, Page.HISTORY, Page.FAVORITES};
-    private static final String[] NAV_NAMES = {"Главная", "Популярное", "Фильмы", "Рекомендации", "В эфире",
+    private static final String[] NAV_NAMES = {"Главная", "Популярное", "Рекомендации", "Фильмы", "В эфире",
             "Подписки", "Каналы", "История", "Избранное"};
-    private static final String[] NAV_ICONS = {"home", "popular", "films", "recommend", "live",
+    private static final String[] NAV_ICONS = {"home", "popular", "recommend", "films", "live",
             "subscriptions", "channels", "history", "favorite"};
     private static final String[] QUALITY_LABELS = {"Любое", "720p+", "1080p+", "1440p+", "4K"};
     private static final int[] QUALITY_WIDTHS = {0, 1280, 1920, 2560, 3840};
@@ -252,7 +252,7 @@ public final class BrowseActivity extends Activity {
         grid.setOnItemLongClickListener((p, v, position, id) -> {
             if (position >= items.size()) return false;
             VideoItem item = items.get(position);
-            VideoActions.show(this, item, () -> showChannel(item));
+            VideoActions.show(this, item, () -> showChannel(item), this::refreshSavedFilms);
             return true;
         });
         grid.setOnKeyListener((v, key, event) -> {
@@ -265,7 +265,7 @@ public final class BrowseActivity extends Activity {
                 int position = grid.getSelectedItemPosition();
                 if (position >= 0 && position < items.size()) {
                     VideoItem item = items.get(position);
-                    VideoActions.show(this, item, () -> showChannel(item));
+                    VideoActions.show(this, item, () -> showChannel(item), this::refreshSavedFilms);
                 }
                 return true;
             }
@@ -325,10 +325,11 @@ public final class BrowseActivity extends Activity {
                 break;
             case FILMS:
                 heading.setText("Фильмы");
-                description.setText("Полнометражные видео с RUTUBE, VK Видео, PeerTube, OK и Дзена");
+                description.setText("Полнометражные видео и добавленные вами фильмы");
                 addAction("Художественные", () -> findFilms("художественный фильм"));
                 addAction("Документальные", () -> findFilms("документальный фильм"));
                 addAction("Мультфильмы", () -> findFilms("мультфильм полный"));
+                rebuildBaseItems();
                 searchAll("полный фильм", false);
                 break;
             case SUBSCRIPTIONS:
@@ -381,7 +382,16 @@ public final class BrowseActivity extends Activity {
 
     private void findFilms(String value) {
         cancel(); candidates.clear(); items.clear(); baseItems.clear();
+        rebuildBaseItems();
+        applySort();
         searchAll(value, false);
+        display("Полнометражные видео пока не найдены.");
+    }
+
+    private void refreshSavedFilms() {
+        if (page != Page.FILMS || activeChannel != null) return;
+        rebuildBaseItems();
+        applySort();
         display("Полнометражные видео пока не найдены.");
     }
 
@@ -496,6 +506,9 @@ public final class BrowseActivity extends Activity {
             baseItems.addAll(RecommendationEngine.rank(candidates, history));
         } else {
             Map<String, VideoItem> unique = new LinkedHashMap<>();
+            if (page == Page.FILMS && activeChannel == null)
+                for (VideoItem item : SavedFilmsStore.load(this))
+                    unique.put(item.stableKey(), item);
             for (VideoItem item : candidates) unique.put(item.stableKey(), item);
             baseItems.addAll(unique.values());
             if (page == Page.POPULAR) Collections.sort(baseItems,
@@ -595,6 +608,18 @@ public final class BrowseActivity extends Activity {
             if (item.maxWidth >= minWidth) items.add(item);
         }
         if (!channelsMode) VideoSort.apply(items, sortMode);
+        if (page == Page.FILMS && activeChannel == null) {
+            Map<String, VideoItem> byKey = new LinkedHashMap<>();
+            for (VideoItem item : items) byKey.put(item.stableKey(), item);
+            List<VideoItem> pinned = new ArrayList<>();
+            for (VideoItem saved : SavedFilmsStore.load(this)) {
+                VideoItem item = byKey.remove(saved.stableKey());
+                if (item != null) pinned.add(item);
+            }
+            pinned.addAll(byKey.values());
+            items.clear();
+            items.addAll(pinned);
+        }
     }
 
     private Button button(String text, Runnable action) {

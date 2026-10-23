@@ -20,6 +20,7 @@ final class UpdateCoordinator {
     private UpdateManager.Release pendingRelease;
     private File pendingApk;
     private AlertDialog progress;
+    private AlertDialog checking;
     private boolean resumed;
     private boolean promptVisible;
     private boolean permissionRequested;
@@ -45,6 +46,7 @@ final class UpdateCoordinator {
     void onDestroy() {
         resumed = false;
         if (progress != null) progress.dismiss();
+        if (checking != null) checking.dismiss();
     }
 
     void onActivityResult(int requestCode) {
@@ -64,6 +66,36 @@ final class UpdateCoordinator {
             if (!alive() || release.version.equals(offeredVersion)) return;
             pendingRelease = release;
             offer();
+        }));
+    }
+
+    void checkNow() {
+        if (checking != null || !alive()) return;
+        AlertDialog dialog = new AlertDialog.Builder(activity)
+                .setTitle("Проверка обновлений")
+                .setMessage("Проверяем GitHub…")
+                .setCancelable(false)
+                .create();
+        checking = dialog;
+        dialog.show();
+        UpdateManager.checkNow(activity, (release, error) -> activity.runOnUiThread(() -> {
+            if (checking != dialog) return;
+            checking = null;
+            dialog.dismiss();
+            if (!alive() || !resumed) return;
+            if (error != null) {
+                showError("Не удалось проверить обновления: " + error);
+            } else if (release == null) {
+                new AlertDialog.Builder(activity)
+                        .setTitle("Обновлений нет")
+                        .setMessage("Установлена последняя версия "
+                                + (BuildConfig.MOBILE_VARIANT ? "RussTube" : "RussTubeTV") + ".")
+                        .setPositiveButton("OK", null).show();
+            } else {
+                offeredVersion = null;
+                pendingRelease = release;
+                offer();
+            }
         }));
     }
 
