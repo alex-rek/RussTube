@@ -63,6 +63,10 @@ public final class TvSettingsActivity extends Activity {
         grid.setVerticalSpacing(dp(16));
         grid.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
         grid.setSelector(android.R.color.transparent);
+        grid.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        grid.setFocusable(true);
+        grid.setOnFocusChangeListener((view, focused) ->
+                updateCategorySelection(focused ? grid.getSelectedItemPosition() : -1));
         grid.setAdapter(new BaseAdapter() {
             @Override public int getCount() { return CATEGORIES.length; }
             @Override public Object getItem(int position) { return CATEGORIES[position]; }
@@ -71,7 +75,8 @@ public final class TvSettingsActivity extends Activity {
                 LinearLayout tile = new LinearLayout(TvSettingsActivity.this);
                 tile.setOrientation(LinearLayout.VERTICAL);
                 tile.setGravity(Gravity.CENTER);
-                tile.setFocusable(true);
+                // GridView owns D-pad selection; focusable children swallow its key events.
+                tile.setFocusable(false);
                 tile.setBackground(tileBackground(false));
                 TextView symbol = new TextView(TvSettingsActivity.this);
                 symbol.setText(SYMBOLS[position]); symbol.setTextSize(34);
@@ -81,12 +86,17 @@ public final class TvSettingsActivity extends Activity {
                 label.setText(CATEGORIES[position]); label.setTextSize(19);
                 label.setTextColor(Color.WHITE); label.setGravity(Gravity.CENTER);
                 tile.addView(label, new LinearLayout.LayoutParams(-1, dp(48)));
-                tile.setOnFocusChangeListener((v, focused) -> {
-                    tile.setBackground(tileBackground(focused));
-                    label.setTextColor(focused ? Color.BLACK : Color.WHITE);
-                });
                 tile.setOnClickListener(v -> openCategory(position));
                 return tile;
+            }
+        });
+        grid.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view,
+                                                 int position, long id) {
+                updateCategorySelection(position);
+            }
+            @Override public void onNothingSelected(android.widget.AdapterView<?> parent) {
+                updateCategorySelection(-1);
             }
         });
         grid.setOnItemClickListener((parent, view, position, id) -> openCategory(position));
@@ -107,7 +117,15 @@ public final class TvSettingsActivity extends Activity {
         drawer.setVisibility(View.GONE);
         screen.addView(drawer, new FrameLayout.LayoutParams(drawerWidth, -1, Gravity.RIGHT));
         setContentView(screen);
+        grid.setSelection(0);
         grid.requestFocus();
+        grid.post(() -> {
+            if (category < 0) {
+                grid.setSelection(0);
+                grid.requestFocus();
+                updateCategorySelection(0);
+            }
+        });
         if (state != null) {
             int restored = state.getInt("category", -1);
             if (restored >= 0 && restored < CATEGORIES.length)
@@ -120,6 +138,15 @@ public final class TvSettingsActivity extends Activity {
         result.setColor(focused ? Color.WHITE : 0xff171a21);
         result.setCornerRadius(dp(14));
         return result;
+    }
+
+    private void updateCategorySelection(int selected) {
+        for (int i = 0; i < grid.getChildCount(); i++) {
+            LinearLayout tile = (LinearLayout) grid.getChildAt(i);
+            boolean active = grid.hasFocus() && grid.getFirstVisiblePosition() + i == selected;
+            tile.setBackground(tileBackground(active));
+            ((TextView) tile.getChildAt(1)).setTextColor(active ? Color.BLACK : Color.WHITE);
+        }
     }
 
     private void openCategory(int selected) {
@@ -295,7 +322,7 @@ public final class TvSettingsActivity extends Activity {
 
     private void about() {
         section("RussTubeTV " + BuildConfig.VERSION_NAME);
-        note("Поиск видео на RUTUBE, VK Видео, OK и Дзене.");
+        note("Поиск видео на RUTUBE, VK Видео, OK, Дзене и PeerTube.");
         note("История и подписки хранятся на устройстве.");
     }
 
@@ -359,6 +386,7 @@ public final class TvSettingsActivity extends Activity {
 
     private void closePanel() {
         if (category < 0) return;
+        int selected = category;
         drawer.animate().translationX(drawerWidth).setDuration(160).withEndAction(() -> {
             if (category < 0) {
                 drawer.setVisibility(View.GONE);
@@ -368,7 +396,9 @@ public final class TvSettingsActivity extends Activity {
         category = -1;
         dashboardRoot.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
         grid.setFocusable(true);
+        grid.setSelection(selected);
         grid.requestFocus();
+        grid.post(() -> updateCategorySelection(grid.getSelectedItemPosition()));
     }
 
     @Override public void onBackPressed() {

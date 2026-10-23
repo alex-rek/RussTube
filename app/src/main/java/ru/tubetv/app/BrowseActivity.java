@@ -32,6 +32,8 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -49,6 +51,8 @@ public final class BrowseActivity extends Activity {
             "Подписки", "Каналы", "История", "Избранное"};
     private static final String[] NAV_ICONS = {"home", "popular", "recommend", "live",
             "subscriptions", "channels", "history", "favorite"};
+    private static final String[] QUALITY_LABELS = {"Любое", "720p+", "1080p+", "1440p+", "4K"};
+    private static final int[] QUALITY_WIDTHS = {0, 1280, 1920, 2560, 3840};
     private Page page = Page.HOME;
     private final ThreadPoolExecutor io = new ThreadPoolExecutor(4, 4, 0, TimeUnit.SECONDS,
             new ArrayBlockingQueue<>(128));
@@ -57,6 +61,7 @@ public final class BrowseActivity extends Activity {
     private final List<VideoItem> baseItems = new ArrayList<>();
     private final List<VideoItem> candidates = new ArrayList<>();
     private final List<VideoItem> history = new ArrayList<>();
+    private final Set<String> qualityRequested = new HashSet<>();
     private final List<Button> navigation = new ArrayList<>();
     private final FeedRepository repository = new FeedRepository();
     private int generation;
@@ -68,6 +73,8 @@ public final class BrowseActivity extends Activity {
     private VideoItem activeChannel;
     private VideoSort.Mode sortMode = VideoSort.Mode.NEWEST;
     private Button sortButton;
+    private Button qualityButton;
+    private int qualityFilter;
     private TextView heading;
     private TextView description;
     private TextView status;
@@ -96,6 +103,8 @@ public final class BrowseActivity extends Activity {
         updates = new UpdateCoordinator(this);
         sortMode = VideoSort.parse(getSharedPreferences("browse", 0)
                 .getString("video_sort", VideoSort.Mode.NEWEST.name()));
+        qualityFilter = Math.max(0, Math.min(QUALITY_LABELS.length - 1,
+                getSharedPreferences("browse", 0).getInt("tv_quality_filter", 0)));
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN
                 | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
         setContentView(createContent());
@@ -292,8 +301,7 @@ public final class BrowseActivity extends Activity {
             case SEARCH:
                 heading.setText("Поиск");
                 description.setText("Единый поиск на пяти платформах");
-                addAction("Фильтры качества", () -> startActivity(new Intent(this, MainActivity.class)
-                        .putExtra("search_query", query.getText().toString())));
+                qualityButton = addAction(qualityButtonLabel(), this::cycleQualityFilter);
                 if (query.getText().toString().trim().length() >= 2) searchAll(query.getText().toString().trim(), false);
                 break;
             case SUBSCRIPTIONS:
@@ -424,20 +432,64 @@ public final class BrowseActivity extends Activity {
                 pending--;
                 if (problem != null && !failed.contains(problem)) failed.add(problem);
                 candidates.addAll(result);
-                baseItems.clear();
-                if ((page == Page.HOME || page == Page.RECOMMENDATIONS) && activeChannel == null) baseItems.addAll(RecommendationEngine.rank(candidates, history));
-                else {
-                    Map<String, VideoItem> unique = new LinkedHashMap<>();
-                    for (VideoItem item : candidates) unique.put(item.stableKey(), item);
-                    baseItems.addAll(unique.values());
-                    if (page == Page.POPULAR) Collections.sort(baseItems,
-                            (a, b) -> Long.compare(b.views, a.views));
-                }
+                rebuildBaseItems();
                 applySort();
                 display(page == Page.LIVE ? "Активные эфиры не найдены. Попробуйте тему или обновите позже."
                         : "Видео не найдены. Попробуйте поиск или обновите позже.");
+                if (page == Page.SEARCH && qualityFilter > 0) inspectQualities(result);
             });
         }));
+    }
+
+    private void rebuildBaseItems() {
+        baseItems.clear();
+        if ((page == Page.HOME || page == Page.RECOMMENDATIONS) && activeChannel == null) {
+            baseItems.addAll(RecommendationEngine.rank(candidates, history));
+        } else {
+            Map<String, VideoItem> unique = new LinkedHashMap<>();
+            for (VideoItem item : candidates) unique.put(item.stableKey(), item);
+            baseItems.addAll(unique.values());
+            if (page == Page.POPULAR) Collections.sort(baseItems,
+                    (a, b) -> Long.compare(b.views, a.views));
+        }
+    }
+
+    private String qualityButtonLabel() { return "Качество: " + QUALITY_LABELS[qualityFilter]; }
+
+    private void cycleQualityFilter() {
+        qualityFilter = (qualityFilter + 1) % QUALITY_LABELS.length;
+        getSharedPreferences("browse", 0).edit().putInt("tv_quality_filter", qualityFilter).apply();
+        if (qualityButton != null) qualityButton.setText(qualityButtonLabel());
+        applySort();
+        display("Видео указанного качества не найдены.");
+        if (qualityFilter > 0) inspectQualities(new ArrayList<>(candidates));
+    }
+
+    private void inspectQualities(List<VideoItem> loaded) {
+        List<VideoItem> missing = new ArrayList<>();
+        for (VideoItem item : loaded) {
+            if (item.maxWidth == 0 && qualityRequested.add(item.stableKey())) missing.add(item);
+        }
+        if (missing.isEmpty()) return;
+        int current = generation;
+        pending++;
+        jobs.add(io.submit(() -> {
+            List<VideoItem> inspected = SearchClient.inspectQualities(missing, 3);
+            runOnUiThread(() -> {
+                if (isFinishing() || current != generation) return;
+                pending--;
+                Map<String, VideoItem> byKey = new LinkedHashMap<>();
+                for (VideoItem item : inspected) byKey.put(item.stableKey(), item);
+                for (int i = 0; i < candidates.size(); i++) {
+                    VideoItem replacement = byKey.get(candidates.get(i).stableKey());
+                    if (replacement != null) candidates.set(i, replacement);
+                }
+                rebuildBaseItems();
+                applySort();
+                display("Видео указанного качества не найдены.");
+            });
+        }));
+        display("Проверяем качество видео…");
     }
 
     private void display(String emptyText) {
@@ -453,7 +505,7 @@ public final class BrowseActivity extends Activity {
     private void cancel() {
         generation++;
         for (Future<?> job : jobs) job.cancel(true);
-        jobs.clear(); io.purge(); pending = 0; failed.clear();
+        jobs.clear(); io.purge(); pending = 0; failed.clear(); qualityRequested.clear();
     }
 
     private void settings() {
@@ -488,7 +540,11 @@ public final class BrowseActivity extends Activity {
 
     private void applySort() {
         items.clear();
-        items.addAll(baseItems);
+        int minWidth = page == Page.SEARCH && activeChannel == null
+                ? QUALITY_WIDTHS[qualityFilter] : 0;
+        for (VideoItem item : baseItems) {
+            if (item.maxWidth >= minWidth) items.add(item);
+        }
         if (!channelsMode) VideoSort.apply(items, sortMode);
     }
 
