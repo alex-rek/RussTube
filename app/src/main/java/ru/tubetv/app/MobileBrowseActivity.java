@@ -121,7 +121,7 @@ public final class MobileBrowseActivity extends Activity {
         header = new LinearLayout(this);
         header.setOrientation(LinearLayout.VERTICAL);
         header.setBackground(new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-                new int[]{0xe6071426, 0x66071426, 0x33071426}));
+                new int[]{0xf5071426, 0xd0071426, 0x44071426}));
         toolbar = new LinearLayout(this);
         toolbar.setGravity(Gravity.CENTER_VERTICAL);
         toolbar.setPadding(dp(16), 0, dp(12), 0);
