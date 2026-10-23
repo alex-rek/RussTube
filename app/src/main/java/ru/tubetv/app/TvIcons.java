@@ -14,6 +14,7 @@ final class TvIcons {
         switch (name) {
             case "home": data = "M10,20v-6h4v6h5v-8h3L12,3 2,12h3v8z"; break;
             case "popular": data = "M13,2c1,5 -4,6 -2,10c-4,-1 -3,-4 -3,-4c-7,8 -2,14 4,14c8,0 11,-12 1,-20z"; break;
+            case "films": data = "M2,4h20v16H2z M6,4v16 M18,4v16 M2,9h4 M2,15h4 M18,9h4 M18,15h4 M9,8l7,4 -7,4z"; break;
             case "recommend": data = "M12,2l3,6 7,1 -5,5 1,7 -6,-3 -6,3 1,-7 -5,-5 7,-1z"; break;
             case "live": data = "M3,6h18v14H3z M5,8v10h14V8z M8,1l4,4 4,-4 1,1 -5,5 -5,-5z M10,10l5,3 -5,3z"; break;
             case "subscriptions": data = "M5,2h14v2H5z M3,6h18v2H3z M2,10h20v12H2z M10,12v8l6,-4z"; break;

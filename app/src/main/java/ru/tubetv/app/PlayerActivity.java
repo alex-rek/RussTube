@@ -281,7 +281,18 @@ public final class PlayerActivity extends Activity {
         controls.addView(row, new LinearLayout.LayoutParams(-1, dp(58)));
 
         timeline = new SeekBar(this);
+        timeline.setFocusable(true);
         timeline.setMax(1000);
+        timeline.setContentDescription("Шкала видео: влево и вправо — перемотка на 10 секунд");
+        timeline.setOnFocusChangeListener((view, focused) -> {
+            if (focused) {
+                showControls();
+                ui.removeCallbacks(hideControls);
+            } else {
+                commitDpadScrub();
+                scheduleControlsHide();
+            }
+        });
         timeline.setProgressTintList(android.content.res.ColorStateList.valueOf(0xffe53935));
         timeline.setThumbTintList(android.content.res.ColorStateList.valueOf(0xffe53935));
         timeline.setProgressBackgroundTintList(android.content.res.ColorStateList.valueOf(0xff84888d));
@@ -558,6 +569,7 @@ public final class PlayerActivity extends Activity {
     private void scheduleControlsHide() {
         ui.removeCallbacks(hideControls);
         if (audioOnly || playbackMenuVisible || scrubbing || dpadScrubbing
+                || timeline.hasFocus()
                 || controlsDragging || player == null
                 || controls.getVisibility() != View.VISIBLE
                 || player.getPlaybackState() == Player.STATE_ENDED) return;
@@ -942,6 +954,7 @@ public final class PlayerActivity extends Activity {
             }
             return true;
         }
+        if (timeline.hasFocus() && handleHorizontalDpad(event)) return true;
         if (controls.hasFocus()) return super.dispatchKeyEvent(event);
         if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) {
             if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {

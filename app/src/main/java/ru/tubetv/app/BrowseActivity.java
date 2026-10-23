@@ -9,6 +9,8 @@ import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
@@ -44,12 +46,12 @@ import java.util.Locale;
 
 /** Native, D-pad-first browsing shell with a persistent navigation rail. */
 public final class BrowseActivity extends Activity {
-    private enum Page { HOME, SEARCH, RECOMMENDATIONS, LIVE, SUBSCRIPTIONS, CHANNELS, HISTORY, POPULAR, FAVORITES }
-    private static final Page[] NAV_PAGES = {Page.HOME, Page.POPULAR, Page.RECOMMENDATIONS, Page.LIVE,
+    private enum Page { HOME, SEARCH, RECOMMENDATIONS, LIVE, SUBSCRIPTIONS, CHANNELS, HISTORY, POPULAR, FILMS, FAVORITES }
+    private static final Page[] NAV_PAGES = {Page.HOME, Page.POPULAR, Page.FILMS, Page.RECOMMENDATIONS, Page.LIVE,
             Page.SUBSCRIPTIONS, Page.CHANNELS, Page.HISTORY, Page.FAVORITES};
-    private static final String[] NAV_NAMES = {"Главная", "Популярное", "Рекомендации", "В эфире",
+    private static final String[] NAV_NAMES = {"Главная", "Популярное", "Фильмы", "Рекомендации", "В эфире",
             "Подписки", "Каналы", "История", "Избранное"};
-    private static final String[] NAV_ICONS = {"home", "popular", "recommend", "live",
+    private static final String[] NAV_ICONS = {"home", "popular", "films", "recommend", "live",
             "subscriptions", "channels", "history", "favorite"};
     private static final String[] QUALITY_LABELS = {"Любое", "720p+", "1080p+", "1440p+", "4K"};
     private static final int[] QUALITY_WIDTHS = {0, 1280, 1920, 2560, 3840};
@@ -82,6 +84,7 @@ public final class BrowseActivity extends Activity {
     private LinearLayout searchRow;
     private LinearLayout actions;
     private EditText query;
+    private Button findButton;
     private GridView grid;
     private Cards adapter;
     private LinearLayout rail;
@@ -91,6 +94,9 @@ public final class BrowseActivity extends Activity {
     private long lastBackAt;
     private TextView clock;
     private final Handler timer = new Handler(Looper.getMainLooper());
+    private final Runnable autoSearch = () -> {
+        if (page == Page.SEARCH) startSearch(query.getText().toString().trim(), false);
+    };
     private final Runnable tick = new Runnable() {
         @Override public void run() {
             clock.setText(new SimpleDateFormat("HH:mm\nEEE, d MMM", new Locale("ru")).format(new Date()));
@@ -199,8 +205,20 @@ public final class BrowseActivity extends Activity {
             }
             return false;
         });
+        query.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence value, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence value, int start, int before, int count) {
+                if (page != Page.SEARCH) return;
+                timer.removeCallbacks(autoSearch);
+                cancel(); candidates.clear(); items.clear(); baseItems.clear();
+                display("Введите хотя бы два символа для поиска.");
+                if (value.toString().trim().length() >= 2) timer.postDelayed(autoSearch, 650);
+            }
+            @Override public void afterTextChanged(Editable value) { }
+        });
         searchRow.addView(query, new LinearLayout.LayoutParams(0, dp(42), 1));
-        searchRow.addView(button("Найти", this::submitSearch), row(100, 42, 8, 0));
+        findButton = button("Найти", this::submitSearch);
+        searchRow.addView(findButton, row(100, 42, 8, 0));
         content.addView(searchRow, row(-1, 48, 0, 6));
         actions = new LinearLayout(this);
         content.addView(actions, row(-1, 40, 0, 10));
@@ -276,6 +294,7 @@ public final class BrowseActivity extends Activity {
         for (WatchHistoryStore.Entry entry : WatchHistoryStore.load(this)) history.add(entry.item);
         updateNavigation();
         searchRow.setVisibility(page == Page.SEARCH || page == Page.LIVE ? View.VISIBLE : View.GONE);
+        findButton.setVisibility(page == Page.LIVE ? View.VISIBLE : View.GONE);
         actions.removeAllViews();
         addAction("Обновить", () -> show(page));
         if (page != Page.CHANNELS) addSortAction();
@@ -303,6 +322,14 @@ public final class BrowseActivity extends Activity {
                 description.setText("Единый поиск на пяти платформах");
                 qualityButton = addAction(qualityButtonLabel(), this::cycleQualityFilter);
                 if (query.getText().toString().trim().length() >= 2) searchAll(query.getText().toString().trim(), false);
+                break;
+            case FILMS:
+                heading.setText("Фильмы");
+                description.setText("Полнометражные видео с RUTUBE, VK Видео, PeerTube, OK и Дзена");
+                addAction("Художественные", () -> findFilms("художественный фильм"));
+                addAction("Документальные", () -> findFilms("документальный фильм"));
+                addAction("Мультфильмы", () -> findFilms("мультфильм полный"));
+                searchAll("полный фильм", false);
                 break;
             case SUBSCRIPTIONS:
                 heading.setText("Подписки");
@@ -344,18 +371,34 @@ public final class BrowseActivity extends Activity {
                 break;
         }
         applySort();
-        display(page == Page.SEARCH ? "Введите запрос для поиска видео." : "Пока здесь нет видео.");
+        display(page == Page.SEARCH ? "Введите запрос для поиска видео."
+                : page == Page.FILMS ? "Полнометражные видео пока не найдены." : "Пока здесь нет видео.");
         if (page == Page.SEARCH) query.requestFocus();
     }
 
     private void discover(String value) { query.setText(value); show(Page.SEARCH); }
     private void searchLive(String value) { query.setText(value); show(Page.LIVE); submitSearch(); }
 
+    private void findFilms(String value) {
+        cancel(); candidates.clear(); items.clear(); baseItems.clear();
+        searchAll(value, false);
+        display("Полнометражные видео пока не найдены.");
+    }
+
     private void submitSearch() {
         String value = query.getText().toString().trim();
         if (value.length() < 2) { query.setError("Введите хотя бы два символа"); return; }
-        ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(query.getWindowToken(), 0);
-        query.clearFocus();
+        timer.removeCallbacks(autoSearch);
+        startSearch(value, true);
+    }
+
+    private void startSearch(String value, boolean dismissKeyboard) {
+        if (value.length() < 2) return;
+        if (dismissKeyboard) {
+            ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE))
+                    .hideSoftInputFromWindow(query.getWindowToken(), 0);
+            query.clearFocus();
+        }
         cancel(); candidates.clear(); items.clear(); baseItems.clear();
         searchAll(value, page == Page.LIVE);
         display("Ничего не найдено. Попробуйте другой запрос.");
@@ -419,11 +462,16 @@ public final class BrowseActivity extends Activity {
 
     private void enqueue(String source, Load operation) {
         int current = generation;
+        boolean filmMode = page == Page.FILMS && activeChannel == null;
         pending++;
         jobs.add(io.submit(() -> {
             List<VideoItem> loaded = new ArrayList<>();
             String error = null;
-            try { loaded = operation.run(); }
+            try {
+                for (VideoItem item : operation.run()) {
+                    if (!filmMode || FilmCatalog.includes(item)) loaded.add(item);
+                }
+            }
             catch (Exception failure) { error = source; }
             final List<VideoItem> result = loaded;
             final String problem = error;
@@ -434,7 +482,8 @@ public final class BrowseActivity extends Activity {
                 candidates.addAll(result);
                 rebuildBaseItems();
                 applySort();
-                display(page == Page.LIVE ? "Активные эфиры не найдены. Попробуйте тему или обновите позже."
+                display(page == Page.FILMS ? "Полнометражные видео пока не найдены. Выберите другую тему."
+                        : page == Page.LIVE ? "Активные эфиры не найдены. Попробуйте тему или обновите позже."
                         : "Видео не найдены. Попробуйте поиск или обновите позже.");
                 if (page == Page.SEARCH && qualityFilter > 0) inspectQualities(result);
             });
@@ -669,7 +718,8 @@ public final class BrowseActivity extends Activity {
         updates.onActivityResult(requestCode);
     }
     @Override protected void onDestroy() {
-        updates.onDestroy(); timer.removeCallbacks(tick); cancel(); io.shutdownNow(); super.onDestroy();
+        updates.onDestroy(); timer.removeCallbacks(tick); timer.removeCallbacks(autoSearch);
+        cancel(); io.shutdownNow(); super.onDestroy();
     }
 
     private final class Cards extends BaseAdapter {
