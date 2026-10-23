@@ -25,12 +25,14 @@ public final class NetworkSettingsActivity extends Activity {
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
-        getWindow().setStatusBarColor(0xff0b0f14);
-        getWindow().setNavigationBarColor(0xff0b0f14);
+        int background = BuildConfig.MOBILE_VARIANT ? MobileAuroraTheme.BACKGROUND : 0xff0b0f14;
+        int accent = BuildConfig.MOBILE_VARIANT ? MobileAuroraTheme.TEAL : 0xffe53935;
+        getWindow().setStatusBarColor(background);
+        getWindow().setNavigationBarColor(background);
         NetworkProxy.Config saved = NetworkProxy.load(this);
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
-        scroll.setBackgroundColor(0xff0b0f14);
+        scroll.setBackgroundColor(background);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(24), dp(20), dp(24), dp(28));
@@ -61,8 +63,8 @@ public final class NetworkSettingsActivity extends Activity {
         Button save = new Button(this);
         save.setText("Сохранить");
         save.setAllCaps(false);
-        save.setTextColor(Color.WHITE);
-        save.setBackgroundTintList(ColorStateList.valueOf(0xffe53935));
+        save.setTextColor(BuildConfig.MOBILE_VARIANT ? MobileAuroraTheme.BACKGROUND : Color.WHITE);
+        save.setBackgroundTintList(ColorStateList.valueOf(accent));
         LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(-1, dp(52));
         saveParams.topMargin = dp(20);
         root.addView(save, saveParams);
@@ -75,7 +77,8 @@ public final class NetworkSettingsActivity extends Activity {
         button.setId(id);
         button.setText(label);
         button.setTextColor(Color.WHITE);
-        button.setButtonTintList(ColorStateList.valueOf(0xffe53935));
+        button.setButtonTintList(ColorStateList.valueOf(BuildConfig.MOBILE_VARIANT
+                ? MobileAuroraTheme.TEAL : 0xffe53935));
         button.setTextSize(14);
         types.addView(button);
     }

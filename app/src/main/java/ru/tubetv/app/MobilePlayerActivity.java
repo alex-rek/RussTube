@@ -48,9 +48,9 @@ import java.util.concurrent.Executors;
 
 /** Portrait watch page sharing RussTube's resolver, decoder and local libraries. */
 public final class MobilePlayerActivity extends Activity {
-    private static final int BACKGROUND = 0xff0b0f14;
-    private static final int SECONDARY = 0xffaeb9cc;
-    private static final int ACCENT = 0xffe53935;
+    private static final int BACKGROUND = MobileAuroraTheme.BACKGROUND;
+    private static final int SECONDARY = MobileAuroraTheme.MUTED;
+    private static final int ACCENT = MobileAuroraTheme.TEAL;
     private final ExecutorService resolver = Executors.newSingleThreadExecutor();
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final Runnable hideControls = () -> this.controls.setVisibility(View.GONE);
@@ -253,13 +253,13 @@ public final class MobilePlayerActivity extends Activity {
         TextView avatar = label(channel.substring(0, 1).toUpperCase(), 19, Color.WHITE);
         avatar.setTypeface(Typeface.DEFAULT_BOLD);
         avatar.setGravity(Gravity.CENTER);
-        avatar.setBackground(round(0xff33465a, 24));
+        avatar.setBackground(round(0xff315679, 24));
         channelRow.addView(avatar, size(44, 44));
         TextView channelText = label(channel + "\n" + video.source, 14, Color.WHITE);
         channelText.setPadding(dp(11), 0, dp(4), 0);
         channelRow.addView(channelText, new LinearLayout.LayoutParams(0, dp(50), 1));
         if (!video.channelId.isEmpty()) {
-            subscribeButton = label("", 13, Color.WHITE);
+            subscribeButton = label("", 13, BACKGROUND);
             subscribeButton.setGravity(Gravity.CENTER);
             subscribeButton.setPadding(dp(10), 0, dp(10), 0);
             subscribeButton.setBackground(round(ACCENT, 18));
@@ -281,7 +281,7 @@ public final class MobilePlayerActivity extends Activity {
         }
         TextView channelVideos = label("Видео канала  ›", 15, Color.WHITE);
         channelVideos.setPadding(dp(14), 0, dp(14), 0);
-        channelVideos.setBackground(round(0xff171a21, 10));
+        channelVideos.setBackground(round(MobileAuroraTheme.SURFACE, 10));
         channelVideos.setOnClickListener(v -> VideoActions.openChannel(this, video));
         channelVideos.setVisibility(video.channelId.isEmpty() ? View.GONE : View.VISIBLE);
         details.addView(channelVideos, size(-1, 48));
@@ -355,7 +355,7 @@ public final class MobilePlayerActivity extends Activity {
     private TextView action(LinearLayout row, String text, Runnable callback) {
         TextView button = label(text, 13, Color.WHITE);
         button.setGravity(Gravity.CENTER);
-        button.setBackground(round(0xff222630, 18));
+        button.setBackground(round(MobileAuroraTheme.SURFACE, 18));
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(44), 1);
         params.rightMargin = dp(8);
         row.addView(button, params);
@@ -677,9 +677,7 @@ public final class MobilePlayerActivity extends Activity {
     }
 
     private GradientDrawable round(int color, int radius) {
-        GradientDrawable result = new GradientDrawable();
-        result.setColor(color); result.setCornerRadius(dp(radius));
-        return result;
+        return MobileAuroraTheme.round(color, dp(radius));
     }
 
     private LinearLayout.LayoutParams size(int width, int height) {
