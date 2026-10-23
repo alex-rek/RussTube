@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 final class FeedRepository {
-    static final String[] SOURCES = {"RUTUBE", "VK VIDEO", "OK", "ДЗЕН"};
+    static final String[] SOURCES = {"RUTUBE", "VK VIDEO", PeerTubeClient.SOURCE, "OK", "ДЗЕН"};
 
     List<VideoItem> live(String source, String query) throws Exception {
         return "VK VIDEO".equals(source) ? new VkWebClient().searchLive(query)
@@ -17,6 +17,7 @@ final class FeedRepository {
             case "RUTUBE": return client.searchRutube(query, 0);
             case "VK VIDEO": return new VkWebClient().search(query, 0, 480);
             case "OK": return client.searchOk(query, 0);
+            case PeerTubeClient.SOURCE: return PeerTubeFeedClient.search(query);
             case "ДЗЕН":
                 List<VideoItem> items = new ArrayList<>();
                 client.searchDzenPages(query, page -> {
@@ -39,6 +40,9 @@ final class FeedRepository {
                 break;
             case "OK":
                 candidates = OkClient.channelVideos(channel);
+                break;
+            case PeerTubeClient.SOURCE:
+                candidates = PeerTubeFeedClient.channelVideos(channel);
                 break;
             default:
                 if (channel.channelName.isEmpty()) throw new Exception("Неизвестно название канала");

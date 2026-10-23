@@ -159,6 +159,15 @@ public final class PeerTubeClientTest {
     }
 
     @Test
+    public void playsLegacyProgressiveMp4WithoutAudioFlags() throws Exception {
+        PlaybackInfo info = PeerTubeClient.resolve("https://video.example/api/v1/videos/test",
+                false, true, (address, limit, deadline, headers) ->
+                        "{\"files\":[{\"fileUrl\":\"/video.mp4\","
+                                + "\"resolution\":{\"id\":720,\"label\":\"720p\"}}]}");
+        assertEquals("https://video.example/video.mp4", info.streamUrl);
+    }
+
+    @Test
     public void discoveryKeepsApiHeadersWithoutAVideoReferer() throws Exception {
         AtomicInteger requests = new AtomicInteger();
         List<VideoItem> result = PeerTubeClient.search("Солярис", 0, 320,

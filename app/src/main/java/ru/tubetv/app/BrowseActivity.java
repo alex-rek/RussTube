@@ -274,7 +274,7 @@ public final class BrowseActivity extends Activity {
             case HOME:
             case RECOMMENDATIONS:
                 heading.setText(page == Page.HOME ? "Главная" : "Рекомендации");
-                description.setText("Видео по вашим интересам · RUTUBE, VK Видео, OK, Дзен");
+                description.setText("Видео по вашим интересам · RUTUBE, VK Видео, OK, Дзен, PeerTube");
                 addAction("Наука", () -> discover("наука"));
                 addAction("Путешествия", () -> discover("путешествия"));
                 addAction("Технологии", () -> discover("технологии"));
@@ -291,7 +291,7 @@ public final class BrowseActivity extends Activity {
                 break;
             case SEARCH:
                 heading.setText("Поиск");
-                description.setText("Единый поиск на четырёх платформах");
+                description.setText("Единый поиск на пяти платформах");
                 addAction("Фильтры качества", () -> startActivity(new Intent(this, MainActivity.class)
                         .putExtra("search_query", query.getText().toString())));
                 if (query.getText().toString().trim().length() >= 2) searchAll(query.getText().toString().trim(), false);

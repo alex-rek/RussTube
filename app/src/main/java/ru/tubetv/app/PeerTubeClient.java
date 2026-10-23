@@ -263,7 +263,7 @@ final class PeerTubeClient {
         int maxHeight = 0;
 
         JSONArray directFiles = metadata.optJSONArray("files");
-        FileSelection direct = parseFiles(directFiles, base);
+        FileSelection direct = parseFiles(directFiles, base, true);
         bestDirectMuxed = direct.bestMuxedUrl;
         bestDirectMuxedHeight = direct.bestMuxedHeight;
         lowestDirectMuxed = direct.lowestMuxedUrl;
@@ -281,7 +281,7 @@ final class PeerTubeClient {
             for (int i = 0; i < playlists.length(); i++) {
                 JSONObject playlist = playlists.optJSONObject(i);
                 if (playlist == null) continue;
-                FileSelection files = parseFiles(playlist.optJSONArray("files"), base);
+                FileSelection files = parseFiles(playlist.optJSONArray("files"), base, false);
                 if (files.maxWidth > maxWidth) {
                     maxWidth = files.maxWidth;
                     maxHeight = files.maxHeight;
@@ -349,7 +349,7 @@ final class PeerTubeClient {
         return result;
     }
 
-    private static FileSelection parseFiles(JSONArray files, String base) {
+    private static FileSelection parseFiles(JSONArray files, String base, boolean directFiles) {
         FileSelection result = new FileSelection();
         if (files == null) return result;
         for (int i = 0; i < files.length(); i++) {
@@ -369,7 +369,9 @@ final class PeerTubeClient {
             boolean audioLabel = height == 0 || resolution != null
                     && resolution.optString("label").toLowerCase(Locale.ROOT).contains("audio");
             boolean hasVideo = file.has("hasVideo") ? file.optBoolean("hasVideo") : !audioLabel;
-            boolean hasAudio = file.has("hasAudio") ? file.optBoolean("hasAudio") : audioLabel;
+            // Older PeerTube versions omit hasAudio on progressive MP4 files.
+            boolean hasAudio = file.has("hasAudio") ? file.optBoolean("hasAudio")
+                    : audioLabel || directFiles;
             long size = file.optLong("size", Long.MAX_VALUE);
             if (!hasVideo && hasAudio && size < result.audioSize) {
                 result.audioUrl = url;
