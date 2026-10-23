@@ -510,7 +510,17 @@ public final class PlayerActivity extends Activity {
                     message.setVisibility(View.GONE);
                     if (!autoPlay || audioOnly) showControls();
                 } else if (state == Player.STATE_ENDED) {
-                    showControls();
+                    if (!mobileMode && !historyItem.isLive
+                            && player.getRepeatMode() != Player.REPEAT_MODE_ONE) {
+                        ui.post(() -> {
+                            if (destroyed || isFinishing() || player == null
+                                    || player.getPlaybackState() != Player.STATE_ENDED) return;
+                            leavingPlayer = true;
+                            saveProgress();
+                            StateStore.markReturnScreen(PlayerActivity.this);
+                            finish();
+                        });
+                    } else showControls();
                 }
             }
 
