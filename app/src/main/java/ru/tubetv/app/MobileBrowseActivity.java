@@ -17,11 +17,13 @@ import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.BaseAdapter;
+import android.widget.AbsListView;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.GridView;
@@ -71,6 +73,12 @@ public final class MobileBrowseActivity extends Activity {
     private final List<String> failed = new ArrayList<>();
     private final FeedRepository repository = new FeedRepository();
     private final Handler searchHandler = new Handler(Looper.getMainLooper());
+    private MobileShortsPlayback shortsPlayback;
+    private Runnable queuedShortSelection;
+    private int scrollState = AbsListView.OnScrollListener.SCROLL_STATE_IDLE;
+    private int shortSnapAttempts;
+    private float pullStartY;
+    private boolean pullFromTop;
     private Page page = Page.HOME;
     private VideoItem activeChannel;
     private int generation;
@@ -105,6 +113,7 @@ public final class MobileBrowseActivity extends Activity {
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
         updates = new UpdateCoordinator(this);
+        shortsPlayback = new MobileShortsPlayback(this);
         getWindow().setStatusBarColor(BACKGROUND);
         getWindow().setNavigationBarColor(BACKGROUND);
         sortMode = VideoSort.parse(getSharedPreferences("browse", 0)
@@ -297,16 +306,55 @@ public final class MobileBrowseActivity extends Activity {
         list.setVerticalScrollBarEnabled(false);
         list.setClipToPadding(false);
         list.setPadding(dp(14), 0, dp(14), dp(18));
+        list.addOnLayoutChangeListener((view, left, top, right, bottom,
+                oldLeft, oldTop, oldRight, oldBottom) -> {
+            if (page == Page.SHORTS && bottom - top != oldBottom - oldTop)
+                list.post(this::updateShortsPadding);
+        });
         adapter = new FeedAdapter();
         list.setAdapter(adapter);
+        list.setOnScrollListener(new AbsListView.OnScrollListener() {
+            @Override public void onScrollStateChanged(AbsListView view, int state) {
+                scrollState = state;
+                if (page != Page.SHORTS) return;
+                if (state == SCROLL_STATE_IDLE) queueShortSelection();
+                else {
+                    if (state == SCROLL_STATE_TOUCH_SCROLL) shortSnapAttempts = 0;
+                    cancelShortSelection(); shortsPlayback.pauseForScroll();
+                }
+            }
+            @Override public void onScroll(AbsListView view, int first, int count, int total) { }
+        });
+        list.setOnTouchListener((view, event) -> {
+            if (page != Page.HOME || activeChannel != null) return false;
+            if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                pullStartY = event.getY();
+                pullFromTop = list.getFirstVisiblePosition() == 0
+                        && (list.getChildCount() == 0 || list.getChildAt(0).getTop()
+                        >= list.getPaddingTop());
+            } else if (event.getActionMasked() == MotionEvent.ACTION_UP) {
+                if (pullFromTop && event.getY() - pullStartY > dp(110)) refresh();
+                pullFromTop = false;
+            } else if (event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
+                pullFromTop = false;
+            }
+            return false;
+        });
         list.setOnItemClickListener((parent, view, position, id) -> {
             if (position >= items.size()) return;
             VideoItem item = items.get(position);
             if (page == Page.CHANNELS && activeChannel == null) showChannel(item);
+            else if (page == Page.SHORTS) {
+                Card card = (Card) view.getTag();
+                if (shortsPlayback.isSelected(card.artwork)) shortsPlayback.toggle();
+                else {
+                    shortsPlayback.select(item, card.artwork, card.image, card.shortCue);
+                    if (!MobileBrowsePreferences.shortsAutoplay(this)) shortsPlayback.toggle();
+                }
+            }
             else {
                 skipResumeReload = true;
-                if (page == Page.SHORTS) ShortsQueue.set(items);
-                VideoActions.play(this, item, page == Page.SHORTS);
+                VideoActions.play(this, item, false);
             }
         });
         list.setOnItemLongClickListener((parent, view, position, id) -> {
@@ -346,6 +394,8 @@ public final class MobileBrowseActivity extends Activity {
     }
 
     private void show(Page target) {
+        cancelShortSelection();
+        shortsPlayback.clear();
         cancelQueuedSearch();
         cancel();
         page = target;
@@ -438,6 +488,8 @@ public final class MobileBrowseActivity extends Activity {
     }
 
     private void showChannel(VideoItem channel) {
+        cancelShortSelection();
+        shortsPlayback.clear();
         cancel();
         activeChannel = channel;
         items.clear(); baseItems.clear(); candidates.clear();
@@ -526,6 +578,48 @@ public final class MobileBrowseActivity extends Activity {
     private void refresh() {
         if (activeChannel != null) showChannel(activeChannel);
         else show(page);
+    }
+
+    private void cancelShortSelection() {
+        if (queuedShortSelection != null) searchHandler.removeCallbacks(queuedShortSelection);
+        queuedShortSelection = null;
+    }
+
+    private void queueShortSelection() {
+        cancelShortSelection();
+        if (page != Page.SHORTS || items.isEmpty() || scrollState != AbsListView.OnScrollListener.SCROLL_STATE_IDLE)
+            return;
+        queuedShortSelection = () -> {
+            queuedShortSelection = null;
+            selectCenteredShort();
+        };
+        searchHandler.postDelayed(queuedShortSelection, 160);
+    }
+
+    private void selectCenteredShort() {
+        if (page != Page.SHORTS || list.getChildCount() == 0 || scrollState
+                != AbsListView.OnScrollListener.SCROLL_STATE_IDLE) return;
+        int center = list.getHeight() / 2;
+        View nearest = null;
+        int distance = Integer.MAX_VALUE;
+        int position = -1;
+        for (int i = 0; i < list.getChildCount(); i++) {
+            View child = list.getChildAt(i);
+            int delta = Math.abs((child.getTop() + child.getBottom()) / 2 - center);
+            if (delta < distance) {
+                nearest = child;
+                distance = delta;
+                position = list.getFirstVisiblePosition() + i;
+            }
+        }
+        if (nearest == null || position < 0 || position >= items.size()) return;
+        Card card = (Card) nearest.getTag();
+        shortsPlayback.select(items.get(position), card.artwork, card.image, card.shortCue);
+        if (distance > dp(12) && shortSnapAttempts++ < 3) {
+            int offset = (nearest.getTop() + nearest.getBottom()) / 2 - center;
+            list.smoothScrollBy(offset, 220);
+            list.postDelayed(this::queueShortSelection, 300);
+        }
     }
 
     private void settings() {
@@ -632,10 +726,20 @@ public final class MobileBrowseActivity extends Activity {
         navigation.setVisibility(landscape ? View.GONE : View.VISIBLE);
         float widthDp = getResources().getDisplayMetrics().widthPixels
                 / getResources().getDisplayMetrics().density;
-        int columns = widthDp >= 1000 ? 3 : widthDp >= 600 || landscape ? 2 : 1;
+        int columns = page == Page.SHORTS ? 1
+                : widthDp >= 1000 ? 3 : widthDp >= 600 || landscape ? 2 : 1;
         list.setNumColumns(columns);
+        updateShortsPadding();
         list.setHorizontalSpacing(dp(14));
         adapter.notifyDataSetChanged();
+    }
+
+    private void updateShortsPadding() {
+        int padding = page == Page.SHORTS
+                ? Math.max(dp(18), Math.round(list.getHeight() * .12f)) : 0;
+        int bottom = page == Page.SHORTS ? padding : dp(18);
+        if (list.getPaddingTop() != padding || list.getPaddingBottom() != bottom)
+            list.setPadding(dp(14), padding, dp(14), bottom);
     }
 
     @Override public void onConfigurationChanged(Configuration configuration) {
@@ -649,6 +753,7 @@ public final class MobileBrowseActivity extends Activity {
         }
         applyLayout();
         if (!items.isEmpty()) list.setSelection(first);
+        queueShortSelection();
     }
 
     private void applySort() {
@@ -659,6 +764,7 @@ public final class MobileBrowseActivity extends Activity {
 
     private void render() {
         adapter.notifyDataSetChanged();
+        if (page == Page.SHORTS) list.post(this::queueShortSelection);
         status.setText((pending > 0 ? "Загрузка…  ·  " : "") + "Видео: " + items.size()
                 + (failed.isEmpty() ? "" : "  ·  Недоступны: " + TextUtils.join(", ", failed)));
         empty.setText(pending > 0 ? "Ищем видео…"
@@ -747,6 +853,8 @@ public final class MobileBrowseActivity extends Activity {
     @Override protected void onResume() {
         super.onResume();
         updates.onResume();
+        shortsPlayback.onResume();
+        if (page == Page.SHORTS) queueShortSelection();
         if (firstResume) { firstResume = false; return; }
         if (skipResumeReload) { skipResumeReload = false; render(); return; }
         if (activeChannel != null) showChannel(activeChannel);
@@ -756,6 +864,7 @@ public final class MobileBrowseActivity extends Activity {
     }
 
     @Override protected void onPause() {
+        shortsPlayback.onPause();
         updates.onPause();
         super.onPause();
     }
@@ -792,6 +901,7 @@ public final class MobileBrowseActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
+        cancelShortSelection(); shortsPlayback.release();
         cancelQueuedSearch(); updates.onDestroy(); cancel(); io.shutdownNow(); super.onDestroy();
     }
 
@@ -847,6 +957,19 @@ public final class MobileBrowseActivity extends Activity {
                 progress.setProgressTintList(ColorStateList.valueOf(ACCENT));
                 progress.setProgressBackgroundTintList(ColorStateList.valueOf(Color.TRANSPARENT));
                 artwork.addView(progress, new FrameLayout.LayoutParams(-1, dp(3), Gravity.BOTTOM));
+                TextView shortInfo = label("", 15, Color.WHITE);
+                shortInfo.setMaxLines(4);
+                shortInfo.setEllipsize(TextUtils.TruncateAt.END);
+                shortInfo.setPadding(dp(14), dp(28), dp(14), dp(16));
+                shortInfo.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                        new int[]{Color.TRANSPARENT, 0xb0071426}));
+                artwork.addView(shortInfo, new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM));
+                TextView shortCue = label("▶", 36, Color.WHITE);
+                shortCue.setGravity(Gravity.CENTER);
+                shortCue.setPadding(dp(14), dp(8), dp(14), dp(8));
+                shortCue.setBackground(round(0x99071426, 14));
+                shortCue.setVisibility(View.GONE);
+                artwork.addView(shortCue, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
                 layout.addView(artwork, size(-1, -2));
 
                 LinearLayout info = new LinearLayout(MobileBrowseActivity.this);
@@ -875,13 +998,32 @@ public final class MobileBrowseActivity extends Activity {
                 more.setContentDescription("Действия с видео");
                 info.addView(more, size(38, 42));
                 layout.addView(info, size(-1, -2));
-                layout.setTag(card = new Card(image, source, duration, progress,
-                        avatar, title, channel, meta, more));
+                layout.setTag(card = new Card(artwork, info, image, source, duration,
+                        progress, shortInfo, shortCue, avatar, title, channel, meta, more));
                 recycled = layout;
             } else card = (Card) recycled.getTag();
             VideoItem item = getItem(position);
+            if (shortsPlayback.isSelected(card.artwork) && (page != Page.SHORTS
+                    || !item.stableKey().equals(card.artwork.getTag()))) shortsPlayback.clear();
+            card.artwork.setTag(item.stableKey());
             card.image.setScaleType(page == Page.SHORTS
                     ? ImageView.ScaleType.CENTER_CROP : ImageView.ScaleType.FIT_CENTER);
+            card.info.setVisibility(page == Page.SHORTS ? View.GONE : View.VISIBLE);
+            card.shortInfo.setVisibility(page == Page.SHORTS
+                    && MobileBrowsePreferences.shortsShowInfo(MobileBrowseActivity.this)
+                    ? View.VISIBLE : View.GONE);
+            if (page == Page.SHORTS) {
+                String details = VideoPresentation.views(item);
+                card.shortInfo.setText(item.source + " · " + VideoPresentation.channel(item)
+                        + "\n" + item.title + (details.isEmpty() ? "" : "\n" + details));
+            } else card.shortCue.setVisibility(View.GONE);
+            FrameLayout.LayoutParams durationParams = (FrameLayout.LayoutParams)
+                    card.duration.getLayoutParams();
+            durationParams.gravity = (page == Page.SHORTS ? Gravity.TOP : Gravity.BOTTOM)
+                    | Gravity.END;
+            durationParams.topMargin = page == Page.SHORTS ? dp(10) : 0;
+            durationParams.bottomMargin = page == Page.SHORTS ? 0 : dp(10);
+            card.duration.setLayoutParams(durationParams);
             card.source.setText(item.isLive ? "● В ЭФИРЕ · " + item.source : item.source);
             card.duration.setText(item.isLive ? "В ЭФИРЕ" : VideoPresentation.duration(item.durationMs));
             card.duration.setVisibility(item.isLive || item.durationMs > 0 ? View.VISIBLE : View.GONE);
@@ -909,14 +1051,20 @@ public final class MobileBrowseActivity extends Activity {
     }
 
     private static final class Card {
+        final FrameLayout artwork;
+        final LinearLayout info;
         final ImageView image;
+        final TextView shortInfo, shortCue;
         final TextView source, duration, avatar, title, channel, meta, more;
         final ProgressBar progress;
-        Card(ImageView image, TextView source, TextView duration, ProgressBar progress,
+        Card(FrameLayout artwork, LinearLayout info, ImageView image, TextView source,
+             TextView duration, ProgressBar progress, TextView shortInfo, TextView shortCue,
              TextView avatar, TextView title, TextView channel, TextView meta, TextView more) {
+            this.artwork = artwork; this.info = info;
             this.image = image; this.source = source; this.duration = duration;
             this.progress = progress; this.avatar = avatar; this.title = title;
             this.channel = channel; this.meta = meta; this.more = more;
+            this.shortInfo = shortInfo; this.shortCue = shortCue;
         }
     }
 }

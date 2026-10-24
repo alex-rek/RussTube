@@ -53,6 +53,21 @@ final class MobileSettingsPanel extends ScrollView {
         subscriptions.setOnCheckedChangeListener((button, checked) ->
                 MobileBrowsePreferences.setRecommendSubscriptions(activity, checked));
 
+        section("Shorts");
+        CheckBox autoplay = check("Автовоспроизведение",
+                MobileBrowsePreferences.shortsAutoplay(activity));
+        autoplay.setOnCheckedChangeListener((button, checked) ->
+                MobileBrowsePreferences.setShortsAutoplay(activity, checked));
+        CheckBox showInfo = check("Показывать информацию поверх видео",
+                MobileBrowsePreferences.shortsShowInfo(activity));
+        showInfo.setOnCheckedChangeListener((button, checked) ->
+                MobileBrowsePreferences.setShortsShowInfo(activity, checked));
+        CheckBox loop = check("Повторять по кругу",
+                MobileBrowsePreferences.shortsLoop(activity));
+        loop.setOnCheckedChangeListener((button, checked) ->
+                MobileBrowsePreferences.setShortsLoop(activity, checked));
+        description("Если повтор выключен, Shorts остановится после одного просмотра.");
+
         section("История");
         description("Удалить просмотры за выбранный период");
         for (int days : new int[]{1, 2, 3, 7}) {
