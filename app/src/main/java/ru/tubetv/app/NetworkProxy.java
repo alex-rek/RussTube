@@ -49,8 +49,9 @@ final class NetworkProxy {
             Authenticator.setDefault(new Authenticator() {
                 @Override protected PasswordAuthentication getPasswordAuthentication() {
                     Config config = load(app);
-                    boolean socksRequest = config.type == Proxy.Type.SOCKS
-                            && "SOCKS5".equalsIgnoreCase(getRequestingProtocol());
+                    // Android does not consistently label SOCKS authentication as
+                    // SOCKS5 or RequestorType.PROXY.
+                    boolean socksRequest = config.type == Proxy.Type.SOCKS;
                     if ((!socksRequest && getRequestorType() != RequestorType.PROXY)
                             || config.user.isEmpty()
                             || !config.host.equalsIgnoreCase(getRequestingHost())
