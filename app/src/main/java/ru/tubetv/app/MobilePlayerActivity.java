@@ -19,6 +19,7 @@ import android.os.Looper;
 import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.Surface;
 import android.view.View;
 import android.view.WindowManager;
@@ -48,9 +49,9 @@ import java.util.concurrent.Executors;
 
 /** Portrait watch page sharing RussTube's resolver, decoder and local libraries. */
 public final class MobilePlayerActivity extends Activity {
-    private static final int BACKGROUND = 0xff0b0f14;
-    private static final int SECONDARY = 0xffaeb9cc;
-    private static final int ACCENT = 0xffe53935;
+    private static final int BACKGROUND = MobileAuroraTheme.BACKGROUND;
+    private static final int SECONDARY = MobileAuroraTheme.MUTED;
+    private static final int ACCENT = MobileAuroraTheme.TEAL;
     private final ExecutorService resolver = Executors.newSingleThreadExecutor();
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final Runnable hideControls = () -> this.controls.setVisibility(View.GONE);
@@ -61,6 +62,7 @@ public final class MobilePlayerActivity extends Activity {
         }
     };
     private ExoPlayer player;
+    private HeadsetMediaControls headsetControls;
     private LinearLayout root;
     private LinearLayout toolbar;
     private ScrollView detailsScroll;
@@ -71,9 +73,12 @@ public final class MobilePlayerActivity extends Activity {
     private TextView errorText;
     private TextView playButton;
     private TextView fullscreenButton;
+    private TextView aspectButton;
     private TextView time;
     private TextView favoriteButton;
     private TextView subscribeButton;
+    private TextView shortsFavoriteButton;
+    private TextView shortsSubscribeButton;
     private SeekBar timeline;
     private VideoItem video;
     private String streamUrl;
@@ -86,6 +91,8 @@ public final class MobilePlayerActivity extends Activity {
     private boolean backgroundStarted;
     private boolean autoResume = true;
     private boolean portraitFullscreen;
+    private boolean shortsMode;
+    private int aspectMode;
     private int videoWidth;
     private int videoHeight;
     private float pixelRatio = 1f;
@@ -95,11 +102,16 @@ public final class MobilePlayerActivity extends Activity {
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
-        if (state != null) portraitFullscreen = state.getBoolean("portrait_fullscreen", false);
+        if (state != null) {
+            portraitFullscreen = state.getBoolean("portrait_fullscreen", false);
+            aspectMode = state.getInt("aspect_mode", 0);
+        }
         getWindow().setStatusBarColor(BACKGROUND);
         getWindow().setNavigationBarColor(BACKGROUND);
         setVolumeControlStream(AudioManager.STREAM_MUSIC);
         Intent intent = getIntent();
+        shortsMode = intent.getBooleanExtra("shorts_mode", false);
+        if (state == null && shortsMode) portraitFullscreen = true;
         knownDuration = Math.max(0, intent.getLongExtra("duration_ms", 0));
         resumePosition = Math.max(0, intent.getLongExtra("resume_position", 0));
         video = new VideoItem(intent.getStringExtra("source"), intent.getStringExtra("title"),
@@ -117,6 +129,11 @@ public final class MobilePlayerActivity extends Activity {
         }
         recorded = WatchHistoryStore.contains(this, video);
         setContentView(createContent());
+        headsetControls = new HeadsetMediaControls(this, () -> {
+            if (player != null) player.play();
+        }, () -> {
+            if (player != null) player.pause();
+        }, this::togglePlayback);
         applyOrientation();
         requestNotificationPermission();
         resolveStream();
@@ -179,6 +196,24 @@ public final class MobilePlayerActivity extends Activity {
         View tapLayer = new View(this);
         tapLayer.setContentDescription("Показать или скрыть управление видео");
         tapLayer.setOnClickListener(v -> toggleControlsVisibility());
+        if (shortsMode) {
+            final float[] down = new float[2];
+            tapLayer.setOnTouchListener((v, event) -> {
+                if (event.getAction() == MotionEvent.ACTION_DOWN) {
+                    down[0] = event.getX(); down[1] = event.getY();
+                    return true;
+                }
+                if (event.getAction() == MotionEvent.ACTION_UP) {
+                    float dx = event.getX() - down[0];
+                    float dy = event.getY() - down[1];
+                    if (Math.abs(dy) > dp(80) && Math.abs(dy) > Math.abs(dx) * 1.2f)
+                        moveShort(dy < 0 ? 1 : -1);
+                    else v.performClick();
+                    return true;
+                }
+                return true;
+            });
+        }
         videoFrame.addView(tapLayer, new FrameLayout.LayoutParams(-1, -1));
         loading = new ProgressBar(this);
         loading.setIndeterminateTintList(ColorStateList.valueOf(ACCENT));
@@ -187,6 +222,38 @@ public final class MobilePlayerActivity extends Activity {
         errorText.setGravity(Gravity.CENTER);
         errorText.setPadding(dp(24), dp(12), dp(24), dp(12));
         videoFrame.addView(errorText, new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER));
+        if (shortsMode) {
+            LinearLayout shortInfo = new LinearLayout(this);
+            shortInfo.setOrientation(LinearLayout.VERTICAL);
+            shortInfo.setPadding(dp(18), dp(24), dp(18), dp(12));
+            shortInfo.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                    new int[]{Color.TRANSPARENT, 0xd9000000}));
+            TextView source = label(video.source + " · " + VideoPresentation.channel(video), 13, Color.WHITE);
+            source.setSingleLine(true); source.setEllipsize(TextUtils.TruncateAt.END);
+            shortInfo.addView(source, size(-1, -2));
+            TextView title = label(video.title, 18, Color.WHITE);
+            title.setTypeface(Typeface.DEFAULT_BOLD);
+            title.setMaxLines(2); title.setEllipsize(TextUtils.TruncateAt.END);
+            shortInfo.addView(title, size(-1, -2));
+            LinearLayout shortActions = new LinearLayout(this);
+            shortsFavoriteButton = label("", 14, Color.WHITE);
+            shortsFavoriteButton.setPadding(0, dp(8), dp(22), 0);
+            shortsFavoriteButton.setOnClickListener(v -> toggleFavorite());
+            shortActions.addView(shortsFavoriteButton);
+            shortsSubscribeButton = label("", 14, Color.WHITE);
+            shortsSubscribeButton.setPadding(0, dp(8), 0, 0);
+            shortsSubscribeButton.setVisibility(video.channelId.isEmpty() ? View.GONE : View.VISIBLE);
+            shortsSubscribeButton.setOnClickListener(v -> toggleSubscription());
+            shortActions.addView(shortsSubscribeButton);
+            shortInfo.addView(shortActions);
+            TextView hint = label("↑ Следующее  ·  ↓ Предыдущее", 12, 0xffc5d7e8);
+            hint.setPadding(0, dp(8), 0, 0);
+            shortInfo.addView(hint);
+            FrameLayout.LayoutParams infoParams = new FrameLayout.LayoutParams(
+                    -1, -2, Gravity.BOTTOM);
+            infoParams.bottomMargin = dp(70);
+            videoFrame.addView(shortInfo, infoParams);
+        }
         controls = new LinearLayout(this);
         controls.setOrientation(LinearLayout.VERTICAL);
         controls.setPadding(dp(9), dp(12), dp(9), dp(3));
@@ -194,13 +261,20 @@ public final class MobilePlayerActivity extends Activity {
                 new int[]{Color.TRANSPARENT, 0xdd000000, 0xf9000000}));
         LinearLayout controlRow = new LinearLayout(this);
         controlRow.setGravity(Gravity.CENTER_VERTICAL);
-        addControl(controlRow, "−10", () -> seek(-10_000));
+        TextView rewind = addControl(controlRow, "◀◀", () -> seek(-10_000));
+        rewind.setTextSize(22);
+        rewind.setContentDescription("Назад на 10 секунд");
         playButton = addControl(controlRow, "▶", this::togglePlayback);
-        addControl(controlRow, "+10", () -> seek(10_000));
+        TextView forward = addControl(controlRow, "▶▶", () -> seek(10_000));
+        forward.setTextSize(22);
+        forward.setContentDescription("Вперёд на 10 секунд");
         controlRow.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
         time = label("0:00 / 0:00", 12, Color.WHITE);
         time.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
         controlRow.addView(time, new LinearLayout.LayoutParams(0, dp(42), 1));
+        aspectButton = addControl(controlRow, "Авто", this::cycleAspect);
+        aspectButton.setTextSize(12);
+        updateAspectButton();
         fullscreenButton = addControl(controlRow, "⛶", this::toggleFullscreen);
         fullscreenButton.setTextSize(26);
         fullscreenButton.setContentDescription("На весь экран");
@@ -253,13 +327,13 @@ public final class MobilePlayerActivity extends Activity {
         TextView avatar = label(channel.substring(0, 1).toUpperCase(), 19, Color.WHITE);
         avatar.setTypeface(Typeface.DEFAULT_BOLD);
         avatar.setGravity(Gravity.CENTER);
-        avatar.setBackground(round(0xff33465a, 24));
+        avatar.setBackground(round(0xff315679, 24));
         channelRow.addView(avatar, size(44, 44));
         TextView channelText = label(channel + "\n" + video.source, 14, Color.WHITE);
         channelText.setPadding(dp(11), 0, dp(4), 0);
         channelRow.addView(channelText, new LinearLayout.LayoutParams(0, dp(50), 1));
         if (!video.channelId.isEmpty()) {
-            subscribeButton = label("", 13, Color.WHITE);
+            subscribeButton = label("", 13, BACKGROUND);
             subscribeButton.setGravity(Gravity.CENTER);
             subscribeButton.setPadding(dp(10), 0, dp(10), 0);
             subscribeButton.setBackground(round(ACCENT, 18));
@@ -281,7 +355,7 @@ public final class MobilePlayerActivity extends Activity {
         }
         TextView channelVideos = label("Видео канала  ›", 15, Color.WHITE);
         channelVideos.setPadding(dp(14), 0, dp(14), 0);
-        channelVideos.setBackground(round(0xff171a21, 10));
+        channelVideos.setBackground(round(MobileAuroraTheme.SURFACE, 10));
         channelVideos.setOnClickListener(v -> VideoActions.openChannel(this, video));
         channelVideos.setVisibility(video.channelId.isEmpty() ? View.GONE : View.VISIBLE);
         details.addView(channelVideos, size(-1, 48));
@@ -309,6 +383,7 @@ public final class MobilePlayerActivity extends Activity {
                 ? "Выйти из полноэкранного режима" : "На весь экран");
         fullscreenButton.setVisibility(landscape ? View.GONE : View.VISIBLE);
         fullscreenButton.setTextColor(portraitFullscreen ? ACCENT : Color.WHITE);
+        aspectButton.setVisibility(fullscreen ? View.VISIBLE : View.GONE);
         ViewCompat.requestApplyInsets(root);
         videoFrame.requestLayout();
         videoFrame.post(this::fitSurface);
@@ -325,14 +400,42 @@ public final class MobilePlayerActivity extends Activity {
         applyOrientation();
     }
 
+    private void cycleAspect() {
+        aspectMode = (aspectMode + 1) % 4;
+        updateAspectButton();
+        fitSurface();
+    }
+
+    private void updateAspectButton() {
+        String[] labels = {"Авто", "Заполн.", "16:9", "4:3"};
+        aspectButton.setText(labels[aspectMode]);
+        aspectButton.setContentDescription("Соотношение сторон: " + labels[aspectMode]);
+    }
+
     private void fitSurface() {
         if (videoWidth <= 0 || videoHeight <= 0 || videoFrame.getWidth() <= 0
                 || videoFrame.getHeight() <= 0) return;
         float width = videoWidth * pixelRatio;
-        float scale = Math.min(videoFrame.getWidth() / width,
-                videoFrame.getHeight() / (float) videoHeight);
+        float frameWidth = videoFrame.getWidth();
+        float frameHeight = videoFrame.getHeight();
+        float scale = Math.min(frameWidth / width, frameHeight / videoHeight);
         int fittedWidth = Math.max(1, Math.round(width * scale));
         int fittedHeight = Math.max(1, Math.round(videoHeight * scale));
+        if (aspectMode == 1) {
+            fittedWidth = videoFrame.getWidth();
+            fittedHeight = videoFrame.getHeight();
+            float videoAspect = width / videoHeight;
+            float frameAspect = frameWidth / frameHeight;
+            surface.setCrop(videoAspect > frameAspect ? frameAspect / videoAspect : 1f,
+                    videoAspect < frameAspect ? videoAspect / frameAspect : 1f);
+        } else if (aspectMode == 2 || aspectMode == 3) {
+            float ratio = aspectMode == 2 ? 16f / 9f : 4f / 3f;
+            fittedWidth = Math.min(videoFrame.getWidth(), Math.round(frameHeight * ratio));
+            fittedHeight = Math.min(videoFrame.getHeight(), Math.round(frameWidth / ratio));
+            surface.setCrop(1f, 1f);
+        } else {
+            surface.setCrop(1f, 1f);
+        }
         FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) surface.getLayoutParams();
         if (params.width == fittedWidth && params.height == fittedHeight) return;
         surface.setLayoutParams(new FrameLayout.LayoutParams(
@@ -355,7 +458,7 @@ public final class MobilePlayerActivity extends Activity {
     private TextView action(LinearLayout row, String text, Runnable callback) {
         TextView button = label(text, 13, Color.WHITE);
         button.setGravity(Gravity.CENTER);
-        button.setBackground(round(0xff222630, 18));
+        button.setBackground(round(MobileAuroraTheme.SURFACE, 18));
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(44), 1);
         params.rightMargin = dp(8);
         row.addView(button, params);
@@ -404,6 +507,7 @@ public final class MobilePlayerActivity extends Activity {
                 }
                 @Override public void onIsPlayingChanged(boolean playing) {
                     updateScreenAwake(); updateProgress(); scheduleHide();
+                    updateHeadsetControls();
                 }
                 @Override public void onPlayWhenReadyChanged(boolean ready, int reason) {
                     updateScreenAwake();
@@ -475,6 +579,12 @@ public final class MobilePlayerActivity extends Activity {
         if (player == null) { openOfficial(); return; }
         if (player.isPlaying()) player.pause(); else player.play();
         updateProgress(); updateScreenAwake();
+        updateHeadsetControls();
+    }
+
+    private void updateHeadsetControls() {
+        if (headsetControls != null) headsetControls.update(player != null && player.isPlaying(),
+                player == null ? 0 : player.getCurrentPosition());
     }
 
     private void seek(long delta) {
@@ -525,6 +635,24 @@ public final class MobilePlayerActivity extends Activity {
         favoriteButton.setText(FavoriteStore.contains(this, video) ? "♥  Сохранено" : "♡  Избранное");
         if (subscribeButton != null) subscribeButton.setText(
                 SubscriptionStore.contains(this, video) ? "Вы подписаны" : "Подписаться");
+        if (shortsFavoriteButton != null) shortsFavoriteButton.setText(
+                FavoriteStore.contains(this, video) ? "♥  Сохранено" : "♡  Избранное");
+        if (shortsSubscribeButton != null) shortsSubscribeButton.setText(
+                SubscriptionStore.contains(this, video) ? "Вы подписаны" : "+ Подписаться");
+    }
+
+    private void moveShort(int direction) {
+        VideoItem next = ShortsQueue.adjacent(video, direction);
+        if (next == null) {
+            Toast.makeText(this, direction > 0 ? "Это последнее видео" : "Это первое видео",
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
+        saveProgress();
+        VideoActions.play(this, next, true);
+        overridePendingTransition(0, 0);
+        finish();
+        overridePendingTransition(0, 0);
     }
 
     private void saveProgress() {
@@ -584,6 +712,7 @@ public final class MobilePlayerActivity extends Activity {
 
     @Override protected void onStart() {
         super.onStart(); started = true; updateScreenAwake();
+        if (headsetControls != null) headsetControls.setActive(true);
         if (streamUrl != null && player == null) startPlayer();
         else if (player != null) ui.post(ticker);
     }
@@ -619,6 +748,7 @@ public final class MobilePlayerActivity extends Activity {
         saveProgress(); started = false; updateScreenAwake();
         ui.removeCallbacks(ticker); ui.removeCallbacks(hideControls);
         if (player != null) player.pause();
+        if (headsetControls != null) headsetControls.setActive(false);
         super.onStop();
     }
 
@@ -648,6 +778,7 @@ public final class MobilePlayerActivity extends Activity {
     }
 
     @Override public void onBackPressed() {
+        if (shortsMode) { finish(); return; }
         if (portraitFullscreen && getResources().getConfiguration().orientation
                 == Configuration.ORIENTATION_PORTRAIT) {
             portraitFullscreen = false;
@@ -657,11 +788,13 @@ public final class MobilePlayerActivity extends Activity {
 
     @Override protected void onSaveInstanceState(Bundle state) {
         state.putBoolean("portrait_fullscreen", portraitFullscreen);
+        state.putInt("aspect_mode", aspectMode);
         super.onSaveInstanceState(state);
     }
 
     @Override protected void onDestroy() {
         resolver.shutdownNow(); ui.removeCallbacksAndMessages(null);
+        if (headsetControls != null) headsetControls.release();
         if (player != null) { player.clearVideoSurface(); player.release(); player = null; }
         if (surface != null) surface.release();
         updateScreenAwake();
@@ -677,9 +810,7 @@ public final class MobilePlayerActivity extends Activity {
     }
 
     private GradientDrawable round(int color, int radius) {
-        GradientDrawable result = new GradientDrawable();
-        result.setColor(color); result.setCornerRadius(dp(radius));
-        return result;
+        return MobileAuroraTheme.round(color, dp(radius));
     }
 
     private LinearLayout.LayoutParams size(int width, int height) {

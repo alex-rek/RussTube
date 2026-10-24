@@ -7,8 +7,13 @@ final class FeedRepository {
     static final String[] SOURCES = {"RUTUBE", "VK VIDEO", PeerTubeClient.SOURCE, "OK", "ДЗЕН"};
 
     List<VideoItem> live(String source, String query) throws Exception {
-        return "VK VIDEO".equals(source) ? new VkWebClient().searchLive(query)
+        return PeerTubeClient.SOURCE.equals(source) ? PeerTubeFeedClient.live(query)
+                : "VK VIDEO".equals(source) ? new VkWebClient().searchLive(query)
                 : liveOnly(search(source, query));
+    }
+
+    List<VideoItem> shorts(String source, String query) throws Exception {
+        return ShortsCatalog.filter(search(source, query));
     }
 
     List<VideoItem> search(String source, String query) throws Exception {

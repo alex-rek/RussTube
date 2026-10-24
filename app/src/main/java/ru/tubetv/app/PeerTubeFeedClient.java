@@ -28,6 +28,18 @@ final class PeerTubeFeedClient {
         return parse(new JSONObject(reader.read(url)));
     }
 
+    static List<VideoItem> live(String query) throws Exception {
+        return live(query, PeerTubeFeedClient::get);
+    }
+
+    static List<VideoItem> live(String query, Reader reader) throws Exception {
+        String value = query == null ? "" : query.trim();
+        String url = SEPIA + (value.isEmpty() ? "?" : "?search=" + encode(value) + "&")
+                + "count=" + LIMIT
+                + "&start=0&nsfw=false&isLive=true&includeScheduledLive=false";
+        return parse(new JSONObject(reader.read(url)), true);
+    }
+
     static List<VideoItem> channelVideos(VideoItem channel) throws Exception {
         return channelVideos(channel, PeerTubeFeedClient::get);
     }
@@ -49,12 +61,17 @@ final class PeerTubeFeedClient {
     }
 
     static List<VideoItem> parse(JSONObject response) {
+        return parse(response, false);
+    }
+
+    private static List<VideoItem> parse(JSONObject response, boolean liveOnly) {
         List<VideoItem> result = new ArrayList<>();
         JSONArray data = response.optJSONArray("data");
         if (data == null) return result;
         for (int i = 0; i < Math.min(data.length(), LIMIT); i++) {
             JSONObject entry = data.optJSONObject(i);
-            PeerTubeSearch.Candidate candidate = PeerTubeSearch.Candidate.from(entry, false);
+            if (liveOnly && (entry == null || !entry.optBoolean("isLive"))) continue;
+            PeerTubeSearch.Candidate candidate = PeerTubeSearch.Candidate.from(entry, false, liveOnly);
             if (candidate == null) continue;
             URI page = URI.create(candidate.pageUrl);
             String origin = page.getScheme() + "://" + page.getRawAuthority() + "/";
@@ -73,10 +90,11 @@ final class PeerTubeFeedClient {
                     if (page.getHost().equalsIgnoreCase(uri.getHost()) && uri.getPath() != null
                             && uri.getPath().matches("/video-channels/[A-Za-z0-9._@-]+")) {
                         String name = channel.optString("displayName", channel.optString("name"));
-                        item = item.withChannel(channelUrl, name, channelUrl, false);
+                        item = item.withChannel(channelUrl, name, channelUrl, liveOnly);
                     }
                 }
             }
+            if (liveOnly && !item.isLive) item = item.withChannel("", "", "", true);
             result.add(item.withMetrics(entry.optLong("views", -1),
                     VideoPresentation.timestamp(entry.optString("publishedAt"))));
         }

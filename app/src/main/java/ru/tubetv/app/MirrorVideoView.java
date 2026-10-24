@@ -54,6 +54,12 @@ final class MirrorVideoView extends GLSurfaceView {
         requestRender();
     }
 
+    void setCrop(float visibleWidth, float visibleHeight) {
+        videoRenderer.visibleWidth = Math.max(0.01f, Math.min(1f, visibleWidth));
+        videoRenderer.visibleHeight = Math.max(0.01f, Math.min(1f, visibleHeight));
+        requestRender();
+    }
+
     void release() {
         released = true;
         surfaceGeneration.incrementAndGet();
@@ -99,9 +105,12 @@ final class MirrorVideoView extends GLSurfaceView {
         private final FloatBuffer textureCoordinates = buffer(new float[]{
                 0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f
         });
+        private final float[] visibleCoordinates = new float[8];
         private final float[] textureMatrix = new float[16];
         private volatile boolean frameAvailable;
         private volatile boolean mirrored;
+        private volatile float visibleWidth = 1f;
+        private volatile float visibleHeight = 1f;
         private volatile SurfaceTexture surfaceTexture;
         private int texture;
         private int program;
@@ -165,6 +174,18 @@ final class MirrorVideoView extends GLSurfaceView {
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
             GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, texture);
             positions.position(0);
+            float cropLeft = (1f - visibleWidth) / 2f;
+            float cropTop = (1f - visibleHeight) / 2f;
+            visibleCoordinates[0] = cropLeft;
+            visibleCoordinates[1] = cropTop;
+            visibleCoordinates[2] = 1f - cropLeft;
+            visibleCoordinates[3] = cropTop;
+            visibleCoordinates[4] = cropLeft;
+            visibleCoordinates[5] = 1f - cropTop;
+            visibleCoordinates[6] = 1f - cropLeft;
+            visibleCoordinates[7] = 1f - cropTop;
+            textureCoordinates.position(0);
+            textureCoordinates.put(visibleCoordinates);
             textureCoordinates.position(0);
             GLES20.glEnableVertexAttribArray(positionAttribute);
             GLES20.glVertexAttribPointer(positionAttribute, 2, GLES20.GL_FLOAT,

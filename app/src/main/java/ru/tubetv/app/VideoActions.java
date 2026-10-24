@@ -110,6 +110,10 @@ final class VideoActions {
     }
 
     static void play(Activity activity, VideoItem item) {
+        play(activity, item, false);
+    }
+
+    static void play(Activity activity, VideoItem item, boolean shortsMode) {
         WatchProgressStore.Progress watched = WatchProgressStore.get(activity, item);
         long duration = watched.durationMs > 0 ? watched.durationMs : item.durationMs;
         long position = item.isLive || (duration > 0 && watched.positionMs >= duration * .95)
@@ -125,6 +129,7 @@ final class VideoActions {
                 .putExtra("channel_id", item.channelId).putExtra("channel_name", item.channelName)
                 .putExtra("channel_url", item.channelUrl).putExtra("live", item.isLive);
         intent.putExtra("views", item.views).putExtra("published_at", item.publishedAtMs);
+        if (shortsMode && BuildConfig.MOBILE_VARIANT) intent.putExtra("shorts_mode", true);
         activity.startActivity(intent);
     }
 }

@@ -65,4 +65,25 @@ public final class PeerTubeFeedClientTest {
         assertEquals(1, videos.size());
         assertEquals(subscribed.channelKey(), videos.get(0).channelKey());
     }
+
+    @Test public void liveFeedIncludesOnlyCurrentStreams() throws Exception {
+        JSONObject live = new JSONObject()
+                .put("uuid", UUID).put("url", ORIGIN + "/videos/watch/" + UUID)
+                .put("name", "Прямой эфир").put("isLive", true).put("duration", 0)
+                .put("channel", new JSONObject().put("url", CHANNEL).put("displayName", "Наука"));
+        JSONObject recording = new JSONObject()
+                .put("uuid", "e8a1af4e-414a-4d58-bfe6-2146eed06d10")
+                .put("url", ORIGIN + "/videos/watch/e8a1af4e-414a-4d58-bfe6-2146eed06d10")
+                .put("name", "Запись").put("isLive", false);
+        List<VideoItem> videos = PeerTubeFeedClient.live("", url -> {
+            assertTrue(url.contains("isLive=true&includeScheduledLive=false"));
+            assertFalse(url.contains("search="));
+            return new JSONObject().put("data", new org.json.JSONArray()
+                    .put(live).put(recording)).toString();
+        });
+        assertEquals(1, videos.size());
+        assertTrue(videos.get(0).isLive);
+        assertEquals(CHANNEL, videos.get(0).channelId);
+        assertEquals(0, videos.get(0).durationMs);
+    }
 }

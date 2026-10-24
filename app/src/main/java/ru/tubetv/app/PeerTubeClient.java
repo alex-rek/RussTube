@@ -320,8 +320,10 @@ final class PeerTubeClient {
             maxWidth = bestHls.maxWidth;
             maxHeight = bestHls.maxHeight;
         }
+        // Live cameras can publish a video-only HLS master without an audio codec.
         boolean hlsPlayable = bestHls != null
-                && (bestHls.muxed || bestHls.separateAudioUrl != null || playlistSaysMuxed);
+                && (bestHls.muxed || bestHls.separateAudioUrl != null || playlistSaysMuxed
+                || metadata.optBoolean("isLive"));
         String streamUrl = hlsPlayable ? masterUrl : bestDirectMuxed;
         String streamMime = hlsPlayable ? "application/x-mpegURL" : null;
         String audioUrl = directAudio;

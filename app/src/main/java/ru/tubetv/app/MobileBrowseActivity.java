@@ -9,7 +9,12 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.speech.RecognizerIntent;
+import android.text.Editable;
 import android.text.TextUtils;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
@@ -37,6 +42,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.Future;
@@ -45,14 +51,15 @@ import java.util.concurrent.TimeUnit;
 
 /** Touch-first RussTube interface; search, stores and playback are shared with TV. */
 public final class MobileBrowseActivity extends Activity {
-    private enum Page { HOME, SEARCH, LIVE, SUBSCRIPTIONS, LIBRARY, HISTORY, FAVORITES, CHANNELS, POPULAR }
-    private static final int BACKGROUND = 0xff0b0f14;
-    private static final int PANEL = 0xff171a21;
-    private static final int SECONDARY = 0xffaeb9cc;
-    private static final int ACCENT = 0xffe53935;
-    private static final Page[] TABS = {Page.HOME, Page.LIVE, Page.SUBSCRIPTIONS, Page.LIBRARY};
-    private static final String[] TAB_LABELS = {"Главная", "В эфире", "Подписки", "Вы"};
-    private static final String[] TAB_ICONS = {"home", "live", "subscriptions", "history"};
+    private static final int VOICE_SEARCH_REQUEST = 7143;
+    private enum Page { HOME, SEARCH, SHORTS, LIVE, SUBSCRIPTIONS, LIBRARY, HISTORY, FAVORITES, CHANNELS, POPULAR, SETTINGS }
+    private static final int BACKGROUND = MobileAuroraTheme.BACKGROUND;
+    private static final int PANEL = MobileAuroraTheme.SURFACE;
+    private static final int SECONDARY = MobileAuroraTheme.MUTED;
+    private static final int ACCENT = MobileAuroraTheme.TEAL;
+    private static final Page[] TABS = {Page.HOME, Page.SHORTS, Page.LIVE, Page.SUBSCRIPTIONS, Page.LIBRARY};
+    private static final String[] TAB_LABELS = {"Главная", "Shorts", "В эфире", "Подписки", "Вы"};
+    private static final String[] TAB_ICONS = {"home", "shorts", "live", "subscriptions", "history"};
 
     private final ThreadPoolExecutor io = new ThreadPoolExecutor(4, 4, 0, TimeUnit.SECONDS,
             new ArrayBlockingQueue<>(128));
@@ -63,6 +70,7 @@ public final class MobileBrowseActivity extends Activity {
     private final List<VideoItem> history = new ArrayList<>();
     private final List<String> failed = new ArrayList<>();
     private final FeedRepository repository = new FeedRepository();
+    private final Handler searchHandler = new Handler(Looper.getMainLooper());
     private Page page = Page.HOME;
     private VideoItem activeChannel;
     private int generation;
@@ -71,8 +79,12 @@ public final class MobileBrowseActivity extends Activity {
     private UpdateCoordinator updates;
     private boolean skipResumeReload;
     private String searchQuery = "";
+    private Runnable queuedSearch;
+    private boolean syncingSearchText;
     private VideoSort.Mode sortMode = VideoSort.Mode.NEWEST;
     private TextView heading;
+    private LinearLayout header;
+    private FrameLayout headerContainer;
     private LinearLayout toolbar;
     private HorizontalScrollView landscapeControls;
     private EditText landscapeQuery;
@@ -87,6 +99,7 @@ public final class MobileBrowseActivity extends Activity {
     private EditText query;
     private GridView list;
     private FeedAdapter adapter;
+    private MobileSettingsPanel settingsPanel;
     private LinearLayout navigation;
 
     @Override protected void onCreate(Bundle state) {
@@ -116,36 +129,44 @@ public final class MobileBrowseActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(BACKGROUND);
 
+        header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.VERTICAL);
+        header.setBackground(new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
+                new int[]{0xf5071426, 0xd0071426, 0x44071426}));
         toolbar = new LinearLayout(this);
         toolbar.setGravity(Gravity.CENTER_VERTICAL);
         toolbar.setPadding(dp(16), 0, dp(12), 0);
-        TextView mark = label("▶", 19, Color.WHITE);
-        mark.setGravity(Gravity.CENTER);
-        mark.setBackground(round(ACCENT, 7));
-        toolbar.addView(mark, size(34, 27));
-        TextView brand = label("RussTube", 22, Color.WHITE);
-        brand.setTypeface(Typeface.DEFAULT_BOLD);
-        LinearLayout.LayoutParams brandParams = new LinearLayout.LayoutParams(0, dp(56), 1);
-        brandParams.leftMargin = dp(7);
-        toolbar.addView(brand, brandParams);
+        FrameLayout brandFrame = new FrameLayout(this);
+        int logoResource = getResources().getIdentifier("aurora_logo", "drawable", getPackageName());
+        if (logoResource != 0) {
+            ImageView brand = new ImageView(this);
+            brand.setImageResource(logoResource);
+            brand.setScaleType(ImageView.ScaleType.FIT_START);
+            brand.setContentDescription("RussTube — Arctic Fox Apps");
+            brandFrame.addView(brand, new FrameLayout.LayoutParams(-1, -1));
+        } else {
+            TextView brand = label("RussTube", MobileAuroraTheme.BRAND_SP, MobileAuroraTheme.TEXT);
+            brand.setTypeface(Typeface.DEFAULT_BOLD);
+            brandFrame.addView(brand, new FrameLayout.LayoutParams(-1, -1));
+        }
+        toolbar.addView(brandFrame, new LinearLayout.LayoutParams(0, dp(64), 1));
         TextView search = icon("search", "Поиск", () -> show(Page.SEARCH));
         toolbar.addView(search, size(46, 46));
-        TextView refresh = label("↻", 26, Color.WHITE);
+        TextView refresh = label("↻", 30, MobileAuroraTheme.CYAN);
         refresh.setGravity(Gravity.CENTER);
         refresh.setContentDescription("Обновить");
         refresh.setOnClickListener(v -> refresh());
         toolbar.addView(refresh, size(42, 46));
-        root.addView(toolbar, size(-1, 56));
+        header.addView(toolbar, size(-1, 64));
 
         landscapeControls = new HorizontalScrollView(this);
         landscapeControls.setHorizontalScrollBarEnabled(false);
         LinearLayout compactRow = new LinearLayout(this);
         compactRow.setGravity(Gravity.CENTER_VERTICAL);
         compactRow.setPadding(dp(10), 0, dp(10), 0);
-        String[] sections = {"Главная", "В эфире", "Подписки", "Вы"};
-        for (int i = 0; i < sections.length; i++) {
+        for (int i = 0; i < TAB_LABELS.length; i++) {
             final Page target = TABS[i];
-            compactAction(compactRow, sections[i], () -> show(target));
+            compactAction(compactRow, TAB_LABELS[i], () -> show(target));
         }
         landscapeQuery = new EditText(this);
         landscapeQuery.setSingleLine(true);
@@ -154,7 +175,7 @@ public final class MobileBrowseActivity extends Activity {
         landscapeQuery.setHintTextColor(SECONDARY);
         landscapeQuery.setHint("Поиск видео");
         landscapeQuery.setPadding(dp(10), 0, dp(10), 0);
-        landscapeQuery.setBackground(round(0xff222630, 10));
+        landscapeQuery.setBackground(round(PANEL, 10));
         landscapeQuery.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
         landscapeQuery.setOnEditorActionListener((v, actionId, event) -> {
             if (actionId == EditorInfo.IME_ACTION_SEARCH || event != null
@@ -166,9 +187,11 @@ public final class MobileBrowseActivity extends Activity {
             return false;
         });
         compactRow.addView(landscapeQuery, size(230, 42));
-        compactAction(compactRow, "Искать", () -> {
-            query.setText(landscapeQuery.getText()); submitSearch();
-        });
+        TextView landscapeVoice = icon("mic", "Голосовой поиск", this::startVoiceSearch);
+        landscapeVoice.setBackground(round(PANEL, 9));
+        LinearLayout.LayoutParams voiceParams = size(44, 42);
+        voiceParams.rightMargin = dp(8);
+        compactRow.addView(landscapeVoice, voiceParams);
         String[] quick = {"Популярное", "Новости", "Наука", "Музыка", "Игры", "Спорт"};
         for (String value : quick) compactAction(compactRow, value, () -> {
             if ("Популярное".equals(value)) show(Page.POPULAR);
@@ -182,7 +205,9 @@ public final class MobileBrowseActivity extends Activity {
         root.addView(landscapeControls, size(-1, 52));
 
         searchRow = new LinearLayout(this);
-        searchRow.setPadding(dp(16), dp(2), dp(16), dp(8));
+        searchRow.setBaselineAligned(false);
+        searchRow.setGravity(Gravity.CENTER_VERTICAL);
+        searchRow.setPadding(dp(16), dp(4), dp(16), dp(4));
         query = new EditText(this);
         query.setSingleLine(true);
         query.setTextSize(16);
@@ -190,7 +215,8 @@ public final class MobileBrowseActivity extends Activity {
         query.setHintTextColor(SECONDARY);
         query.setHint("Видео или канал на всех платформах");
         query.setPadding(dp(14), 0, dp(10), 0);
-        query.setBackground(round(0xff222630, 12));
+        query.setBackground(MobileAuroraTheme.stroke(PANEL, dp(12),
+                0xff31506a, dp(1)));
         query.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
         query.setOnEditorActionListener((v, actionId, event) -> {
             if (actionId == EditorInfo.IME_ACTION_SEARCH || event != null
@@ -199,27 +225,41 @@ public final class MobileBrowseActivity extends Activity {
             }
             return false;
         });
-        searchRow.addView(query, new LinearLayout.LayoutParams(0, dp(46), 1));
-        TextView submit = icon("search", "Искать", this::submitSearch);
-        searchRow.addView(submit, size(48, 46));
-        root.addView(searchRow, size(-1, 56));
+        searchRow.addView(query, new LinearLayout.LayoutParams(0, dp(48), 1));
+        TextView voice = icon("mic", "Голосовой поиск", this::startVoiceSearch);
+        searchRow.addView(voice, size(48, 48));
+        root.addView(searchRow, size(-1, 66));
+        watchQuery(query, landscapeQuery);
+        watchQuery(landscapeQuery, query);
 
-        heading = label("", 22, Color.WHITE);
+        heading = label("", MobileAuroraTheme.HEADING_SP, MobileAuroraTheme.TEXT);
         heading.setTypeface(Typeface.DEFAULT_BOLD);
-        heading.setPadding(dp(16), 0, dp(16), 0);
-        root.addView(heading, size(-1, 42));
+        heading.setPadding(dp(16), 0, dp(16), dp(3));
+        header.addView(heading, size(-1, 42));
+        headerContainer = new FrameLayout(this);
+        ImageView aurora = new ImageView(this);
+        int auroraResource = getResources().getIdentifier("aurora_header", "drawable", getPackageName());
+        if (auroraResource != 0) aurora.setImageResource(auroraResource);
+        aurora.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        headerContainer.addView(aurora, new FrameLayout.LayoutParams(-1, -1));
+        headerContainer.addView(header, new FrameLayout.LayoutParams(-1, -1));
+        root.addView(headerContainer, 0, size(-1, 106));
 
         topics = new HorizontalScrollView(this);
         topics.setHorizontalScrollBarEnabled(false);
         LinearLayout topicRow = new LinearLayout(this);
-        topicRow.setPadding(dp(16), dp(1), dp(16), dp(9));
+        topicRow.setPadding(dp(14), dp(1), dp(14), dp(10));
         String[] labels = {"Популярное", "Новости", "Наука", "Музыка", "Игры", "Спорт", "Путешествия"};
-        for (String value : labels) {
-            TextView chip = label(value, 14, Color.WHITE);
+        String[] symbols = {"✦", "▣", "⚗", "♫", "✥", "●", "◇"};
+        for (int i = 0; i < labels.length; i++) {
+            String value = labels[i];
+            TextView chip = label(symbols[i] + "  " + value,
+                    MobileAuroraTheme.CHIP_SP, MobileAuroraTheme.TEXT);
             chip.setGravity(Gravity.CENTER);
-            chip.setPadding(dp(13), 0, dp(13), 0);
-            chip.setBackground(round(PANEL, 9));
-            LinearLayout.LayoutParams params = size(-2, 36);
+            chip.setPadding(dp(12), 0, dp(12), 0);
+            chip.setBackground(MobileAuroraTheme.stroke(i == 0 ? 0xff082b42 : PANEL,
+                    dp(12), i == 0 ? ACCENT : 0xff31506a, dp(1)));
+            LinearLayout.LayoutParams params = size(-2, 38);
             params.rightMargin = dp(8);
             topicRow.addView(chip, params);
             chip.setOnClickListener(v -> {
@@ -228,7 +268,7 @@ public final class MobileBrowseActivity extends Activity {
             });
         }
         topics.addView(topicRow);
-        root.addView(topics, size(-1, 46));
+        root.addView(topics, size(-1, 50));
 
         actions = new LinearLayout(this);
         actions.setPadding(dp(16), 0, dp(16), dp(4));
@@ -236,10 +276,10 @@ public final class MobileBrowseActivity extends Activity {
         sortRow = new LinearLayout(this);
         sortRow.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
         sortRow.setPadding(dp(16), 0, dp(16), 0);
-        sortButton = label("", 14, Color.WHITE);
+        sortButton = label("", 13, MobileAuroraTheme.TEXT);
         sortButton.setGravity(Gravity.CENTER);
         sortButton.setPadding(dp(14), 0, dp(14), 0);
-        sortButton.setBackground(round(PANEL, 10));
+        sortButton.setBackground(round(0xff0c2a43, 12));
         sortButton.setOnClickListener(v -> chooseSort());
         sortRow.addView(sortButton, size(-2, 38));
         root.addView(sortRow, size(-1, 48));
@@ -250,22 +290,23 @@ public final class MobileBrowseActivity extends Activity {
         FrameLayout feed = new FrameLayout(this);
         list = new GridView(this);
         list.setNumColumns(1);
-        list.setHorizontalSpacing(dp(10));
-        list.setVerticalSpacing(dp(8));
+        list.setHorizontalSpacing(dp(14));
+        list.setVerticalSpacing(dp(16));
         list.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
         list.setCacheColorHint(Color.TRANSPARENT);
         list.setVerticalScrollBarEnabled(false);
         list.setClipToPadding(false);
-        list.setPadding(0, 0, 0, dp(12));
+        list.setPadding(dp(14), 0, dp(14), dp(18));
         adapter = new FeedAdapter();
         list.setAdapter(adapter);
         list.setOnItemClickListener((parent, view, position, id) -> {
             if (position >= items.size()) return;
             VideoItem item = items.get(position);
-            if (page == Page.CHANNELS) showChannel(item);
+            if (page == Page.CHANNELS && activeChannel == null) showChannel(item);
             else {
                 skipResumeReload = true;
-                VideoActions.play(this, item);
+                if (page == Page.SHORTS) ShortsQueue.set(items);
+                VideoActions.play(this, item, page == Page.SHORTS);
             }
         });
         list.setOnItemLongClickListener((parent, view, position, id) -> {
@@ -280,12 +321,20 @@ public final class MobileBrowseActivity extends Activity {
         empty.setPadding(dp(28), dp(18), dp(28), dp(18));
         feed.addView(empty, new FrameLayout.LayoutParams(-1, -1));
         list.setEmptyView(empty);
+        settingsPanel = new MobileSettingsPanel(this,
+                () -> startActivity(new Intent(this, NetworkSettingsActivity.class)), () -> { });
+        settingsPanel.setVisibility(View.GONE);
+        feed.addView(settingsPanel, new FrameLayout.LayoutParams(-1, -1));
         root.addView(feed, new LinearLayout.LayoutParams(-1, 0, 1));
 
         navigation = new LinearLayout(this);
-        navigation.setBackgroundColor(0xff11151b);
-        navigation.setPadding(dp(4), dp(2), dp(4), dp(2));
-        root.addView(navigation, size(-1, 62));
+        navigation.setBackground(MobileAuroraTheme.stroke(0xff071a2d,
+                dp(20), 0xff185671, dp(1)));
+        navigation.setPadding(dp(4), dp(3), dp(4), dp(3));
+        LinearLayout.LayoutParams navParams = size(-1, 66);
+        navParams.leftMargin = dp(2);
+        navParams.rightMargin = dp(2);
+        root.addView(navigation, navParams);
         ViewCompat.setOnApplyWindowInsetsListener(root, (view, insets) -> {
             Insets safe = insets.getInsets(WindowInsetsCompat.Type.systemBars()
                     | WindowInsetsCompat.Type.displayCutout());
@@ -297,23 +346,29 @@ public final class MobileBrowseActivity extends Activity {
     }
 
     private void show(Page target) {
+        cancelQueuedSearch();
         cancel();
         page = target;
         activeChannel = null;
         items.clear(); baseItems.clear(); candidates.clear(); history.clear();
         for (WatchHistoryStore.Entry entry : WatchHistoryStore.load(this)) history.add(entry.item);
         actions.removeAllViews();
+        syncingSearchText = true;
         landscapeQuery.setText(query.getText());
+        syncingSearchText = false;
         searchRow.setVisibility(target == Page.SEARCH ? View.VISIBLE : View.GONE);
         topics.setVisibility(target == Page.HOME || target == Page.SEARCH || target == Page.POPULAR
                 ? View.VISIBLE : View.GONE);
         switch (target) {
             case HOME:
                 heading.setText("Главная");
-                if (getSharedPreferences("browse", 0).getBoolean("recommendations", true)
-                        && !history.isEmpty()) {
+                if (MobileBrowsePreferences.recommendHistory(this) && !history.isEmpty()) {
                     List<String> queries = RecommendationEngine.queries(history);
                     for (String value : queries) searchAll(value, false);
+                }
+                if (MobileBrowsePreferences.recommendSubscriptions(this)) {
+                    for (VideoItem channel : SubscriptionStore.load(this))
+                        enqueue(channel.source, () -> repository.channel(channel));
                 }
                 searchAll("популярное", false);
                 break;
@@ -325,8 +380,13 @@ public final class MobileBrowseActivity extends Activity {
                 heading.setText("Популярное");
                 searchAll("популярное", false);
                 break;
+            case SHORTS:
+                heading.setText("Shorts");
+                searchShorts();
+                break;
             case LIVE:
                 heading.setText("В эфире");
+                enqueue(PeerTubeClient.SOURCE, () -> repository.live(PeerTubeClient.SOURCE, ""));
                 searchAll("прямой эфир", true);
                 searchAll("24/7", true);
                 break;
@@ -355,14 +415,19 @@ public final class MobileBrowseActivity extends Activity {
                 heading.setText("Избранное");
                 baseItems.addAll(FavoriteStore.load(this));
                 break;
+            case SETTINGS:
+                heading.setText("Настройки");
+                break;
         }
+        settingsPanel.setVisibility(target == Page.SETTINGS ? View.VISIBLE : View.GONE);
+        list.setVisibility(target == Page.SETTINGS ? View.GONE : View.VISIBLE);
         actions.setVisibility(actions.getChildCount() == 0 ? View.GONE : View.VISIBLE);
         sortRow.setVisibility(target == Page.CHANNELS ? View.GONE : View.VISIBLE);
         updateSortLabel();
         applySort();
         updateNavigation();
-        list.setSelection(0);
         render();
+        if (!items.isEmpty()) list.setSelection(0);
         if (target == Page.SEARCH && searchQuery.isEmpty()
                 && getResources().getConfiguration().orientation == Configuration.ORIENTATION_PORTRAIT) {
             query.requestFocus();
@@ -397,11 +462,65 @@ public final class MobileBrowseActivity extends Activity {
     private void submitSearch() {
         searchQuery = query.getText().toString().trim();
         if (searchQuery.length() < 2) { query.setError("Введите хотя бы два символа"); return; }
+        cancelQueuedSearch();
         ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE))
                 .hideSoftInputFromWindow(query.getWindowToken(), 0);
         query.clearFocus();
         landscapeQuery.clearFocus();
         show(Page.SEARCH);
+    }
+
+    private void watchQuery(EditText source, EditText other) {
+        source.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) { }
+            @Override public void afterTextChanged(Editable value) {
+                if (syncingSearchText) return;
+                String typed = value.toString();
+                if (!typed.contentEquals(other.getText())) {
+                    syncingSearchText = true;
+                    other.setText(typed);
+                    syncingSearchText = false;
+                }
+                searchQuery = typed.trim();
+                cancelQueuedSearch();
+                if (page != Page.SEARCH) {
+                    if (source != landscapeQuery || searchQuery.length() < 2) return;
+                    queuedSearch = () -> {
+                        queuedSearch = null;
+                        show(Page.SEARCH);
+                    };
+                    searchHandler.postDelayed(queuedSearch, 450);
+                    return;
+                }
+                cancel();
+                items.clear(); baseItems.clear(); candidates.clear();
+                applySort(); render();
+                queuedSearch = () -> {
+                    queuedSearch = null;
+                    if (searchQuery.length() >= 2) searchAll(searchQuery, false);
+                };
+                searchHandler.postDelayed(queuedSearch, 450);
+            }
+        });
+    }
+
+    private void cancelQueuedSearch() {
+        if (queuedSearch == null) return;
+        searchHandler.removeCallbacks(queuedSearch);
+        queuedSearch = null;
+    }
+
+    private void startVoiceSearch() {
+        Intent speech = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                        RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
+                .putExtra(RecognizerIntent.EXTRA_PROMPT, "Что найти?");
+        try { startActivityForResult(speech, VOICE_SEARCH_REQUEST); }
+        catch (RuntimeException error) {
+            Toast.makeText(this, "Голосовой ввод недоступен на устройстве", Toast.LENGTH_LONG).show();
+        }
     }
 
     private void refresh() {
@@ -410,26 +529,27 @@ public final class MobileBrowseActivity extends Activity {
     }
 
     private void settings() {
-        boolean enabled = getSharedPreferences("browse", 0).getBoolean("recommendations", true);
-        new AlertDialog.Builder(this).setTitle("Настройки RussTube")
-                .setMultiChoiceItems(new String[]{"Рекомендации по истории просмотров"},
-                        new boolean[]{enabled}, (dialog, index, checked) ->
-                                getSharedPreferences("browse", 0).edit()
-                                        .putBoolean("recommendations", checked).apply())
-                .setNeutralButton("Сеть", (dialog, which) ->
-                        startActivity(new Intent(this, NetworkSettingsActivity.class)))
-                .setPositiveButton("Готово", (dialog, which) -> {
-                    if (page == Page.HOME) show(Page.HOME);
-                }).show();
+        show(Page.SETTINGS);
     }
 
     private void searchAll(String value, boolean live) {
-        String[] sources = live ? new String[]{"RUTUBE", "VK VIDEO"} : FeedRepository.SOURCES;
+        String[] sources = live ? new String[]{"RUTUBE", "VK VIDEO", PeerTubeClient.SOURCE}
+                : FeedRepository.SOURCES;
         for (String source : sources) enqueue(source,
                 () -> live ? repository.live(source, value) : repository.search(source, value));
     }
 
+    private void searchShorts() {
+        for (String source : FeedRepository.SOURCES) {
+            enqueue(source, () -> repository.shorts(source, "shorts"));
+            enqueue(source, () -> repository.shorts(source, "шортс"));
+            if ("VK VIDEO".equals(source))
+                enqueue(source, () -> repository.shorts(source, "клипы"));
+        }
+    }
+
     private void enqueue(String source, Load operation) {
+        if (!MobileBrowsePreferences.sourceEnabled(this, source)) return;
         int current = generation;
         pending++;
         jobs.add(io.submit(() -> {
@@ -445,7 +565,8 @@ public final class MobileBrowseActivity extends Activity {
                 if (failedRequest && !failed.contains(source)) failed.add(source);
                 candidates.addAll(result);
                 baseItems.clear();
-                if (page == Page.HOME && !history.isEmpty() && activeChannel == null) {
+                if (page == Page.HOME && MobileBrowsePreferences.recommendHistory(this)
+                        && !history.isEmpty() && activeChannel == null) {
                     baseItems.addAll(RecommendationEngine.rank(candidates, history));
                 } else {
                     Map<String, VideoItem> unique = new LinkedHashMap<>();
@@ -471,14 +592,14 @@ public final class MobileBrowseActivity extends Activity {
                             .putString("video_sort", sortMode.name()).apply();
                     updateSortLabel();
                     applySort();
-                    list.setSelection(0);
                     render();
+                    if (!items.isEmpty()) list.setSelection(0);
                     dialog.dismiss();
                 }).setNegativeButton("Отмена", null).show();
     }
 
     private void updateSortLabel() {
-        sortButton.setText(sortMode.label + "  ▾");
+        sortButton.setText("☷  " + sortMode.label + "  ▾");
         if (landscapeSortButton != null) landscapeSortButton.setText(sortMode.label + "  ▾");
     }
 
@@ -497,20 +618,23 @@ public final class MobileBrowseActivity extends Activity {
     private void applyLayout() {
         boolean landscape = getResources().getConfiguration().orientation
                 == Configuration.ORIENTATION_LANDSCAPE;
-        toolbar.setVisibility(landscape ? View.GONE : View.VISIBLE);
+        headerContainer.setVisibility(landscape ? View.GONE : View.VISIBLE);
         landscapeControls.setVisibility(landscape ? View.VISIBLE : View.GONE);
         searchRow.setVisibility(!landscape && page == Page.SEARCH ? View.VISIBLE : View.GONE);
-        heading.setVisibility(landscape ? View.GONE : View.VISIBLE);
         topics.setVisibility(!landscape && activeChannel == null
                 && (page == Page.HOME || page == Page.SEARCH || page == Page.POPULAR)
                 ? View.VISIBLE : View.GONE);
         actions.setVisibility(!landscape && actions.getChildCount() > 0 ? View.VISIBLE : View.GONE);
-        sortRow.setVisibility(!landscape && (page != Page.CHANNELS || activeChannel != null)
+        sortRow.setVisibility(!landscape && page != Page.SETTINGS
+                && (page != Page.CHANNELS || activeChannel != null)
                 ? View.VISIBLE : View.GONE);
-        status.setVisibility(landscape ? View.GONE : View.VISIBLE);
+        status.setVisibility(landscape || page == Page.SETTINGS ? View.GONE : View.VISIBLE);
         navigation.setVisibility(landscape ? View.GONE : View.VISIBLE);
-        list.setNumColumns(landscape ? 2 : 1);
-        list.setHorizontalSpacing(dp(landscape ? 10 : 0));
+        float widthDp = getResources().getDisplayMetrics().widthPixels
+                / getResources().getDisplayMetrics().density;
+        int columns = widthDp >= 1000 ? 3 : widthDp >= 600 || landscape ? 2 : 1;
+        list.setNumColumns(columns);
+        list.setHorizontalSpacing(dp(14));
         adapter.notifyDataSetChanged();
     }
 
@@ -518,9 +642,13 @@ public final class MobileBrowseActivity extends Activity {
         int first = list.getFirstVisiblePosition();
         super.onConfigurationChanged(configuration);
         skipResumeReload = true;
-        if (!landscapeQuery.hasFocus()) landscapeQuery.setText(query.getText());
+        if (!landscapeQuery.hasFocus()) {
+            syncingSearchText = true;
+            landscapeQuery.setText(query.getText());
+            syncingSearchText = false;
+        }
         applyLayout();
-        list.setSelection(first);
+        if (!items.isEmpty()) list.setSelection(first);
     }
 
     private void applySort() {
@@ -534,18 +662,24 @@ public final class MobileBrowseActivity extends Activity {
         status.setText((pending > 0 ? "Загрузка…  ·  " : "") + "Видео: " + items.size()
                 + (failed.isEmpty() ? "" : "  ·  Недоступны: " + TextUtils.join(", ", failed)));
         empty.setText(pending > 0 ? "Ищем видео…"
-                : page == Page.SEARCH && searchQuery.isEmpty() ? "Введите запрос для поиска видео"
+                : activeChannel != null
+                        && !MobileBrowsePreferences.sourceEnabled(this, activeChannel.source)
+                        ? "Эта площадка выключена в настройках"
+                : page == Page.SEARCH && searchQuery.length() < 2 ? "Введите хотя бы два символа"
                 : page == Page.SUBSCRIPTIONS ? "Подпишитесь на канал через меню видео"
                 : page == Page.LIVE ? "Сейчас нет подтверждённых эфиров"
+                : page == Page.SHORTS ? "Короткие вертикальные видео пока не найдены"
                 : page == Page.FAVORITES ? "Сохранённые видео появятся здесь"
                 : page == Page.LIBRARY || page == Page.HISTORY ? "История просмотра пока пуста"
-                : page == Page.CHANNELS ? "Подписок пока нет" : "Видео пока не найдены");
+                : page == Page.CHANNELS && activeChannel == null ? "Подписок пока нет"
+                : "Видео пока не найдены");
     }
 
     private void updateNavigation() {
         navigation.removeAllViews();
         Page selected = page == Page.SEARCH || page == Page.POPULAR ? Page.HOME
-                : page == Page.HISTORY || page == Page.FAVORITES || page == Page.CHANNELS ? Page.LIBRARY : page;
+                : page == Page.HISTORY || page == Page.FAVORITES || page == Page.CHANNELS
+                        || page == Page.SETTINGS ? Page.LIBRARY : page;
         for (int i = 0; i < TABS.length; i++) {
             Page target = TABS[i];
             boolean active = selected == target;
@@ -553,13 +687,16 @@ public final class MobileBrowseActivity extends Activity {
             tab.setOrientation(LinearLayout.VERTICAL);
             tab.setGravity(Gravity.CENTER);
             ImageView image = new ImageView(this);
-            image.setImageDrawable(TvIcons.icon(TAB_ICONS[i], active ? ACCENT : SECONDARY, dp(23)));
-            tab.addView(image, size(24, 24));
-            TextView name = label(TAB_LABELS[i], 11, active ? Color.WHITE : SECONDARY);
+            image.setImageDrawable(TvIcons.icon(TAB_ICONS[i], active ? ACCENT : 0xffa4b9db, dp(25)));
+            tab.addView(image, size(27, 27));
+            TextView name = label(TAB_LABELS[i], MobileAuroraTheme.NAV_LABEL_SP,
+                    active ? ACCENT : 0xffa4b9db);
             name.setGravity(Gravity.CENTER);
             tab.addView(name, size(-1, 22));
             navigation.addView(tab, new LinearLayout.LayoutParams(0, -1, 1));
-            tab.setOnClickListener(v -> show(target));
+            tab.setOnClickListener(v -> {
+                if (page != target || activeChannel != null) show(target);
+            });
         }
     }
 
@@ -575,7 +712,7 @@ public final class MobileBrowseActivity extends Activity {
     }
 
     private TextView icon(String type, String description, Runnable callback) {
-        TextView button = label("", 20, Color.WHITE);
+        TextView button = label("", 20, MobileAuroraTheme.TEXT);
         button.setGravity(Gravity.CENTER);
         button.setCompoundDrawables(null, TvIcons.icon(type, Color.WHITE, dp(23)), null, null);
         button.setContentDescription(description);
@@ -591,9 +728,7 @@ public final class MobileBrowseActivity extends Activity {
     }
 
     private GradientDrawable round(int color, int radius) {
-        GradientDrawable drawable = new GradientDrawable();
-        drawable.setColor(color); drawable.setCornerRadius(dp(radius));
-        return drawable;
+        return MobileAuroraTheme.round(color, dp(radius));
     }
 
     private LinearLayout.LayoutParams size(int width, int height) {
@@ -627,6 +762,17 @@ public final class MobileBrowseActivity extends Activity {
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == VOICE_SEARCH_REQUEST) {
+            if (resultCode == RESULT_OK && data != null) {
+                ArrayList<String> results = data.getStringArrayListExtra(
+                        RecognizerIntent.EXTRA_RESULTS);
+                if (results != null && !results.isEmpty()) {
+                    query.setText(results.get(0));
+                    submitSearch();
+                }
+            }
+            return;
+        }
         updates.onActivityResult(requestCode);
     }
 
@@ -637,7 +783,8 @@ public final class MobileBrowseActivity extends Activity {
 
     @Override public void onBackPressed() {
         if (activeChannel != null) { show(page); return; }
-        if (page == Page.HISTORY || page == Page.FAVORITES || page == Page.CHANNELS) {
+        if (page == Page.HISTORY || page == Page.FAVORITES || page == Page.CHANNELS
+                || page == Page.SETTINGS) {
             show(Page.LIBRARY); return;
         }
         if (page != Page.HOME) { show(Page.HOME); return; }
@@ -645,7 +792,7 @@ public final class MobileBrowseActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
-        updates.onDestroy(); cancel(); io.shutdownNow(); super.onDestroy();
+        cancelQueuedSearch(); updates.onDestroy(); cancel(); io.shutdownNow(); super.onDestroy();
     }
 
     private interface Load { List<VideoItem> run() throws Exception; }
@@ -653,30 +800,45 @@ public final class MobileBrowseActivity extends Activity {
     private final class FeedAdapter extends BaseAdapter {
         @Override public int getCount() { return items.size(); }
         @Override public VideoItem getItem(int position) { return items.get(position); }
-        @Override public long getItemId(int position) { return getItem(position).stableKey().hashCode(); }
+        @Override public long getItemId(int position) {
+            return position >= 0 && position < items.size()
+                    ? items.get(position).stableKey().hashCode() : -1;
+        }
 
         @Override public View getView(int position, View recycled, ViewGroup parent) {
             Card card;
             if (recycled == null) {
                 LinearLayout layout = new LinearLayout(MobileBrowseActivity.this);
                 layout.setOrientation(LinearLayout.VERTICAL);
+                layout.setBackground(round(MobileAuroraTheme.SURFACE_DARK,
+                        MobileAuroraTheme.CARD_RADIUS_DP));
                 FrameLayout artwork = new FrameLayout(MobileBrowseActivity.this) {
                     @Override protected void onMeasure(int widthSpec, int heightSpec) {
                         int width = View.MeasureSpec.getSize(widthSpec);
+                        int artworkHeight = Math.round(width * (page == Page.SHORTS
+                                ? 16f / 9f : 9f / 16f));
+                        if (page == Page.SHORTS) artworkHeight = Math.min(artworkHeight,
+                                Math.round(getResources().getDisplayMetrics().heightPixels * .58f));
                         super.onMeasure(widthSpec, View.MeasureSpec.makeMeasureSpec(
-                                Math.round(width * 9f / 16f), View.MeasureSpec.EXACTLY));
+                                artworkHeight, View.MeasureSpec.EXACTLY));
                     }
                 };
-                artwork.setBackgroundColor(PANEL);
+                artwork.setBackground(MobileAuroraTheme.stroke(PANEL,
+                        dp(MobileAuroraTheme.ARTWORK_RADIUS_DP),
+                        0xff315d75, dp(1)));
+                artwork.setClipToOutline(true);
                 ImageView image = new ImageView(MobileBrowseActivity.this);
-                image.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                image.setScaleType(ImageView.ScaleType.FIT_CENTER);
                 artwork.addView(image, new FrameLayout.LayoutParams(-1, -1));
-                TextView source = label("", 11, Color.WHITE);
-                source.setPadding(dp(7), 0, dp(7), 0); source.setBackground(round(0xdd171a21, 4));
-                FrameLayout.LayoutParams sourceParams = new FrameLayout.LayoutParams(-2, dp(22), Gravity.TOP | Gravity.START);
+                TextView source = label("", 11, MobileAuroraTheme.TEXT);
+                source.setTypeface(Typeface.DEFAULT_BOLD);
+                source.setPadding(dp(8), 0, dp(8), 0);
+                source.setBackground(round(0xee071426, 7));
+                FrameLayout.LayoutParams sourceParams = new FrameLayout.LayoutParams(-2, dp(24), Gravity.TOP | Gravity.START);
                 sourceParams.setMargins(dp(10), dp(10), 0, 0); artwork.addView(source, sourceParams);
-                TextView duration = label("", 11, Color.WHITE);
-                duration.setPadding(dp(6), 0, dp(6), 0); duration.setBackground(round(0xee101216, 4));
+                TextView duration = label("", 11, MobileAuroraTheme.TEXT);
+                duration.setTypeface(Typeface.DEFAULT_BOLD);
+                duration.setPadding(dp(6), 0, dp(6), 0); duration.setBackground(round(0xee071426, 6));
                 FrameLayout.LayoutParams durationParams = new FrameLayout.LayoutParams(-2, dp(22), Gravity.BOTTOM | Gravity.END);
                 durationParams.setMargins(0, 0, dp(10), dp(10)); artwork.addView(duration, durationParams);
                 ProgressBar progress = new ProgressBar(MobileBrowseActivity.this, null,
@@ -688,39 +850,50 @@ public final class MobileBrowseActivity extends Activity {
                 layout.addView(artwork, size(-1, -2));
 
                 LinearLayout info = new LinearLayout(MobileBrowseActivity.this);
-                info.setPadding(dp(12), dp(11), dp(10), dp(14));
+                info.setPadding(dp(4), dp(10), dp(2), dp(12));
                 TextView avatar = label("", 17, Color.WHITE);
                 avatar.setTypeface(Typeface.DEFAULT_BOLD); avatar.setGravity(Gravity.CENTER);
-                avatar.setBackground(round(0xff33465a, 22));
-                info.addView(avatar, size(42, 42));
+                avatar.setBackground(round(0xff315679, 22));
+                info.addView(avatar, size(40, 40));
                 LinearLayout text = new LinearLayout(MobileBrowseActivity.this);
                 text.setOrientation(LinearLayout.VERTICAL);
-                text.setPadding(dp(11), 0, dp(4), 0);
-                TextView title = label("", 15, Color.WHITE);
+                text.setPadding(dp(10), 0, dp(4), 0);
+                TextView title = label("", MobileAuroraTheme.CARD_TITLE_SP,
+                        MobileAuroraTheme.TEXT);
                 title.setTypeface(Typeface.DEFAULT_BOLD);
                 title.setMaxLines(2); title.setEllipsize(TextUtils.TruncateAt.END);
                 text.addView(title, size(-1, -2));
-                TextView meta = label("", 12, SECONDARY);
-                meta.setMaxLines(2); meta.setEllipsize(TextUtils.TruncateAt.END);
+                TextView channel = label("", MobileAuroraTheme.CARD_META_SP, SECONDARY);
+                channel.setSingleLine(true); channel.setEllipsize(TextUtils.TruncateAt.END);
+                text.addView(channel, size(-1, -2));
+                TextView meta = label("", MobileAuroraTheme.CARD_META_SP, SECONDARY);
+                meta.setSingleLine(true); meta.setEllipsize(TextUtils.TruncateAt.END);
                 text.addView(meta, size(-1, -2));
                 info.addView(text, new LinearLayout.LayoutParams(0, -2, 1));
-                TextView more = label("⋮", 25, Color.WHITE);
+                TextView more = label("⋮", 24, MobileAuroraTheme.TEXT);
                 more.setGravity(Gravity.CENTER);
                 more.setContentDescription("Действия с видео");
                 info.addView(more, size(38, 42));
                 layout.addView(info, size(-1, -2));
-                layout.setTag(card = new Card(image, source, duration, progress, avatar, title, meta, more));
+                layout.setTag(card = new Card(image, source, duration, progress,
+                        avatar, title, channel, meta, more));
                 recycled = layout;
             } else card = (Card) recycled.getTag();
             VideoItem item = getItem(position);
+            card.image.setScaleType(page == Page.SHORTS
+                    ? ImageView.ScaleType.CENTER_CROP : ImageView.ScaleType.FIT_CENTER);
             card.source.setText(item.isLive ? "● В ЭФИРЕ · " + item.source : item.source);
             card.duration.setText(item.isLive ? "В ЭФИРЕ" : VideoPresentation.duration(item.durationMs));
             card.duration.setVisibility(item.isLive || item.durationMs > 0 ? View.VISIBLE : View.GONE);
-            card.title.setText(page == Page.CHANNELS ? VideoPresentation.channel(item) : item.title);
+            card.title.setText(page == Page.CHANNELS && activeChannel == null
+                    ? VideoPresentation.channel(item) : item.title);
             String channel = VideoPresentation.channel(item);
-            card.avatar.setText(channel.isEmpty() ? "?" : channel.substring(0, 1).toUpperCase());
+            card.avatar.setText(channel.isEmpty() ? "?"
+                    : channel.substring(0, 1).toUpperCase(Locale.getDefault()));
+            card.avatar.setBackground(round(item.source.contains("VK") ? 0xff315d98
+                    : item.source.contains("RUTUBE") ? 0xff4f3990 : 0xff246b76, 22));
+            card.channel.setText(item.source + " · " + channel);
             List<String> details = new ArrayList<>();
-            details.add(item.source + " · " + channel);
             if (!VideoPresentation.views(item).isEmpty()) details.add(VideoPresentation.views(item));
             if (!VideoPresentation.published(item).isEmpty()) details.add(VideoPresentation.published(item));
             card.meta.setText(TextUtils.join(" · ", details));
@@ -737,13 +910,13 @@ public final class MobileBrowseActivity extends Activity {
 
     private static final class Card {
         final ImageView image;
-        final TextView source, duration, avatar, title, meta, more;
+        final TextView source, duration, avatar, title, channel, meta, more;
         final ProgressBar progress;
         Card(ImageView image, TextView source, TextView duration, ProgressBar progress,
-             TextView avatar, TextView title, TextView meta, TextView more) {
+             TextView avatar, TextView title, TextView channel, TextView meta, TextView more) {
             this.image = image; this.source = source; this.duration = duration;
             this.progress = progress; this.avatar = avatar; this.title = title;
-            this.meta = meta; this.more = more;
+            this.channel = channel; this.meta = meta; this.more = more;
         }
     }
 }

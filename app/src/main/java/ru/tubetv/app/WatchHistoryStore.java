@@ -112,6 +112,38 @@ final class WatchHistoryStore {
         return prefs(context).contains(ENTRY_PREFIX + key);
     }
 
+    static synchronized int deleteSince(Context context, long cutoffMs) {
+        List<String> removed = deleteSince(prefs(context), cutoffMs);
+        for (String key : removed) WatchProgressStore.remove(context, key);
+        return removed.size();
+    }
+
+    static List<String> deleteSince(SharedPreferences preferences, long cutoffMs) {
+        List<String> retained = new ArrayList<>();
+        List<String> removed = new ArrayList<>();
+        SharedPreferences.Editor editor = preferences.edit();
+        List<String> keys = readOrder(preferences);
+        for (String field : preferences.getAll().keySet()) {
+            if (field.startsWith(ENTRY_PREFIX)) {
+                String key = field.substring(ENTRY_PREFIX.length());
+                if (!keys.contains(key)) keys.add(key);
+            }
+        }
+        for (String key : keys) {
+            String encoded = preferences.getString(ENTRY_PREFIX + key, null);
+            if (encoded == null) continue;
+            long watchedAt = 0;
+            try { watchedAt = new JSONObject(encoded).optLong("l", 0L); }
+            catch (Exception ignored) { }
+            if (cutoffMs <= 0 || watchedAt >= cutoffMs) {
+                removed.add(key);
+                editor.remove(ENTRY_PREFIX + key);
+            } else retained.add(key);
+        }
+        editor.putString(ORDER, join(retained)).apply();
+        return removed;
+    }
+
     private static List<String> readOrder(SharedPreferences preferences) {
         String encoded = preferences.getString(ORDER, "");
         List<String> result = new ArrayList<>();
