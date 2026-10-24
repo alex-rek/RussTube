@@ -12,6 +12,10 @@ final class FeedRepository {
                 : liveOnly(search(source, query));
     }
 
+    List<VideoItem> shorts(String source, String query) throws Exception {
+        return ShortsCatalog.filter(search(source, query));
+    }
+
     List<VideoItem> search(String source, String query) throws Exception {
         SearchClient client = new SearchClient();
         switch (source) {

@@ -52,14 +52,14 @@ import java.util.concurrent.TimeUnit;
 /** Touch-first RussTube interface; search, stores and playback are shared with TV. */
 public final class MobileBrowseActivity extends Activity {
     private static final int VOICE_SEARCH_REQUEST = 7143;
-    private enum Page { HOME, SEARCH, LIVE, SUBSCRIPTIONS, LIBRARY, HISTORY, FAVORITES, CHANNELS, POPULAR, SETTINGS }
+    private enum Page { HOME, SEARCH, SHORTS, LIVE, SUBSCRIPTIONS, LIBRARY, HISTORY, FAVORITES, CHANNELS, POPULAR, SETTINGS }
     private static final int BACKGROUND = MobileAuroraTheme.BACKGROUND;
     private static final int PANEL = MobileAuroraTheme.SURFACE;
     private static final int SECONDARY = MobileAuroraTheme.MUTED;
     private static final int ACCENT = MobileAuroraTheme.TEAL;
-    private static final Page[] TABS = {Page.HOME, Page.LIVE, Page.SUBSCRIPTIONS, Page.LIBRARY};
-    private static final String[] TAB_LABELS = {"Главная", "В эфире", "Подписки", "Вы"};
-    private static final String[] TAB_ICONS = {"home", "live", "subscriptions", "history"};
+    private static final Page[] TABS = {Page.HOME, Page.SHORTS, Page.LIVE, Page.SUBSCRIPTIONS, Page.LIBRARY};
+    private static final String[] TAB_LABELS = {"Главная", "Shorts", "В эфире", "Подписки", "Вы"};
+    private static final String[] TAB_ICONS = {"home", "shorts", "live", "subscriptions", "history"};
 
     private final ThreadPoolExecutor io = new ThreadPoolExecutor(4, 4, 0, TimeUnit.SECONDS,
             new ArrayBlockingQueue<>(128));
@@ -164,10 +164,9 @@ public final class MobileBrowseActivity extends Activity {
         LinearLayout compactRow = new LinearLayout(this);
         compactRow.setGravity(Gravity.CENTER_VERTICAL);
         compactRow.setPadding(dp(10), 0, dp(10), 0);
-        String[] sections = {"Главная", "В эфире", "Подписки", "Вы"};
-        for (int i = 0; i < sections.length; i++) {
+        for (int i = 0; i < TAB_LABELS.length; i++) {
             final Page target = TABS[i];
-            compactAction(compactRow, sections[i], () -> show(target));
+            compactAction(compactRow, TAB_LABELS[i], () -> show(target));
         }
         landscapeQuery = new EditText(this);
         landscapeQuery.setSingleLine(true);
@@ -306,7 +305,8 @@ public final class MobileBrowseActivity extends Activity {
             if (page == Page.CHANNELS && activeChannel == null) showChannel(item);
             else {
                 skipResumeReload = true;
-                VideoActions.play(this, item);
+                if (page == Page.SHORTS) ShortsQueue.set(items);
+                VideoActions.play(this, item, page == Page.SHORTS);
             }
         });
         list.setOnItemLongClickListener((parent, view, position, id) -> {
@@ -379,6 +379,10 @@ public final class MobileBrowseActivity extends Activity {
             case POPULAR:
                 heading.setText("Популярное");
                 searchAll("популярное", false);
+                break;
+            case SHORTS:
+                heading.setText("Shorts");
+                searchShorts();
                 break;
             case LIVE:
                 heading.setText("В эфире");
@@ -535,6 +539,15 @@ public final class MobileBrowseActivity extends Activity {
                 () -> live ? repository.live(source, value) : repository.search(source, value));
     }
 
+    private void searchShorts() {
+        for (String source : FeedRepository.SOURCES) {
+            enqueue(source, () -> repository.shorts(source, "shorts"));
+            enqueue(source, () -> repository.shorts(source, "шортс"));
+            if ("VK VIDEO".equals(source))
+                enqueue(source, () -> repository.shorts(source, "клипы"));
+        }
+    }
+
     private void enqueue(String source, Load operation) {
         if (!MobileBrowsePreferences.sourceEnabled(this, source)) return;
         int current = generation;
@@ -655,6 +668,7 @@ public final class MobileBrowseActivity extends Activity {
                 : page == Page.SEARCH && searchQuery.length() < 2 ? "Введите хотя бы два символа"
                 : page == Page.SUBSCRIPTIONS ? "Подпишитесь на канал через меню видео"
                 : page == Page.LIVE ? "Сейчас нет подтверждённых эфиров"
+                : page == Page.SHORTS ? "Короткие вертикальные видео пока не найдены"
                 : page == Page.FAVORITES ? "Сохранённые видео появятся здесь"
                 : page == Page.LIBRARY || page == Page.HISTORY ? "История просмотра пока пуста"
                 : page == Page.CHANNELS && activeChannel == null ? "Подписок пока нет"
@@ -680,7 +694,9 @@ public final class MobileBrowseActivity extends Activity {
             name.setGravity(Gravity.CENTER);
             tab.addView(name, size(-1, 22));
             navigation.addView(tab, new LinearLayout.LayoutParams(0, -1, 1));
-            tab.setOnClickListener(v -> show(target));
+            tab.setOnClickListener(v -> {
+                if (page != target || activeChannel != null) show(target);
+            });
         }
     }
 
@@ -799,8 +815,12 @@ public final class MobileBrowseActivity extends Activity {
                 FrameLayout artwork = new FrameLayout(MobileBrowseActivity.this) {
                     @Override protected void onMeasure(int widthSpec, int heightSpec) {
                         int width = View.MeasureSpec.getSize(widthSpec);
+                        int artworkHeight = Math.round(width * (page == Page.SHORTS
+                                ? 16f / 9f : 9f / 16f));
+                        if (page == Page.SHORTS) artworkHeight = Math.min(artworkHeight,
+                                Math.round(getResources().getDisplayMetrics().heightPixels * .58f));
                         super.onMeasure(widthSpec, View.MeasureSpec.makeMeasureSpec(
-                                Math.round(width * 9f / 16f), View.MeasureSpec.EXACTLY));
+                                artworkHeight, View.MeasureSpec.EXACTLY));
                     }
                 };
                 artwork.setBackground(MobileAuroraTheme.stroke(PANEL,
@@ -860,6 +880,8 @@ public final class MobileBrowseActivity extends Activity {
                 recycled = layout;
             } else card = (Card) recycled.getTag();
             VideoItem item = getItem(position);
+            card.image.setScaleType(page == Page.SHORTS
+                    ? ImageView.ScaleType.CENTER_CROP : ImageView.ScaleType.FIT_CENTER);
             card.source.setText(item.isLive ? "● В ЭФИРЕ · " + item.source : item.source);
             card.duration.setText(item.isLive ? "В ЭФИРЕ" : VideoPresentation.duration(item.durationMs));
             card.duration.setVisibility(item.isLive || item.durationMs > 0 ? View.VISIBLE : View.GONE);

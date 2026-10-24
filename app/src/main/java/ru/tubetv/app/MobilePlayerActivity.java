@@ -19,6 +19,7 @@ import android.os.Looper;
 import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.Surface;
 import android.view.View;
 import android.view.WindowManager;
@@ -76,6 +77,8 @@ public final class MobilePlayerActivity extends Activity {
     private TextView time;
     private TextView favoriteButton;
     private TextView subscribeButton;
+    private TextView shortsFavoriteButton;
+    private TextView shortsSubscribeButton;
     private SeekBar timeline;
     private VideoItem video;
     private String streamUrl;
@@ -88,6 +91,7 @@ public final class MobilePlayerActivity extends Activity {
     private boolean backgroundStarted;
     private boolean autoResume = true;
     private boolean portraitFullscreen;
+    private boolean shortsMode;
     private int aspectMode;
     private int videoWidth;
     private int videoHeight;
@@ -106,6 +110,8 @@ public final class MobilePlayerActivity extends Activity {
         getWindow().setNavigationBarColor(BACKGROUND);
         setVolumeControlStream(AudioManager.STREAM_MUSIC);
         Intent intent = getIntent();
+        shortsMode = intent.getBooleanExtra("shorts_mode", false);
+        if (state == null && shortsMode) portraitFullscreen = true;
         knownDuration = Math.max(0, intent.getLongExtra("duration_ms", 0));
         resumePosition = Math.max(0, intent.getLongExtra("resume_position", 0));
         video = new VideoItem(intent.getStringExtra("source"), intent.getStringExtra("title"),
@@ -190,6 +196,24 @@ public final class MobilePlayerActivity extends Activity {
         View tapLayer = new View(this);
         tapLayer.setContentDescription("Показать или скрыть управление видео");
         tapLayer.setOnClickListener(v -> toggleControlsVisibility());
+        if (shortsMode) {
+            final float[] down = new float[2];
+            tapLayer.setOnTouchListener((v, event) -> {
+                if (event.getAction() == MotionEvent.ACTION_DOWN) {
+                    down[0] = event.getX(); down[1] = event.getY();
+                    return true;
+                }
+                if (event.getAction() == MotionEvent.ACTION_UP) {
+                    float dx = event.getX() - down[0];
+                    float dy = event.getY() - down[1];
+                    if (Math.abs(dy) > dp(80) && Math.abs(dy) > Math.abs(dx) * 1.2f)
+                        moveShort(dy < 0 ? 1 : -1);
+                    else v.performClick();
+                    return true;
+                }
+                return true;
+            });
+        }
         videoFrame.addView(tapLayer, new FrameLayout.LayoutParams(-1, -1));
         loading = new ProgressBar(this);
         loading.setIndeterminateTintList(ColorStateList.valueOf(ACCENT));
@@ -198,6 +222,38 @@ public final class MobilePlayerActivity extends Activity {
         errorText.setGravity(Gravity.CENTER);
         errorText.setPadding(dp(24), dp(12), dp(24), dp(12));
         videoFrame.addView(errorText, new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER));
+        if (shortsMode) {
+            LinearLayout shortInfo = new LinearLayout(this);
+            shortInfo.setOrientation(LinearLayout.VERTICAL);
+            shortInfo.setPadding(dp(18), dp(24), dp(18), dp(12));
+            shortInfo.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                    new int[]{Color.TRANSPARENT, 0xd9000000}));
+            TextView source = label(video.source + " · " + VideoPresentation.channel(video), 13, Color.WHITE);
+            source.setSingleLine(true); source.setEllipsize(TextUtils.TruncateAt.END);
+            shortInfo.addView(source, size(-1, -2));
+            TextView title = label(video.title, 18, Color.WHITE);
+            title.setTypeface(Typeface.DEFAULT_BOLD);
+            title.setMaxLines(2); title.setEllipsize(TextUtils.TruncateAt.END);
+            shortInfo.addView(title, size(-1, -2));
+            LinearLayout shortActions = new LinearLayout(this);
+            shortsFavoriteButton = label("", 14, Color.WHITE);
+            shortsFavoriteButton.setPadding(0, dp(8), dp(22), 0);
+            shortsFavoriteButton.setOnClickListener(v -> toggleFavorite());
+            shortActions.addView(shortsFavoriteButton);
+            shortsSubscribeButton = label("", 14, Color.WHITE);
+            shortsSubscribeButton.setPadding(0, dp(8), 0, 0);
+            shortsSubscribeButton.setVisibility(video.channelId.isEmpty() ? View.GONE : View.VISIBLE);
+            shortsSubscribeButton.setOnClickListener(v -> toggleSubscription());
+            shortActions.addView(shortsSubscribeButton);
+            shortInfo.addView(shortActions);
+            TextView hint = label("↑ Следующее  ·  ↓ Предыдущее", 12, 0xffc5d7e8);
+            hint.setPadding(0, dp(8), 0, 0);
+            shortInfo.addView(hint);
+            FrameLayout.LayoutParams infoParams = new FrameLayout.LayoutParams(
+                    -1, -2, Gravity.BOTTOM);
+            infoParams.bottomMargin = dp(70);
+            videoFrame.addView(shortInfo, infoParams);
+        }
         controls = new LinearLayout(this);
         controls.setOrientation(LinearLayout.VERTICAL);
         controls.setPadding(dp(9), dp(12), dp(9), dp(3));
@@ -579,6 +635,24 @@ public final class MobilePlayerActivity extends Activity {
         favoriteButton.setText(FavoriteStore.contains(this, video) ? "♥  Сохранено" : "♡  Избранное");
         if (subscribeButton != null) subscribeButton.setText(
                 SubscriptionStore.contains(this, video) ? "Вы подписаны" : "Подписаться");
+        if (shortsFavoriteButton != null) shortsFavoriteButton.setText(
+                FavoriteStore.contains(this, video) ? "♥  Сохранено" : "♡  Избранное");
+        if (shortsSubscribeButton != null) shortsSubscribeButton.setText(
+                SubscriptionStore.contains(this, video) ? "Вы подписаны" : "+ Подписаться");
+    }
+
+    private void moveShort(int direction) {
+        VideoItem next = ShortsQueue.adjacent(video, direction);
+        if (next == null) {
+            Toast.makeText(this, direction > 0 ? "Это последнее видео" : "Это первое видео",
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
+        saveProgress();
+        VideoActions.play(this, next, true);
+        overridePendingTransition(0, 0);
+        finish();
+        overridePendingTransition(0, 0);
     }
 
     private void saveProgress() {
@@ -704,6 +778,7 @@ public final class MobilePlayerActivity extends Activity {
     }
 
     @Override public void onBackPressed() {
+        if (shortsMode) { finish(); return; }
         if (portraitFullscreen && getResources().getConfiguration().orientation
                 == Configuration.ORIENTATION_PORTRAIT) {
             portraitFullscreen = false;
