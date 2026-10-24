@@ -715,7 +715,7 @@ public final class MainActivity extends Activity {
                 ? trafficMode && targetHeight == 0
                 : history.audioOnly;
         if (WatchHistoryStore.contains(this, item)
-                || watched.positionMs >= WatchProgressStore.MIN_POSITION_MS) {
+                || WatchProgressStore.isViewed(watched.positionMs, duration)) {
             WatchHistoryStore.record(this, item.withDuration(duration),
                     playerTrafficMode, targetHeight, audioOnly);
         }
@@ -1122,7 +1122,7 @@ public final class MainActivity extends Activity {
             holder.duration.setVisibility(durationLabel.isEmpty() ? View.GONE : View.VISIBLE);
             WatchProgressStore.Progress watched = WatchProgressStore.get(context, item);
             long duration = watched.durationMs > 0 ? watched.durationMs : item.durationMs;
-            if (watched.positionMs >= WatchProgressStore.MIN_POSITION_MS && duration > 0) {
+            if (WatchProgressStore.isViewed(watched.positionMs, duration) && duration > 0) {
                 holder.progress.setProgress((int) Math.min(1000L, watched.positionMs * 1000L / duration));
                 holder.progress.setVisibility(View.VISIBLE);
             } else {

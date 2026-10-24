@@ -42,10 +42,13 @@ import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -70,6 +73,9 @@ public final class MobileBrowseActivity extends Activity {
     private final List<VideoItem> baseItems = new ArrayList<>();
     private final List<VideoItem> candidates = new ArrayList<>();
     private final List<VideoItem> history = new ArrayList<>();
+    private final List<WatchHistoryStore.Entry> historyEntries = new ArrayList<>();
+    private final Set<String> watchedKeys = new HashSet<>();
+    private boolean shortsHistory;
     private final List<String> failed = new ArrayList<>();
     private final FeedRepository repository = new FeedRepository();
     private final Handler searchHandler = new Handler(Looper.getMainLooper());
@@ -395,13 +401,19 @@ public final class MobileBrowseActivity extends Activity {
 
     private void show(Page target) {
         cancelShortSelection();
+        if (target != Page.SHORTS) shortsPlayback.stopPreloading();
         shortsPlayback.clear();
         cancelQueuedSearch();
         cancel();
         page = target;
         activeChannel = null;
         items.clear(); baseItems.clear(); candidates.clear(); history.clear();
-        for (WatchHistoryStore.Entry entry : WatchHistoryStore.load(this)) history.add(entry.item);
+        historyEntries.clear(); watchedKeys.clear();
+        historyEntries.addAll(WatchHistoryStore.load(this));
+        for (WatchHistoryStore.Entry entry : historyEntries) {
+            history.add(entry.item);
+            watchedKeys.add(entry.item.stableKey());
+        }
         actions.removeAllViews();
         syncingSearchText = true;
         landscapeQuery.setText(query.getText());
@@ -459,7 +471,11 @@ public final class MobileBrowseActivity extends Activity {
                 break;
             case HISTORY:
                 heading.setText("История");
-                baseItems.addAll(history);
+                action(shortsHistory ? "Видео" : "✓ Видео", () -> showHistory(false));
+                action(shortsHistory ? "✓ Просмотренные Shorts" : "Просмотренные Shorts",
+                        () -> showHistory(true));
+                for (WatchHistoryStore.Entry entry : historyEntries)
+                    if (entry.shorts == shortsHistory) baseItems.add(entry.item);
                 break;
             case FAVORITES:
                 heading.setText("Избранное");
@@ -580,6 +596,11 @@ public final class MobileBrowseActivity extends Activity {
         else show(page);
     }
 
+    private void showHistory(boolean shorts) {
+        shortsHistory = shorts;
+        show(Page.HISTORY);
+    }
+
     private void cancelShortSelection() {
         if (queuedShortSelection != null) searchHandler.removeCallbacks(queuedShortSelection);
         queuedShortSelection = null;
@@ -615,6 +636,7 @@ public final class MobileBrowseActivity extends Activity {
         if (nearest == null || position < 0 || position >= items.size()) return;
         Card card = (Card) nearest.getTag();
         shortsPlayback.select(items.get(position), card.artwork, card.image, card.shortCue);
+        shortsPlayback.preload(items, position);
         if (distance > dp(12) && shortSnapAttempts++ < 3) {
             int offset = (nearest.getTop() + nearest.getBottom()) / 2 - center;
             list.smoothScrollBy(offset, 220);
@@ -666,6 +688,11 @@ public final class MobileBrowseActivity extends Activity {
                     Map<String, VideoItem> unique = new LinkedHashMap<>();
                     for (VideoItem item : candidates) unique.put(item.stableKey(), item);
                     baseItems.addAll(unique.values());
+                }
+                if (page == Page.HOME || page == Page.SHORTS) {
+                    Iterator<VideoItem> iterator = baseItems.iterator();
+                    while (iterator.hasNext())
+                        if (watchedKeys.contains(iterator.next().stableKey())) iterator.remove();
                 }
                 if (page == Page.POPULAR) Collections.sort(baseItems,
                         (a, b) -> Long.compare(b.views, a.views));
@@ -776,6 +803,7 @@ public final class MobileBrowseActivity extends Activity {
                 : page == Page.LIVE ? "Сейчас нет подтверждённых эфиров"
                 : page == Page.SHORTS ? "Короткие вертикальные видео пока не найдены"
                 : page == Page.FAVORITES ? "Сохранённые видео появятся здесь"
+                : page == Page.HISTORY && shortsHistory ? "Просмотренных Shorts пока нет"
                 : page == Page.LIBRARY || page == Page.HISTORY ? "История просмотра пока пуста"
                 : page == Page.CHANNELS && activeChannel == null ? "Подписок пока нет"
                 : "Видео пока не найдены");
@@ -926,9 +954,14 @@ public final class MobileBrowseActivity extends Activity {
                     @Override protected void onMeasure(int widthSpec, int heightSpec) {
                         int width = View.MeasureSpec.getSize(widthSpec);
                         int artworkHeight = Math.round(width * (page == Page.SHORTS
-                                ? 16f / 9f : 9f / 16f));
-                        if (page == Page.SHORTS) artworkHeight = Math.min(artworkHeight,
-                                Math.round(getResources().getDisplayMetrics().heightPixels * .58f));
+                                ? MobileBrowsePreferences.shortsFrameRatio(MobileBrowseActivity.this) == 1
+                                        ? 5f / 4f : 16f / 9f : 9f / 16f));
+                        if (page == Page.SHORTS) {
+                            int available = Math.max(dp(180), list.getHeight() - dp(30));
+                            if (MobileBrowsePreferences.shortsFrameRatio(MobileBrowseActivity.this) == 2)
+                                artworkHeight = available;
+                            else artworkHeight = Math.min(artworkHeight, available);
+                        }
                         super.onMeasure(widthSpec, View.MeasureSpec.makeMeasureSpec(
                                 artworkHeight, View.MeasureSpec.EXACTLY));
                     }

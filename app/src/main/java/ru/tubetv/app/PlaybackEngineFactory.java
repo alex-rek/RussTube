@@ -14,6 +14,9 @@ import androidx.media3.datasource.DataSource;
 import androidx.media3.datasource.DataSpec;
 import androidx.media3.datasource.DefaultHttpDataSource;
 import androidx.media3.datasource.TransferListener;
+import androidx.media3.datasource.cache.CacheDataSource;
+import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor;
+import androidx.media3.datasource.cache.SimpleCache;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.mediacodec.MediaCodecInfo;
@@ -21,10 +24,13 @@ import androidx.media3.exoplayer.mediacodec.MediaCodecSelector;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 
 import java.io.IOException;
+import java.io.ByteArrayOutputStream;
 import java.net.CookieHandler;
 import java.net.CookieManager;
 import java.net.CookiePolicy;
 import java.net.Proxy;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -32,6 +38,65 @@ import java.util.Map;
 
 @OptIn(markerClass = UnstableApi.class)
 final class PlaybackEngineFactory {
+    private static SimpleCache shortsCache;
+
+    private static synchronized SimpleCache shortsCache(Context context) {
+        if (shortsCache == null) shortsCache = new SimpleCache(
+                new java.io.File(context.getCacheDir(), "shorts_media"),
+                new LeastRecentlyUsedCacheEvictor(24L * 1024 * 1024));
+        return shortsCache;
+    }
+
+    static void preloadShort(Context context, VideoItem item, PlaybackInfo stream) {
+        if (stream == null || stream.streamUrl == null || stream.streamUrl.isEmpty()) return;
+        if (MimeTypes.APPLICATION_MPD.equals(stream.streamMimeType)
+                || stream.streamUrl.contains(".mpd")) return;
+        DataSource.Factory factory = cachedHttp(context, item.source, item.pageUrl);
+        try {
+            if (MimeTypes.APPLICATION_M3U8.equals(stream.streamMimeType)
+                    || stream.streamUrl.contains(".m3u8")) {
+                String playlistUrl = stream.streamUrl;
+                for (int depth = 0; depth < 3 && !Thread.currentThread().isInterrupted(); depth++) {
+                    String playlist = new String(readPrefix(factory, playlistUrl, 128 * 1024),
+                            StandardCharsets.UTF_8);
+                    String next = null;
+                    for (String line : playlist.split("\\r?\\n")) {
+                        String value = line.trim();
+                        if (!value.isEmpty() && !value.startsWith("#")) { next = value; break; }
+                    }
+                    if (next == null) return;
+                    String resolved = URI.create(playlistUrl).resolve(next).toString();
+                    if (playlist.contains("#EXT-X-STREAM-INF")) playlistUrl = resolved;
+                    else { readPrefix(factory, resolved, 384 * 1024); return; }
+                }
+            } else readPrefix(factory, stream.streamUrl, 384 * 1024);
+        } catch (Exception ignored) {
+            // A failed warmup must never prevent normal playback.
+        }
+    }
+
+    private static byte[] readPrefix(DataSource.Factory factory, String url, int limit)
+            throws IOException {
+        DataSource source = factory.createDataSource();
+        try {
+            source.open(new DataSpec.Builder().setUri(url).setLength(limit).build());
+            byte[] bytes = new byte[16 * 1024];
+            ByteArrayOutputStream output = new ByteArrayOutputStream(Math.min(limit, 16 * 1024));
+            int read;
+            while (!Thread.currentThread().isInterrupted() && output.size() < limit
+                    && (read = source.read(bytes, 0, Math.min(bytes.length, limit - output.size()))) != -1)
+                output.write(bytes, 0, read);
+            return output.toByteArray();
+        } finally {
+            source.close();
+        }
+    }
+
+    private static DataSource.Factory cachedHttp(Context context, String source, String pageUrl) {
+        return new CacheDataSource.Factory().setCache(shortsCache(context))
+                .setUpstreamDataSourceFactory(http(context, source, pageUrl))
+                .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR);
+    }
     static ExoPlayer create(Context context, String source, String pageUrl,
                             boolean trafficMode, int targetHeight, boolean audioOnly) {
         DeviceCapabilities capabilities = DeviceCapabilities.get();
@@ -54,7 +119,9 @@ final class PlaybackEngineFactory {
         ExoPlayer player = new ExoPlayer.Builder(context)
                 .setRenderersFactory(new DefaultRenderersFactory(context)
                         .setMediaCodecSelector(selector).setEnableDecoderFallback(true))
-                .setMediaSourceFactory(new DefaultMediaSourceFactory(http(context, source, pageUrl)))
+                .setMediaSourceFactory(new DefaultMediaSourceFactory(
+                        BuildConfig.MOBILE_VARIANT ? cachedHttp(context, source, pageUrl)
+                                : http(context, source, pageUrl)))
                 .build();
         TrackSelectionParameters.Builder tracks = player.getTrackSelectionParameters().buildUpon();
         String[] video = capabilities.preferredVideoMimes(trafficMode);

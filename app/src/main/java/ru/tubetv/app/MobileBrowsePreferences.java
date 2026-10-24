@@ -65,6 +65,31 @@ final class MobileBrowsePreferences {
         preferences(context).edit().putBoolean("shorts_loop", enabled).apply();
     }
 
+    static int shortsPreloadCount(Context context) {
+        return Math.max(0, Math.min(5, preferences(context).getInt("shorts_preload_count", 2)));
+    }
+
+    static void setShortsPreloadCount(Context context, int count) {
+        preferences(context).edit().putInt("shorts_preload_count", Math.max(0, Math.min(5, count))).apply();
+    }
+
+    /** 0: 9:16, 1: 4:5, 2: available feed height. */
+    static int shortsFrameRatio(Context context) {
+        return Math.max(0, Math.min(2, preferences(context).getInt("shorts_frame_ratio", 0)));
+    }
+
+    static void setShortsFrameRatio(Context context, int ratio) {
+        preferences(context).edit().putInt("shorts_frame_ratio", Math.max(0, Math.min(2, ratio))).apply();
+    }
+
+    static boolean shortsFill(Context context) {
+        return preferences(context).getBoolean("shorts_fill", false);
+    }
+
+    static void setShortsFill(Context context, boolean fill) {
+        preferences(context).edit().putBoolean("shorts_fill", fill).apply();
+    }
+
     private static SharedPreferences preferences(Context context) {
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
