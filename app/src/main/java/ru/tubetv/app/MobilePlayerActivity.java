@@ -61,6 +61,7 @@ public final class MobilePlayerActivity extends Activity {
         }
     };
     private ExoPlayer player;
+    private HeadsetMediaControls headsetControls;
     private LinearLayout root;
     private LinearLayout toolbar;
     private ScrollView detailsScroll;
@@ -122,6 +123,11 @@ public final class MobilePlayerActivity extends Activity {
         }
         recorded = WatchHistoryStore.contains(this, video);
         setContentView(createContent());
+        headsetControls = new HeadsetMediaControls(this, () -> {
+            if (player != null) player.play();
+        }, () -> {
+            if (player != null) player.pause();
+        }, this::togglePlayback);
         applyOrientation();
         requestNotificationPermission();
         resolveStream();
@@ -445,6 +451,7 @@ public final class MobilePlayerActivity extends Activity {
                 }
                 @Override public void onIsPlayingChanged(boolean playing) {
                     updateScreenAwake(); updateProgress(); scheduleHide();
+                    updateHeadsetControls();
                 }
                 @Override public void onPlayWhenReadyChanged(boolean ready, int reason) {
                     updateScreenAwake();
@@ -516,6 +523,12 @@ public final class MobilePlayerActivity extends Activity {
         if (player == null) { openOfficial(); return; }
         if (player.isPlaying()) player.pause(); else player.play();
         updateProgress(); updateScreenAwake();
+        updateHeadsetControls();
+    }
+
+    private void updateHeadsetControls() {
+        if (headsetControls != null) headsetControls.update(player != null && player.isPlaying(),
+                player == null ? 0 : player.getCurrentPosition());
     }
 
     private void seek(long delta) {
@@ -625,6 +638,7 @@ public final class MobilePlayerActivity extends Activity {
 
     @Override protected void onStart() {
         super.onStart(); started = true; updateScreenAwake();
+        if (headsetControls != null) headsetControls.setActive(true);
         if (streamUrl != null && player == null) startPlayer();
         else if (player != null) ui.post(ticker);
     }
@@ -660,6 +674,7 @@ public final class MobilePlayerActivity extends Activity {
         saveProgress(); started = false; updateScreenAwake();
         ui.removeCallbacks(ticker); ui.removeCallbacks(hideControls);
         if (player != null) player.pause();
+        if (headsetControls != null) headsetControls.setActive(false);
         super.onStop();
     }
 
@@ -704,6 +719,7 @@ public final class MobilePlayerActivity extends Activity {
 
     @Override protected void onDestroy() {
         resolver.shutdownNow(); ui.removeCallbacksAndMessages(null);
+        if (headsetControls != null) headsetControls.release();
         if (player != null) { player.clearVideoSurface(); player.release(); player = null; }
         if (surface != null) surface.release();
         updateScreenAwake();

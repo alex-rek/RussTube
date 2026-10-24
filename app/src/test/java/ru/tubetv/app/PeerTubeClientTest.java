@@ -85,6 +85,19 @@ public final class PeerTubeClientTest {
     }
 
     @Test
+    public void liveVideoOnlyHlsIsPlayable() throws Exception {
+        PlaybackInfo playback = PeerTubeClient.resolve(
+                "https://live.example/api/v1/videos/live-id", false, true,
+                (address, limit, deadline, headers) -> address.contains("/api/v1/videos/")
+                        ? "{\"isLive\":true,\"duration\":0,\"streamingPlaylists\":["
+                        + "{\"playlistUrl\":\"https://live.example/master.m3u8\"}]}"
+                        : "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=760100,"
+                        + "RESOLUTION=640x360,CODECS=\"avc1.640016\"\n0.m3u8\n");
+        assertEquals("https://live.example/master.m3u8", playback.streamUrl);
+        assertEquals("application/x-mpegURL", playback.streamMimeType);
+    }
+
+    @Test
     public void audioModeStillPrefersSeparateTrackAfterExpandedSearch() throws Exception {
         PlaybackInfo audio = PeerTubeClient.resolve("https://video.example/api/v1/videos/test", true, true,
                 (address, limit, deadline, headers) -> "{\"duration\":5400,\"files\":["

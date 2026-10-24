@@ -39,7 +39,7 @@ final class NetworkProxy {
                                 : fallback.select(uri);
                     }
                     return Collections.singletonList(new Proxy(config.type,
-                            InetSocketAddress.createUnresolved(config.host, config.port)));
+                            new InetSocketAddress(config.host, config.port)));
                 }
 
                 @Override public void connectFailed(URI uri, SocketAddress address, IOException error) {
@@ -49,7 +49,10 @@ final class NetworkProxy {
             Authenticator.setDefault(new Authenticator() {
                 @Override protected PasswordAuthentication getPasswordAuthentication() {
                     Config config = load(app);
-                    if (getRequestorType() != RequestorType.PROXY || config.user.isEmpty()
+                    boolean socksRequest = config.type == Proxy.Type.SOCKS
+                            && "SOCKS5".equalsIgnoreCase(getRequestingProtocol());
+                    if ((!socksRequest && getRequestorType() != RequestorType.PROXY)
+                            || config.user.isEmpty()
                             || !config.host.equalsIgnoreCase(getRequestingHost())
                             || config.port != getRequestingPort()) return null;
                     return new PasswordAuthentication(config.user, config.password.toCharArray());
@@ -66,7 +69,7 @@ final class NetworkProxy {
         if (config == null || config.type == Proxy.Type.DIRECT)
             return (HttpURLConnection) url.openConnection();
         Proxy proxy = new Proxy(config.type,
-                InetSocketAddress.createUnresolved(config.host, config.port));
+                new InetSocketAddress(config.host, config.port));
         return (HttpURLConnection) url.openConnection(proxy);
     }
 

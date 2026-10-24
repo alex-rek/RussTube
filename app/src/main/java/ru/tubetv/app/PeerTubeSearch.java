@@ -215,7 +215,12 @@ final class PeerTubeSearch {
         }
 
         static Candidate from(JSONObject item, boolean peerSeek) {
-            if (item == null || item.optBoolean("isLive") || item.optBoolean("nsfw")) return null;
+            return from(item, peerSeek, false);
+        }
+
+        static Candidate from(JSONObject item, boolean peerSeek, boolean allowLive) {
+            if (item == null || (!allowLive && item.optBoolean("isLive"))
+                    || item.optBoolean("nsfw")) return null;
             try {
                 URI page = URI.create(item.optString(peerSeek ? "videoUrl" : "url"));
                 if (!"https".equalsIgnoreCase(page.getScheme()) || page.getHost() == null

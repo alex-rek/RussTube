@@ -77,6 +77,7 @@ public final class AudioPlaybackService extends Service {
         }
     };
     private ExoPlayer player;
+    private HeadsetMediaControls headsetControls;
     private String source;
     private String pageUrl;
     private long knownDuration;
@@ -89,6 +90,13 @@ public final class AudioPlaybackService extends Service {
     @Override public void onCreate() {
         super.onCreate();
         active = this;
+        headsetControls = new HeadsetMediaControls(this,
+                () -> { if (player != null) player.play(); },
+                () -> { if (player != null) player.pause(); },
+                () -> { if (player != null) {
+                    if (player.isPlaying()) player.pause(); else player.play();
+                } });
+        headsetControls.setActive(true);
         createNotificationChannel();
     }
 
@@ -158,7 +166,9 @@ public final class AudioPlaybackService extends Service {
             @Override public void onPlaybackStateChanged(int state) {
                 if (state == Player.STATE_ENDED) stopSelf();
             }
-            @Override public void onIsPlayingChanged(boolean isPlaying) { updateNotification(); }
+            @Override public void onIsPlayingChanged(boolean isPlaying) {
+                updateNotification(); updateHeadsetControls();
+            }
         });
         player.setMediaItem(PlaybackEngineFactory.mediaItem(streamUrl, streamMimeType));
         if (position > 0) player.seekTo(position);
@@ -212,6 +222,11 @@ public final class AudioPlaybackService extends Service {
         if (manager != null) manager.notify(NOTIFICATION_ID, buildNotification());
     }
 
+    private void updateHeadsetControls() {
+        if (headsetControls != null) headsetControls.update(player != null && player.isPlaying(),
+                player == null ? 0 : player.getCurrentPosition());
+    }
+
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
         NotificationChannel channel = new NotificationChannel(CHANNEL_ID,
@@ -242,10 +257,12 @@ public final class AudioPlaybackService extends Service {
         saveProgress();
         player.release();
         player = null;
+        updateHeadsetControls();
     }
 
     @Override public void onDestroy() {
         releasePlayer();
+        if (headsetControls != null) headsetControls.release();
         if (active == this) active = null;
         super.onDestroy();
     }

@@ -382,6 +382,7 @@ public final class MobileBrowseActivity extends Activity {
                 break;
             case LIVE:
                 heading.setText("В эфире");
+                enqueue(PeerTubeClient.SOURCE, () -> repository.live(PeerTubeClient.SOURCE, ""));
                 searchAll("прямой эфир", true);
                 searchAll("24/7", true);
                 break;
@@ -528,7 +529,8 @@ public final class MobileBrowseActivity extends Activity {
     }
 
     private void searchAll(String value, boolean live) {
-        String[] sources = live ? new String[]{"RUTUBE", "VK VIDEO"} : FeedRepository.SOURCES;
+        String[] sources = live ? new String[]{"RUTUBE", "VK VIDEO", PeerTubeClient.SOURCE}
+                : FeedRepository.SOURCES;
         for (String source : sources) enqueue(source,
                 () -> live ? repository.live(source, value) : repository.search(source, value));
     }

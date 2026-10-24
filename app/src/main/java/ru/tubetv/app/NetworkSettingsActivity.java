@@ -23,6 +23,7 @@ import java.net.Proxy;
 public final class NetworkSettingsActivity extends Activity {
     private RadioGroup types;
     private EditText host, port, user, password;
+    private TextView connectionStatus;
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
@@ -80,6 +81,9 @@ public final class NetworkSettingsActivity extends Activity {
             verifyParams.topMargin = dp(8);
             root.addView(verify, verifyParams);
             verify.setOnClickListener(v -> verify(verify));
+            connectionStatus = text("", 14, 0xffaeb9cc);
+            connectionStatus.setPadding(0, dp(10), 0, 0);
+            root.addView(connectionStatus);
         }
         setContentView(scroll);
     }
@@ -133,6 +137,7 @@ public final class NetworkSettingsActivity extends Activity {
 
     private void verify(Button button) {
         if (!save(false)) return;
+        connectionStatus.setText("Проверяем соединение…");
         button.setEnabled(false);
         button.setText("Проверяем соединение…");
         new Thread(() -> {
@@ -146,7 +151,9 @@ public final class NetworkSettingsActivity extends Activity {
                 result = code >= 200 && code < 400 ? "Соединение работает"
                         : "Прокси ответил кодом " + code;
             } catch (Exception error) {
-                result = "Соединение не удалось: " + error.getClass().getSimpleName();
+                String detail = error.getMessage();
+                result = "Соединение не удалось: " + error.getClass().getSimpleName()
+                        + (detail == null || detail.isEmpty() ? "" : " — " + detail);
             } finally {
                 if (connection != null) connection.disconnect();
             }
@@ -155,6 +162,7 @@ public final class NetworkSettingsActivity extends Activity {
                 if (isFinishing() || isDestroyed()) return;
                 button.setEnabled(true);
                 button.setText("Сохранить и проверить соединение");
+                connectionStatus.setText(message);
                 Toast.makeText(this, message, Toast.LENGTH_LONG).show();
             });
         }, "proxy-check").start();

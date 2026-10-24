@@ -348,10 +348,11 @@ public final class BrowseActivity extends Activity {
                 showChannels(); return;
             case LIVE:
                 heading.setText("В эфире");
-                description.setText("Эфиры RUTUBE и VK Видео · только подтверждённые активные трансляции");
+                description.setText("Эфиры RUTUBE, VK Видео и PeerTube · активные трансляции");
                 addAction("Новости", () -> searchLive("новости"));
                 addAction("Спорт", () -> searchLive("спорт"));
                 addAction("Музыка", () -> searchLive("музыка"));
+                enqueue(PeerTubeClient.SOURCE, () -> repository.live(PeerTubeClient.SOURCE, ""));
                 searchAll("прямой эфир", true);
                 searchAll("24/7", true);
                 break;
@@ -465,7 +466,8 @@ public final class BrowseActivity extends Activity {
     }
 
     private void searchAll(String value, boolean live) {
-        String[] sources = live ? new String[]{"RUTUBE", "VK VIDEO"} : FeedRepository.SOURCES;
+        String[] sources = live ? new String[]{"RUTUBE", "VK VIDEO", PeerTubeClient.SOURCE}
+                : FeedRepository.SOURCES;
         for (String source : sources) enqueue(source,
                 () -> live ? repository.live(source, value) : repository.search(source, value));
     }
