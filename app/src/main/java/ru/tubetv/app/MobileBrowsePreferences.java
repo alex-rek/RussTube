@@ -41,6 +41,30 @@ final class MobileBrowsePreferences {
         preferences(context).edit().putBoolean("recommend_subscriptions", enabled).apply();
     }
 
+    static boolean shortsAutoplay(Context context) {
+        return preferences(context).getBoolean("shorts_autoplay", true);
+    }
+
+    static void setShortsAutoplay(Context context, boolean enabled) {
+        preferences(context).edit().putBoolean("shorts_autoplay", enabled).apply();
+    }
+
+    static boolean shortsShowInfo(Context context) {
+        return preferences(context).getBoolean("shorts_show_info", true);
+    }
+
+    static void setShortsShowInfo(Context context, boolean enabled) {
+        preferences(context).edit().putBoolean("shorts_show_info", enabled).apply();
+    }
+
+    static boolean shortsLoop(Context context) {
+        return preferences(context).getBoolean("shorts_loop", true);
+    }
+
+    static void setShortsLoop(Context context, boolean enabled) {
+        preferences(context).edit().putBoolean("shorts_loop", enabled).apply();
+    }
+
     private static SharedPreferences preferences(Context context) {
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }

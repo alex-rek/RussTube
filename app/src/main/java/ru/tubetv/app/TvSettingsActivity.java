@@ -18,6 +18,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.net.HttpURLConnection;
 import java.net.Proxy;
 
 /** Category dashboard following the TV settings navigation used by PeerTubeTV. */
@@ -37,6 +38,7 @@ public final class TvSettingsActivity extends Activity {
     private int category = -1;
     private int drawerWidth;
     private EditText proxyHost, proxyPort, proxyUser, proxyPassword;
+    private TextView proxyStatus;
     private String proxyType;
     private String draftHost, draftPort, draftUser, draftPassword;
     private UpdateCoordinator updates;
@@ -288,6 +290,10 @@ public final class TvSettingsActivity extends Activity {
         proxyPassword = field("Пароль (необязательно)", draftPassword,
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         row("Сохранить прокси", "✓", this::saveProxy);
+        row("Сохранить и проверить соединение", "↻", this::checkProxy);
+        proxyStatus = text("", 14, SECONDARY);
+        proxyStatus.setPadding(0, dp(8), 0, dp(12));
+        drawerContent.addView(proxyStatus);
     }
 
     private void loadProxyDraft() {
@@ -309,18 +315,52 @@ public final class TvSettingsActivity extends Activity {
     }
 
     private void saveProxy() {
+        validateAndSaveProxy(true);
+    }
+
+    private boolean validateAndSaveProxy(boolean notify) {
         captureProxyDraft();
         int port = 0;
         try { port = Integer.parseInt(draftPort); }
         catch (NumberFormatException ignored) { }
         if (!"off".equals(proxyType) && draftHost.isEmpty()) {
-            proxyHost.setError("Введите адрес прокси"); proxyHost.requestFocus(); return;
+            proxyHost.setError("Введите адрес прокси"); proxyHost.requestFocus(); return false;
         }
         if (!"off".equals(proxyType) && (port < 1 || port > 65535)) {
-            proxyPort.setError("Порт должен быть от 1 до 65535"); proxyPort.requestFocus(); return;
+            proxyPort.setError("Порт должен быть от 1 до 65535"); proxyPort.requestFocus(); return false;
         }
         NetworkProxy.save(this, proxyType, draftHost, port, draftUser, draftPassword);
-        Toast.makeText(this, "Настройки сети сохранены", Toast.LENGTH_SHORT).show();
+        if (notify) Toast.makeText(this, "Настройки сети сохранены", Toast.LENGTH_SHORT).show();
+        return true;
+    }
+
+    private void checkProxy() {
+        if (!validateAndSaveProxy(false)) return;
+        proxyStatus.setText("Проверяем соединение…");
+        new Thread(() -> {
+            String result;
+            HttpURLConnection connection = null;
+            try {
+                connection = NetworkProxy.openConnection("https://example.com/");
+                connection.setConnectTimeout(10_000);
+                connection.setReadTimeout(10_000);
+                int code = connection.getResponseCode();
+                result = code >= 200 && code < 400 ? "Соединение работает"
+                        : "Прокси ответил кодом " + code;
+            } catch (Exception error) {
+                String detail = error.getMessage();
+                result = "Соединение не удалось: " + error.getClass().getSimpleName()
+                        + (detail == null || detail.isEmpty() ? "" : " — " + detail);
+            } finally {
+                if (connection != null) connection.disconnect();
+            }
+            String message = result;
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed() || proxyStatus == null) return;
+                proxyStatus.setText(message);
+                Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+            });
+        }, "tv-proxy-check").start();
     }
 
     private void about() {
