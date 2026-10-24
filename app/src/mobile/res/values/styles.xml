@@ -1,0 +1,18 @@
+<resources>
+    <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:navigationBarColor">@color/background</item>
+        <item name="android:windowBackground">@color/background</item>
+        <item name="android:alertDialogTheme">@style/AuroraAlertDialog</item>
+    </style>
+
+    <style name="AuroraAlertDialog" parent="android:style/Theme.Material.Dialog.Alert">
+        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:colorBackground">@color/aurora_surface</item>
+        <item name="android:textColorPrimary">@color/aurora_text</item>
+        <item name="android:textColorSecondary">@color/aurora_muted</item>
+        <item name="android:windowBackground">@drawable/aurora_dialog_background</item>
+    </style>
+</resources>

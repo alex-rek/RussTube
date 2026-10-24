@@ -22,6 +22,7 @@ final class TvIcons {
             case "history": data = "M12,3a9,9 0,1 1,-8,13l2,-1a7,7 0,1 0,1,-9L10,9H2V1l3,3a9,9 0,0 1,7,-1z M11,7h2v5l4,2 -1,2 -5,-3z"; break;
             case "favorite": data = "M12,21L3,12C-4,4 6,-1 12,6C18,-1 28,4 21,12z"; break;
             case "search": data = "M10,2a8,8 0,1 0,5,14l6,6 2,-2 -6,-6A8,8 0,0 0,10,2z M10,4a6,6 0,1 1,0,12a6,6 0,1 1,0,-12z"; break;
+            case "mic": data = "M12,2a3,3 0,0 0,-3 3v7a3,3 0,0 0,6 0V5a3,3 0,0 0,-3 -3z M5,10h2v2a5,5 0,0 0,10 0v-2h2v2a7,7 0,0 1,-6 6.9V22h-2v-3.1A7,7 0,0 1,5 12z"; break;
             case "settings": data = "M9,2h6l1,4 4,1 3,5 -3,5 -4,1 -1,4H9l-1,-4 -4,-1 -3,-5 3,-5 4,-1z M12,8a4,4 0,1 0,0,8a4,4 0,1 0,0,-8z"; break;
             default: data = "M3,5h18v2H3z M3,11h18v2H3z M3,17h18v2H3z";
         }

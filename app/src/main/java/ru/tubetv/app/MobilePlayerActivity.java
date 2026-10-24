@@ -71,6 +71,7 @@ public final class MobilePlayerActivity extends Activity {
     private TextView errorText;
     private TextView playButton;
     private TextView fullscreenButton;
+    private TextView aspectButton;
     private TextView time;
     private TextView favoriteButton;
     private TextView subscribeButton;
@@ -86,6 +87,7 @@ public final class MobilePlayerActivity extends Activity {
     private boolean backgroundStarted;
     private boolean autoResume = true;
     private boolean portraitFullscreen;
+    private int aspectMode;
     private int videoWidth;
     private int videoHeight;
     private float pixelRatio = 1f;
@@ -95,7 +97,10 @@ public final class MobilePlayerActivity extends Activity {
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
-        if (state != null) portraitFullscreen = state.getBoolean("portrait_fullscreen", false);
+        if (state != null) {
+            portraitFullscreen = state.getBoolean("portrait_fullscreen", false);
+            aspectMode = state.getInt("aspect_mode", 0);
+        }
         getWindow().setStatusBarColor(BACKGROUND);
         getWindow().setNavigationBarColor(BACKGROUND);
         setVolumeControlStream(AudioManager.STREAM_MUSIC);
@@ -194,13 +199,20 @@ public final class MobilePlayerActivity extends Activity {
                 new int[]{Color.TRANSPARENT, 0xdd000000, 0xf9000000}));
         LinearLayout controlRow = new LinearLayout(this);
         controlRow.setGravity(Gravity.CENTER_VERTICAL);
-        addControl(controlRow, "−10", () -> seek(-10_000));
+        TextView rewind = addControl(controlRow, "◀◀", () -> seek(-10_000));
+        rewind.setTextSize(22);
+        rewind.setContentDescription("Назад на 10 секунд");
         playButton = addControl(controlRow, "▶", this::togglePlayback);
-        addControl(controlRow, "+10", () -> seek(10_000));
+        TextView forward = addControl(controlRow, "▶▶", () -> seek(10_000));
+        forward.setTextSize(22);
+        forward.setContentDescription("Вперёд на 10 секунд");
         controlRow.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
         time = label("0:00 / 0:00", 12, Color.WHITE);
         time.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
         controlRow.addView(time, new LinearLayout.LayoutParams(0, dp(42), 1));
+        aspectButton = addControl(controlRow, "Авто", this::cycleAspect);
+        aspectButton.setTextSize(12);
+        updateAspectButton();
         fullscreenButton = addControl(controlRow, "⛶", this::toggleFullscreen);
         fullscreenButton.setTextSize(26);
         fullscreenButton.setContentDescription("На весь экран");
@@ -309,6 +321,7 @@ public final class MobilePlayerActivity extends Activity {
                 ? "Выйти из полноэкранного режима" : "На весь экран");
         fullscreenButton.setVisibility(landscape ? View.GONE : View.VISIBLE);
         fullscreenButton.setTextColor(portraitFullscreen ? ACCENT : Color.WHITE);
+        aspectButton.setVisibility(fullscreen ? View.VISIBLE : View.GONE);
         ViewCompat.requestApplyInsets(root);
         videoFrame.requestLayout();
         videoFrame.post(this::fitSurface);
@@ -325,14 +338,42 @@ public final class MobilePlayerActivity extends Activity {
         applyOrientation();
     }
 
+    private void cycleAspect() {
+        aspectMode = (aspectMode + 1) % 4;
+        updateAspectButton();
+        fitSurface();
+    }
+
+    private void updateAspectButton() {
+        String[] labels = {"Авто", "Заполн.", "16:9", "4:3"};
+        aspectButton.setText(labels[aspectMode]);
+        aspectButton.setContentDescription("Соотношение сторон: " + labels[aspectMode]);
+    }
+
     private void fitSurface() {
         if (videoWidth <= 0 || videoHeight <= 0 || videoFrame.getWidth() <= 0
                 || videoFrame.getHeight() <= 0) return;
         float width = videoWidth * pixelRatio;
-        float scale = Math.min(videoFrame.getWidth() / width,
-                videoFrame.getHeight() / (float) videoHeight);
+        float frameWidth = videoFrame.getWidth();
+        float frameHeight = videoFrame.getHeight();
+        float scale = Math.min(frameWidth / width, frameHeight / videoHeight);
         int fittedWidth = Math.max(1, Math.round(width * scale));
         int fittedHeight = Math.max(1, Math.round(videoHeight * scale));
+        if (aspectMode == 1) {
+            fittedWidth = videoFrame.getWidth();
+            fittedHeight = videoFrame.getHeight();
+            float videoAspect = width / videoHeight;
+            float frameAspect = frameWidth / frameHeight;
+            surface.setCrop(videoAspect > frameAspect ? frameAspect / videoAspect : 1f,
+                    videoAspect < frameAspect ? videoAspect / frameAspect : 1f);
+        } else if (aspectMode == 2 || aspectMode == 3) {
+            float ratio = aspectMode == 2 ? 16f / 9f : 4f / 3f;
+            fittedWidth = Math.min(videoFrame.getWidth(), Math.round(frameHeight * ratio));
+            fittedHeight = Math.min(videoFrame.getHeight(), Math.round(frameWidth / ratio));
+            surface.setCrop(1f, 1f);
+        } else {
+            surface.setCrop(1f, 1f);
+        }
         FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) surface.getLayoutParams();
         if (params.width == fittedWidth && params.height == fittedHeight) return;
         surface.setLayoutParams(new FrameLayout.LayoutParams(
@@ -657,6 +698,7 @@ public final class MobilePlayerActivity extends Activity {
 
     @Override protected void onSaveInstanceState(Bundle state) {
         state.putBoolean("portrait_fullscreen", portraitFullscreen);
+        state.putInt("aspect_mode", aspectMode);
         super.onSaveInstanceState(state);
     }
 

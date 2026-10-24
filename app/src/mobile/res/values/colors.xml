@@ -1,4 +1,7 @@
 <resources>
     <color name="background">#071426</color>
     <color name="accent">#00D9C0</color>
+    <color name="aurora_surface">#10243B</color>
+    <color name="aurora_text">#F4F8FF</color>
+    <color name="aurora_muted">#AEC1DA</color>
 </resources>

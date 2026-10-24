@@ -16,6 +16,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.net.HttpURLConnection;
 import java.net.Proxy;
 
 /** Network settings shared by the TV and mobile flavors. */
@@ -68,7 +69,18 @@ public final class NetworkSettingsActivity extends Activity {
         LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(-1, dp(52));
         saveParams.topMargin = dp(20);
         root.addView(save, saveParams);
-        save.setOnClickListener(v -> save());
+        save.setOnClickListener(v -> save(true));
+        if (BuildConfig.MOBILE_VARIANT) {
+            Button verify = new Button(this);
+            verify.setText("Сохранить и проверить соединение");
+            verify.setAllCaps(false);
+            verify.setTextColor(MobileAuroraTheme.TEXT);
+            verify.setBackgroundTintList(ColorStateList.valueOf(MobileAuroraTheme.SURFACE));
+            LinearLayout.LayoutParams verifyParams = new LinearLayout.LayoutParams(-1, dp(52));
+            verifyParams.topMargin = dp(8);
+            root.addView(verify, verifyParams);
+            verify.setOnClickListener(v -> verify(verify));
+        }
         setContentView(scroll);
     }
 
@@ -97,7 +109,7 @@ public final class NetworkSettingsActivity extends Activity {
         return input;
     }
 
-    private void save() {
+    private boolean save(boolean finishAfterSave) {
         String type = types.getCheckedRadioButtonId() == R.id.proxy_http ? "http"
                 : types.getCheckedRadioButtonId() == R.id.proxy_socks5 ? "socks5" : "off";
         String address = host.getText().toString().trim();
@@ -105,15 +117,47 @@ public final class NetworkSettingsActivity extends Activity {
         try { number = Integer.parseInt(port.getText().toString().trim()); }
         catch (NumberFormatException ignored) { }
         if (!"off".equals(type) && address.isEmpty()) {
-            host.setError("Введите адрес прокси"); host.requestFocus(); return;
+            host.setError("Введите адрес прокси"); host.requestFocus(); return false;
         }
         if (!"off".equals(type) && (number < 1 || number > 65535)) {
-            port.setError("Порт должен быть от 1 до 65535"); port.requestFocus(); return;
+            port.setError("Порт должен быть от 1 до 65535"); port.requestFocus(); return false;
         }
         NetworkProxy.save(this, type, address, number,
                 user.getText().toString(), password.getText().toString());
-        Toast.makeText(this, "Настройки сети сохранены", Toast.LENGTH_SHORT).show();
-        finish();
+        if (finishAfterSave) {
+            Toast.makeText(this, "Настройки сети сохранены", Toast.LENGTH_SHORT).show();
+            finish();
+        }
+        return true;
+    }
+
+    private void verify(Button button) {
+        if (!save(false)) return;
+        button.setEnabled(false);
+        button.setText("Проверяем соединение…");
+        new Thread(() -> {
+            String result;
+            HttpURLConnection connection = null;
+            try {
+                connection = NetworkProxy.openConnection("https://example.com/");
+                connection.setConnectTimeout(10_000);
+                connection.setReadTimeout(10_000);
+                int code = connection.getResponseCode();
+                result = code >= 200 && code < 400 ? "Соединение работает"
+                        : "Прокси ответил кодом " + code;
+            } catch (Exception error) {
+                result = "Соединение не удалось: " + error.getClass().getSimpleName();
+            } finally {
+                if (connection != null) connection.disconnect();
+            }
+            String message = result;
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                button.setEnabled(true);
+                button.setText("Сохранить и проверить соединение");
+                Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+            });
+        }, "proxy-check").start();
     }
 
     private TextView text(String value, int size, int color) {

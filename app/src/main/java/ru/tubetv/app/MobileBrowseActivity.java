@@ -9,7 +9,12 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.speech.RecognizerIntent;
+import android.text.Editable;
 import android.text.TextUtils;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
@@ -37,6 +42,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.Future;
@@ -45,7 +51,8 @@ import java.util.concurrent.TimeUnit;
 
 /** Touch-first RussTube interface; search, stores and playback are shared with TV. */
 public final class MobileBrowseActivity extends Activity {
-    private enum Page { HOME, SEARCH, LIVE, SUBSCRIPTIONS, LIBRARY, HISTORY, FAVORITES, CHANNELS, POPULAR }
+    private static final int VOICE_SEARCH_REQUEST = 7143;
+    private enum Page { HOME, SEARCH, LIVE, SUBSCRIPTIONS, LIBRARY, HISTORY, FAVORITES, CHANNELS, POPULAR, SETTINGS }
     private static final int BACKGROUND = MobileAuroraTheme.BACKGROUND;
     private static final int PANEL = MobileAuroraTheme.SURFACE;
     private static final int SECONDARY = MobileAuroraTheme.MUTED;
@@ -63,6 +70,7 @@ public final class MobileBrowseActivity extends Activity {
     private final List<VideoItem> history = new ArrayList<>();
     private final List<String> failed = new ArrayList<>();
     private final FeedRepository repository = new FeedRepository();
+    private final Handler searchHandler = new Handler(Looper.getMainLooper());
     private Page page = Page.HOME;
     private VideoItem activeChannel;
     private int generation;
@@ -71,6 +79,8 @@ public final class MobileBrowseActivity extends Activity {
     private UpdateCoordinator updates;
     private boolean skipResumeReload;
     private String searchQuery = "";
+    private Runnable queuedSearch;
+    private boolean syncingSearchText;
     private VideoSort.Mode sortMode = VideoSort.Mode.NEWEST;
     private TextView heading;
     private LinearLayout header;
@@ -89,6 +99,7 @@ public final class MobileBrowseActivity extends Activity {
     private EditText query;
     private GridView list;
     private FeedAdapter adapter;
+    private MobileSettingsPanel settingsPanel;
     private LinearLayout navigation;
 
     @Override protected void onCreate(Bundle state) {
@@ -177,9 +188,11 @@ public final class MobileBrowseActivity extends Activity {
             return false;
         });
         compactRow.addView(landscapeQuery, size(230, 42));
-        compactAction(compactRow, "Искать", () -> {
-            query.setText(landscapeQuery.getText()); submitSearch();
-        });
+        TextView landscapeVoice = icon("mic", "Голосовой поиск", this::startVoiceSearch);
+        landscapeVoice.setBackground(round(PANEL, 9));
+        LinearLayout.LayoutParams voiceParams = size(44, 42);
+        voiceParams.rightMargin = dp(8);
+        compactRow.addView(landscapeVoice, voiceParams);
         String[] quick = {"Популярное", "Новости", "Наука", "Музыка", "Игры", "Спорт"};
         for (String value : quick) compactAction(compactRow, value, () -> {
             if ("Популярное".equals(value)) show(Page.POPULAR);
@@ -193,7 +206,9 @@ public final class MobileBrowseActivity extends Activity {
         root.addView(landscapeControls, size(-1, 52));
 
         searchRow = new LinearLayout(this);
-        searchRow.setPadding(dp(16), dp(2), dp(16), dp(8));
+        searchRow.setBaselineAligned(false);
+        searchRow.setGravity(Gravity.CENTER_VERTICAL);
+        searchRow.setPadding(dp(16), dp(4), dp(16), dp(4));
         query = new EditText(this);
         query.setSingleLine(true);
         query.setTextSize(16);
@@ -211,10 +226,12 @@ public final class MobileBrowseActivity extends Activity {
             }
             return false;
         });
-        searchRow.addView(query, new LinearLayout.LayoutParams(0, dp(46), 1));
-        TextView submit = icon("search", "Искать", this::submitSearch);
-        searchRow.addView(submit, size(48, 46));
-        root.addView(searchRow, size(-1, 56));
+        searchRow.addView(query, new LinearLayout.LayoutParams(0, dp(48), 1));
+        TextView voice = icon("mic", "Голосовой поиск", this::startVoiceSearch);
+        searchRow.addView(voice, size(48, 48));
+        root.addView(searchRow, size(-1, 66));
+        watchQuery(query, landscapeQuery);
+        watchQuery(landscapeQuery, query);
 
         heading = label("", MobileAuroraTheme.HEADING_SP, MobileAuroraTheme.TEXT);
         heading.setTypeface(Typeface.DEFAULT_BOLD);
@@ -286,7 +303,7 @@ public final class MobileBrowseActivity extends Activity {
         list.setOnItemClickListener((parent, view, position, id) -> {
             if (position >= items.size()) return;
             VideoItem item = items.get(position);
-            if (page == Page.CHANNELS) showChannel(item);
+            if (page == Page.CHANNELS && activeChannel == null) showChannel(item);
             else {
                 skipResumeReload = true;
                 VideoActions.play(this, item);
@@ -304,6 +321,10 @@ public final class MobileBrowseActivity extends Activity {
         empty.setPadding(dp(28), dp(18), dp(28), dp(18));
         feed.addView(empty, new FrameLayout.LayoutParams(-1, -1));
         list.setEmptyView(empty);
+        settingsPanel = new MobileSettingsPanel(this,
+                () -> startActivity(new Intent(this, NetworkSettingsActivity.class)), () -> { });
+        settingsPanel.setVisibility(View.GONE);
+        feed.addView(settingsPanel, new FrameLayout.LayoutParams(-1, -1));
         root.addView(feed, new LinearLayout.LayoutParams(-1, 0, 1));
 
         navigation = new LinearLayout(this);
@@ -325,23 +346,29 @@ public final class MobileBrowseActivity extends Activity {
     }
 
     private void show(Page target) {
+        cancelQueuedSearch();
         cancel();
         page = target;
         activeChannel = null;
         items.clear(); baseItems.clear(); candidates.clear(); history.clear();
         for (WatchHistoryStore.Entry entry : WatchHistoryStore.load(this)) history.add(entry.item);
         actions.removeAllViews();
+        syncingSearchText = true;
         landscapeQuery.setText(query.getText());
+        syncingSearchText = false;
         searchRow.setVisibility(target == Page.SEARCH ? View.VISIBLE : View.GONE);
         topics.setVisibility(target == Page.HOME || target == Page.SEARCH || target == Page.POPULAR
                 ? View.VISIBLE : View.GONE);
         switch (target) {
             case HOME:
                 heading.setText("Главная");
-                if (getSharedPreferences("browse", 0).getBoolean("recommendations", true)
-                        && !history.isEmpty()) {
+                if (MobileBrowsePreferences.recommendHistory(this) && !history.isEmpty()) {
                     List<String> queries = RecommendationEngine.queries(history);
                     for (String value : queries) searchAll(value, false);
+                }
+                if (MobileBrowsePreferences.recommendSubscriptions(this)) {
+                    for (VideoItem channel : SubscriptionStore.load(this))
+                        enqueue(channel.source, () -> repository.channel(channel));
                 }
                 searchAll("популярное", false);
                 break;
@@ -383,7 +410,12 @@ public final class MobileBrowseActivity extends Activity {
                 heading.setText("Избранное");
                 baseItems.addAll(FavoriteStore.load(this));
                 break;
+            case SETTINGS:
+                heading.setText("Настройки");
+                break;
         }
+        settingsPanel.setVisibility(target == Page.SETTINGS ? View.VISIBLE : View.GONE);
+        list.setVisibility(target == Page.SETTINGS ? View.GONE : View.VISIBLE);
         actions.setVisibility(actions.getChildCount() == 0 ? View.GONE : View.VISIBLE);
         sortRow.setVisibility(target == Page.CHANNELS ? View.GONE : View.VISIBLE);
         updateSortLabel();
@@ -425,11 +457,65 @@ public final class MobileBrowseActivity extends Activity {
     private void submitSearch() {
         searchQuery = query.getText().toString().trim();
         if (searchQuery.length() < 2) { query.setError("Введите хотя бы два символа"); return; }
+        cancelQueuedSearch();
         ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE))
                 .hideSoftInputFromWindow(query.getWindowToken(), 0);
         query.clearFocus();
         landscapeQuery.clearFocus();
         show(Page.SEARCH);
+    }
+
+    private void watchQuery(EditText source, EditText other) {
+        source.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) { }
+            @Override public void afterTextChanged(Editable value) {
+                if (syncingSearchText) return;
+                String typed = value.toString();
+                if (!typed.contentEquals(other.getText())) {
+                    syncingSearchText = true;
+                    other.setText(typed);
+                    syncingSearchText = false;
+                }
+                searchQuery = typed.trim();
+                cancelQueuedSearch();
+                if (page != Page.SEARCH) {
+                    if (source != landscapeQuery || searchQuery.length() < 2) return;
+                    queuedSearch = () -> {
+                        queuedSearch = null;
+                        show(Page.SEARCH);
+                    };
+                    searchHandler.postDelayed(queuedSearch, 450);
+                    return;
+                }
+                cancel();
+                items.clear(); baseItems.clear(); candidates.clear();
+                applySort(); render();
+                queuedSearch = () -> {
+                    queuedSearch = null;
+                    if (searchQuery.length() >= 2) searchAll(searchQuery, false);
+                };
+                searchHandler.postDelayed(queuedSearch, 450);
+            }
+        });
+    }
+
+    private void cancelQueuedSearch() {
+        if (queuedSearch == null) return;
+        searchHandler.removeCallbacks(queuedSearch);
+        queuedSearch = null;
+    }
+
+    private void startVoiceSearch() {
+        Intent speech = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                        RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
+                .putExtra(RecognizerIntent.EXTRA_PROMPT, "Что найти?");
+        try { startActivityForResult(speech, VOICE_SEARCH_REQUEST); }
+        catch (RuntimeException error) {
+            Toast.makeText(this, "Голосовой ввод недоступен на устройстве", Toast.LENGTH_LONG).show();
+        }
     }
 
     private void refresh() {
@@ -438,17 +524,7 @@ public final class MobileBrowseActivity extends Activity {
     }
 
     private void settings() {
-        boolean enabled = getSharedPreferences("browse", 0).getBoolean("recommendations", true);
-        new AlertDialog.Builder(this).setTitle("Настройки RussTube")
-                .setMultiChoiceItems(new String[]{"Рекомендации по истории просмотров"},
-                        new boolean[]{enabled}, (dialog, index, checked) ->
-                                getSharedPreferences("browse", 0).edit()
-                                        .putBoolean("recommendations", checked).apply())
-                .setNeutralButton("Сеть", (dialog, which) ->
-                        startActivity(new Intent(this, NetworkSettingsActivity.class)))
-                .setPositiveButton("Готово", (dialog, which) -> {
-                    if (page == Page.HOME) show(Page.HOME);
-                }).show();
+        show(Page.SETTINGS);
     }
 
     private void searchAll(String value, boolean live) {
@@ -458,6 +534,7 @@ public final class MobileBrowseActivity extends Activity {
     }
 
     private void enqueue(String source, Load operation) {
+        if (!MobileBrowsePreferences.sourceEnabled(this, source)) return;
         int current = generation;
         pending++;
         jobs.add(io.submit(() -> {
@@ -473,7 +550,8 @@ public final class MobileBrowseActivity extends Activity {
                 if (failedRequest && !failed.contains(source)) failed.add(source);
                 candidates.addAll(result);
                 baseItems.clear();
-                if (page == Page.HOME && !history.isEmpty() && activeChannel == null) {
+                if (page == Page.HOME && MobileBrowsePreferences.recommendHistory(this)
+                        && !history.isEmpty() && activeChannel == null) {
                     baseItems.addAll(RecommendationEngine.rank(candidates, history));
                 } else {
                     Map<String, VideoItem> unique = new LinkedHashMap<>();
@@ -532,9 +610,10 @@ public final class MobileBrowseActivity extends Activity {
                 && (page == Page.HOME || page == Page.SEARCH || page == Page.POPULAR)
                 ? View.VISIBLE : View.GONE);
         actions.setVisibility(!landscape && actions.getChildCount() > 0 ? View.VISIBLE : View.GONE);
-        sortRow.setVisibility(!landscape && (page != Page.CHANNELS || activeChannel != null)
+        sortRow.setVisibility(!landscape && page != Page.SETTINGS
+                && (page != Page.CHANNELS || activeChannel != null)
                 ? View.VISIBLE : View.GONE);
-        status.setVisibility(landscape ? View.GONE : View.VISIBLE);
+        status.setVisibility(landscape || page == Page.SETTINGS ? View.GONE : View.VISIBLE);
         navigation.setVisibility(landscape ? View.GONE : View.VISIBLE);
         float widthDp = getResources().getDisplayMetrics().widthPixels
                 / getResources().getDisplayMetrics().density;
@@ -548,7 +627,11 @@ public final class MobileBrowseActivity extends Activity {
         int first = list.getFirstVisiblePosition();
         super.onConfigurationChanged(configuration);
         skipResumeReload = true;
-        if (!landscapeQuery.hasFocus()) landscapeQuery.setText(query.getText());
+        if (!landscapeQuery.hasFocus()) {
+            syncingSearchText = true;
+            landscapeQuery.setText(query.getText());
+            syncingSearchText = false;
+        }
         applyLayout();
         if (!items.isEmpty()) list.setSelection(first);
     }
@@ -564,18 +647,23 @@ public final class MobileBrowseActivity extends Activity {
         status.setText((pending > 0 ? "Загрузка…  ·  " : "") + "Видео: " + items.size()
                 + (failed.isEmpty() ? "" : "  ·  Недоступны: " + TextUtils.join(", ", failed)));
         empty.setText(pending > 0 ? "Ищем видео…"
-                : page == Page.SEARCH && searchQuery.isEmpty() ? "Введите запрос для поиска видео"
+                : activeChannel != null
+                        && !MobileBrowsePreferences.sourceEnabled(this, activeChannel.source)
+                        ? "Эта площадка выключена в настройках"
+                : page == Page.SEARCH && searchQuery.length() < 2 ? "Введите хотя бы два символа"
                 : page == Page.SUBSCRIPTIONS ? "Подпишитесь на канал через меню видео"
                 : page == Page.LIVE ? "Сейчас нет подтверждённых эфиров"
                 : page == Page.FAVORITES ? "Сохранённые видео появятся здесь"
                 : page == Page.LIBRARY || page == Page.HISTORY ? "История просмотра пока пуста"
-                : page == Page.CHANNELS ? "Подписок пока нет" : "Видео пока не найдены");
+                : page == Page.CHANNELS && activeChannel == null ? "Подписок пока нет"
+                : "Видео пока не найдены");
     }
 
     private void updateNavigation() {
         navigation.removeAllViews();
         Page selected = page == Page.SEARCH || page == Page.POPULAR ? Page.HOME
-                : page == Page.HISTORY || page == Page.FAVORITES || page == Page.CHANNELS ? Page.LIBRARY : page;
+                : page == Page.HISTORY || page == Page.FAVORITES || page == Page.CHANNELS
+                        || page == Page.SETTINGS ? Page.LIBRARY : page;
         for (int i = 0; i < TABS.length; i++) {
             Page target = TABS[i];
             boolean active = selected == target;
@@ -656,6 +744,17 @@ public final class MobileBrowseActivity extends Activity {
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == VOICE_SEARCH_REQUEST) {
+            if (resultCode == RESULT_OK && data != null) {
+                ArrayList<String> results = data.getStringArrayListExtra(
+                        RecognizerIntent.EXTRA_RESULTS);
+                if (results != null && !results.isEmpty()) {
+                    query.setText(results.get(0));
+                    submitSearch();
+                }
+            }
+            return;
+        }
         updates.onActivityResult(requestCode);
     }
 
@@ -666,7 +765,8 @@ public final class MobileBrowseActivity extends Activity {
 
     @Override public void onBackPressed() {
         if (activeChannel != null) { show(page); return; }
-        if (page == Page.HISTORY || page == Page.FAVORITES || page == Page.CHANNELS) {
+        if (page == Page.HISTORY || page == Page.FAVORITES || page == Page.CHANNELS
+                || page == Page.SETTINGS) {
             show(Page.LIBRARY); return;
         }
         if (page != Page.HOME) { show(Page.HOME); return; }
@@ -674,7 +774,7 @@ public final class MobileBrowseActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
-        updates.onDestroy(); cancel(); io.shutdownNow(); super.onDestroy();
+        cancelQueuedSearch(); updates.onDestroy(); cancel(); io.shutdownNow(); super.onDestroy();
     }
 
     private interface Load { List<VideoItem> run() throws Exception; }
@@ -761,9 +861,11 @@ public final class MobileBrowseActivity extends Activity {
             card.source.setText(item.isLive ? "● В ЭФИРЕ · " + item.source : item.source);
             card.duration.setText(item.isLive ? "В ЭФИРЕ" : VideoPresentation.duration(item.durationMs));
             card.duration.setVisibility(item.isLive || item.durationMs > 0 ? View.VISIBLE : View.GONE);
-            card.title.setText(page == Page.CHANNELS ? VideoPresentation.channel(item) : item.title);
+            card.title.setText(page == Page.CHANNELS && activeChannel == null
+                    ? VideoPresentation.channel(item) : item.title);
             String channel = VideoPresentation.channel(item);
-            card.avatar.setText(channel.isEmpty() ? "?" : channel.substring(0, 1).toUpperCase());
+            card.avatar.setText(channel.isEmpty() ? "?"
+                    : channel.substring(0, 1).toUpperCase(Locale.getDefault()));
             card.avatar.setBackground(round(item.source.contains("VK") ? 0xff315d98
                     : item.source.contains("RUTUBE") ? 0xff4f3990 : 0xff246b76, 22));
             card.channel.setText(item.source + " · " + channel);
