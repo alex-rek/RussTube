@@ -662,7 +662,7 @@ public final class MobilePlayerActivity extends Activity {
         if (duration > 0) knownDuration = duration;
         StateStore.savePlayerPosition(this, video.source, video.pageUrl, position);
         WatchProgressStore.save(this, video.source, video.pageUrl, position, duration);
-        if (!recorded && position >= WatchProgressStore.MIN_POSITION_MS) {
+        if (!recorded && WatchProgressStore.isViewed(position, duration)) {
             WatchHistoryStore.record(this, video.withDuration(duration), false, 0, false);
             recorded = true;
         }

@@ -1022,7 +1022,7 @@ public final class PlayerActivity extends Activity {
                 videoIdentityUrl,
                 Math.max(0L, position),
                 Math.max(0L, actualDuration));
-        if (!historyRecordedThisSession && position >= WatchProgressStore.MIN_POSITION_MS) {
+        if (!historyRecordedThisSession && WatchProgressStore.isViewed(position, actualDuration)) {
             WatchHistoryStore.record(this, historyItem.withDuration(actualDuration),
                     trafficMode, targetHeight, audioOnly);
             historyRecordedThisSession = true;

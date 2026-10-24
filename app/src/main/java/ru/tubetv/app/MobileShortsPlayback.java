@@ -16,6 +16,12 @@ import androidx.media3.common.Player;
 import androidx.media3.common.VideoSize;
 import androidx.media3.exoplayer.ExoPlayer;
 
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -24,6 +30,9 @@ import java.util.concurrent.Future;
 final class MobileShortsPlayback {
     private final Activity activity;
     private final ExecutorService resolver = Executors.newSingleThreadExecutor();
+    private final ExecutorService preloader = Executors.newSingleThreadExecutor();
+    private final Map<String, PlaybackInfo> prepared = new ConcurrentHashMap<>();
+    private Future<?> preloadJob;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Runnable progress = new Runnable() {
         @Override public void run() {
@@ -70,6 +79,35 @@ final class MobileShortsPlayback {
         if (MobileBrowsePreferences.shortsAutoplay(activity)) start();
     }
 
+    void preload(List<VideoItem> feed, int position) {
+        int count = MobileBrowsePreferences.shortsPreloadCount(activity);
+        if (preloadJob != null) preloadJob.cancel(true);
+        Set<String> nextKeys = new HashSet<>();
+        List<VideoItem> next = new ArrayList<>();
+        for (int i = position + 1; i < feed.size() && next.size() < count; i++) {
+            VideoItem candidate = feed.get(i);
+            if (nextKeys.add(candidate.stableKey())) next.add(candidate);
+        }
+        if (item != null) nextKeys.add(item.stableKey());
+        prepared.keySet().retainAll(nextKeys);
+        if (next.isEmpty()) return;
+        preloadJob = preloader.submit(() -> {
+            for (VideoItem candidate : next) {
+                if (Thread.currentThread().isInterrupted()) return;
+                try {
+                    PlaybackInfo stream = prepared.get(candidate.stableKey());
+                    if (stream == null) {
+                        stream = new StreamResolver().resolveForPlayback(candidate.playUrl, false);
+                        prepared.put(candidate.stableKey(), stream);
+                    }
+                    PlaybackEngineFactory.preloadShort(activity, candidate, stream);
+                } catch (Exception ignored) {
+                    // Continue with the remaining cards; selection can resolve again.
+                }
+            }
+        });
+    }
+
     void toggle() {
         if (item == null) return;
         if (failed) {
@@ -103,6 +141,7 @@ final class MobileShortsPlayback {
 
     void onPause() {
         foreground = false;
+        stopPreloading();
         resumeAfterPause = player != null && player.isPlaying();
         if (player != null) player.pause();
         if (surface != null) surface.onPause();
@@ -135,6 +174,11 @@ final class MobileShortsPlayback {
         keepScreenAwake();
     }
 
+    void stopPreloading() {
+        if (preloadJob != null) preloadJob.cancel(true);
+        preloadJob = null;
+    }
+
     private void resetDecoder() {
         if (player != null) { player.clearVideoSurface(); player.release(); player = null; }
         if (surface != null) {
@@ -146,7 +190,11 @@ final class MobileShortsPlayback {
         failed = false;
     }
 
-    void release() { clear(); resolver.shutdownNow(); }
+    void release() {
+        clear();
+        stopPreloading();
+        preloader.shutdownNow(); resolver.shutdownNow(); prepared.clear();
+    }
 
     private void start() {
         if (item == null || resolving != null || player != null) return;
@@ -158,7 +206,10 @@ final class MobileShortsPlayback {
         indicator.setVisibility(View.VISIBLE);
         resolving = resolver.submit(() -> {
             PlaybackInfo stream;
-            try { stream = new StreamResolver().resolveForPlayback(target.playUrl, false); }
+            try {
+                stream = prepared.remove(target.stableKey());
+                if (stream == null) stream = new StreamResolver().resolveForPlayback(target.playUrl, false);
+            }
             catch (Exception error) {
                 main.post(() -> {
                     if (token != requestId || indicator == null) return;
@@ -167,10 +218,11 @@ final class MobileShortsPlayback {
                 });
                 return;
             }
+            final PlaybackInfo resolvedStream = stream;
             main.post(() -> {
                 if (token != requestId || artwork == null) return;
                 resolving = null;
-                attach(stream);
+                attach(resolvedStream);
             });
         });
     }
@@ -248,6 +300,14 @@ final class MobileShortsPlayback {
         float ratio = videoWidth * pixelRatio / videoHeight;
         int width = artwork.getWidth();
         int height = artwork.getHeight();
+        if (MobileBrowsePreferences.shortsFill(activity)) {
+            surface.setLayoutParams(new FrameLayout.LayoutParams(width, height, Gravity.CENTER));
+            float frameRatio = width / (float) height;
+            if (ratio > frameRatio) surface.setCrop(frameRatio / ratio, 1f);
+            else surface.setCrop(1f, ratio / frameRatio);
+            return;
+        }
+        surface.setCrop(1f, 1f);
         int fittedWidth = Math.min(width, Math.round(height * ratio));
         int fittedHeight = Math.min(height, Math.round(width / ratio));
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
@@ -263,8 +323,8 @@ final class MobileShortsPlayback {
             WatchProgressStore.save(activity, item.source, item.pageUrl, position, duration);
             StateStore.savePlayerPosition(activity, item.source, item.pageUrl, position);
         }
-        if (!recorded && position >= WatchProgressStore.MIN_POSITION_MS) {
-            WatchHistoryStore.record(activity, item.withDuration(duration), false, 0, false);
+        if (!recorded && WatchProgressStore.isViewed(position, duration)) {
+            WatchHistoryStore.record(activity, item.withDuration(duration), false, 0, false, true);
             recorded = true;
         }
     }

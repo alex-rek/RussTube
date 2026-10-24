@@ -17,6 +17,12 @@ final class WatchProgressStore {
     static final int MAX_ENTRIES = 1000;
     private static final String ORDER = "order";
 
+    static boolean isViewed(long positionMs, long durationMs) {
+        return positionMs >= (durationMs > 0 ? Math.max(1L,
+                durationMs / 10L + (durationMs % 10L == 0 ? 0L : 1L))
+                : MIN_POSITION_MS);
+    }
+
     static void save(Context context, String source, String pageUrl, long positionMs, long durationMs) {
         save(prefs(context), source, pageUrl, positionMs, durationMs);
     }
@@ -25,9 +31,8 @@ final class WatchProgressStore {
                                   long positionMs, long durationMs) {
         if (pageUrl == null || pageUrl.isEmpty()) return;
         String key = key(source, pageUrl);
-        // The minute threshold creates a history entry; it must not prevent rewinding
-        // an already watched video back to its beginning.
-        if (positionMs < MIN_POSITION_MS && !preferences.contains(key + "_position")) return;
+        // A new entry starts at 10% watched; existing entries can still be rewound.
+        if (!isViewed(positionMs, durationMs) && !preferences.contains(key + "_position")) return;
         SharedPreferences.Editor editor = preferences.edit()
                 .putLong(key + "_position", Math.max(0L, positionMs));
         if (durationMs > 0) editor.putLong(key + "_duration", durationMs);

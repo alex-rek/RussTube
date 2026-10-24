@@ -67,6 +67,14 @@ final class MobileSettingsPanel extends ScrollView {
         loop.setOnCheckedChangeListener((button, checked) ->
                 MobileBrowsePreferences.setShortsLoop(activity, checked));
         description("Если повтор выключен, Shorts остановится после одного просмотра.");
+        row("Предзагрузка следующих: " + MobileBrowsePreferences.shortsPreloadCount(activity),
+                () -> choosePreload());
+        row("Формат окна: " + frameLabel(MobileBrowsePreferences.shortsFrameRatio(activity)),
+                () -> chooseFrame());
+        CheckBox fill = check("Заполнять окно видео (обрезать края)",
+                MobileBrowsePreferences.shortsFill(activity));
+        fill.setOnCheckedChangeListener((button, checked) ->
+                MobileBrowsePreferences.setShortsFill(activity, checked));
 
         section("История");
         description("Удалить просмотры за выбранный период");
@@ -95,6 +103,45 @@ final class MobileSettingsPanel extends ScrollView {
                             Toast.LENGTH_SHORT).show();
                     changed.run();
                 }).show());
+    }
+
+    private void choosePreload() {
+        String[] choices = {"0 — выключено", "1 видео", "2 видео", "3 видео", "4 видео", "5 видео"};
+        new AlertDialog.Builder(activity).setTitle("Предзагрузка Shorts")
+                .setSingleChoiceItems(choices, MobileBrowsePreferences.shortsPreloadCount(activity),
+                        (dialog, which) -> {
+                            MobileBrowsePreferences.setShortsPreloadCount(activity, which);
+                            dialog.dismiss();
+                            refreshShortsRows();
+                        }).setNegativeButton("Отмена", null).show();
+    }
+
+    private void chooseFrame() {
+        String[] choices = {"9:16", "4:5", "По высоте экрана"};
+        new AlertDialog.Builder(activity).setTitle("Формат окна Shorts")
+                .setSingleChoiceItems(choices, MobileBrowsePreferences.shortsFrameRatio(activity),
+                        (dialog, which) -> {
+                            MobileBrowsePreferences.setShortsFrameRatio(activity, which);
+                            dialog.dismiss();
+                            refreshShortsRows();
+                        }).setNegativeButton("Отмена", null).show();
+    }
+
+    private String frameLabel(int ratio) {
+        return ratio == 1 ? "4:5" : ratio == 2 ? "По высоте экрана" : "9:16";
+    }
+
+    private void refreshShortsRows() {
+        // Settings are rebuilt when the user returns to this page.
+        for (int i = 0; i < content.getChildCount(); i++) {
+            if (!(content.getChildAt(i) instanceof TextView)) continue;
+            TextView view = (TextView) content.getChildAt(i);
+            String label = view.getText().toString();
+            if (label.startsWith("Предзагрузка следующих:"))
+                view.setText("Предзагрузка следующих: " + MobileBrowsePreferences.shortsPreloadCount(activity));
+            else if (label.startsWith("Формат окна:"))
+                view.setText("Формат окна: " + frameLabel(MobileBrowsePreferences.shortsFrameRatio(activity)));
+        }
     }
 
     private void section(String title) {

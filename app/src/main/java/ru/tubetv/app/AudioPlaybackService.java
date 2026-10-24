@@ -244,7 +244,7 @@ public final class AudioPlaybackService extends Service {
         if (duration > 0) knownDuration = duration;
         StateStore.savePlayerPosition(this, source, pageUrl, position);
         WatchProgressStore.save(this, source, pageUrl, position, Math.max(0L, duration));
-        if (!historyRecordedThisSession && position >= WatchProgressStore.MIN_POSITION_MS) {
+        if (!historyRecordedThisSession && WatchProgressStore.isViewed(position, duration)) {
             WatchHistoryStore.record(this, historyItem.withDuration(duration),
                     trafficMode, targetHeight, true);
             historyRecordedThisSession = true;
