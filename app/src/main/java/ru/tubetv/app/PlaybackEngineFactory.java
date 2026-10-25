@@ -38,12 +38,14 @@ import java.util.Map;
 
 @OptIn(markerClass = UnstableApi.class)
 final class PlaybackEngineFactory {
+    private static final int SHORT_PRELOAD_BYTES = 4 * 1024 * 1024;
+    private static final float SHORT_PRELOAD_SECONDS = 16f;
     private static SimpleCache shortsCache;
 
     private static synchronized SimpleCache shortsCache(Context context) {
         if (shortsCache == null) shortsCache = new SimpleCache(
                 new java.io.File(context.getCacheDir(), "shorts_media"),
-                new LeastRecentlyUsedCacheEvictor(24L * 1024 * 1024));
+                new LeastRecentlyUsedCacheEvictor(64L * 1024 * 1024));
         return shortsCache;
     }
 
@@ -59,19 +61,92 @@ final class PlaybackEngineFactory {
                 for (int depth = 0; depth < 3 && !Thread.currentThread().isInterrupted(); depth++) {
                     String playlist = new String(readPrefix(factory, playlistUrl, 128 * 1024),
                             StandardCharsets.UTF_8);
-                    String next = null;
-                    for (String line : playlist.split("\\r?\\n")) {
-                        String value = line.trim();
-                        if (!value.isEmpty() && !value.startsWith("#")) { next = value; break; }
+                    if (playlist.contains("#EXT-X-STREAM-INF")) {
+                        String variant = firstMediaUri(playlist);
+                        if (variant == null) return;
+                        playlistUrl = URI.create(playlistUrl).resolve(variant).toString();
+                    } else {
+                        preloadSegments(factory, playlistUrl, playlist);
+                        return;
                     }
-                    if (next == null) return;
-                    String resolved = URI.create(playlistUrl).resolve(next).toString();
-                    if (playlist.contains("#EXT-X-STREAM-INF")) playlistUrl = resolved;
-                    else { readPrefix(factory, resolved, 384 * 1024); return; }
                 }
-            } else readPrefix(factory, stream.streamUrl, 384 * 1024);
+            } else preloadProgressive(factory, stream.streamUrl, item.durationMs);
         } catch (Exception ignored) {
             // A failed warmup must never prevent normal playback.
+        }
+    }
+
+    private static String firstMediaUri(String playlist) {
+        for (String line : playlist.split("\\r?\\n")) {
+            String value = line.trim();
+            if (!value.isEmpty() && !value.startsWith("#")) return value;
+        }
+        return null;
+    }
+
+    private static void preloadSegments(DataSource.Factory factory, String playlistUrl,
+                                        String playlist) throws IOException {
+        if (playlist.contains("#EXT-X-BYTERANGE")) return;
+        float seconds = 0f;
+        float nextDuration = 0f;
+        int bytes = 0;
+        for (String line : playlist.split("\\r?\\n")) {
+            if (Thread.currentThread().isInterrupted()) return;
+            if (seconds >= SHORT_PRELOAD_SECONDS || bytes >= SHORT_PRELOAD_BYTES) break;
+            String value = line.trim();
+            if (value.startsWith("#EXTINF:")) {
+                try { nextDuration = Float.parseFloat(value.substring(8).split(",", 2)[0]); }
+                catch (NumberFormatException ignored) { nextDuration = 0f; }
+            } else if (!value.isEmpty() && !value.startsWith("#")) {
+                String segment = URI.create(playlistUrl).resolve(value).toString();
+                bytes += cachePrefix(factory, segment, SHORT_PRELOAD_BYTES - bytes);
+                seconds += nextDuration > 0f ? nextDuration : 4f;
+                nextDuration = 0f;
+            }
+        }
+        if (BuildConfig.DEBUG) android.util.Log.i("RussTubeShortsPreload",
+                "kind=hls seconds=" + seconds + " bytes=" + bytes);
+    }
+
+    private static void preloadProgressive(DataSource.Factory factory, String url,
+                                           long durationMs) throws IOException {
+        DataSource source = factory.createDataSource();
+        try {
+            long length = source.open(new DataSpec.Builder().setUri(url).build());
+            int budget = 768 * 1024;
+            if (length > 0 && durationMs > 0) {
+                long estimated = length * 16_000L / durationMs;
+                budget = (int) Math.max(64 * 1024L,
+                        Math.min(SHORT_PRELOAD_BYTES, estimated));
+            }
+            byte[] bytes = new byte[16 * 1024];
+            int loaded = 0;
+            int read;
+            while (!Thread.currentThread().isInterrupted() && loaded < budget
+                    && (read = source.read(bytes, 0, Math.min(bytes.length, budget - loaded))) != -1)
+                loaded += read;
+            if (BuildConfig.DEBUG) android.util.Log.i("RussTubeShortsPreload",
+                    "kind=progressive bytes=" + loaded + " durationMs=" + durationMs
+                            + " contentLength=" + length);
+        } finally {
+            source.close();
+        }
+    }
+
+    private static int cachePrefix(DataSource.Factory factory, String url, int limit)
+            throws IOException {
+        DataSource source = factory.createDataSource();
+        try {
+            source.open(new DataSpec.Builder().setUri(url).setLength(limit).build());
+            byte[] buffer = new byte[16 * 1024];
+            int loaded = 0;
+            int read;
+            while (!Thread.currentThread().isInterrupted() && loaded < limit
+                    && (read = source.read(buffer, 0, Math.min(buffer.length, limit - loaded))) != -1)
+                loaded += read;
+            return loaded;
+        } finally {
+            source.close();
         }
     }
 

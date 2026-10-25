@@ -72,7 +72,9 @@ public final class MobileBrowseActivity extends Activity {
     private final List<VideoItem> items = new ArrayList<>();
     private final List<VideoItem> baseItems = new ArrayList<>();
     private final List<VideoItem> candidates = new ArrayList<>();
+    private final Map<String, VideoItem> discoveredShorts = new LinkedHashMap<>();
     private final List<VideoItem> history = new ArrayList<>();
+    private final List<VideoItem> regularHistory = new ArrayList<>();
     private final List<WatchHistoryStore.Entry> historyEntries = new ArrayList<>();
     private final Set<String> watchedKeys = new HashSet<>();
     private boolean shortsHistory;
@@ -82,7 +84,12 @@ public final class MobileBrowseActivity extends Activity {
     private MobileShortsPlayback shortsPlayback;
     private Runnable queuedShortSelection;
     private int scrollState = AbsListView.OnScrollListener.SCROLL_STATE_IDLE;
-    private int shortSnapAttempts;
+    private float shortTouchStartX;
+    private float shortTouchStartY;
+    private long shortTouchStartedAt;
+    private int shortTouchPosition;
+    private boolean shortTouchMoving;
+    private String shortSelectedKey;
     private float pullStartY;
     private boolean pullFromTop;
     private Page page = Page.HOME;
@@ -324,10 +331,7 @@ public final class MobileBrowseActivity extends Activity {
                 scrollState = state;
                 if (page != Page.SHORTS) return;
                 if (state == SCROLL_STATE_IDLE) queueShortSelection();
-                else {
-                    if (state == SCROLL_STATE_TOUCH_SCROLL) shortSnapAttempts = 0;
-                    cancelShortSelection(); shortsPlayback.pauseForScroll();
-                }
+                else { cancelShortSelection(); shortsPlayback.pauseForScroll(); }
             }
             @Override public void onScroll(AbsListView view, int first, int count, int total) {
                 if (page == Page.SHORTS || count <= 0) return;
@@ -339,6 +343,7 @@ public final class MobileBrowseActivity extends Activity {
             }
         });
         list.setOnTouchListener((view, event) -> {
+            if (page == Page.SHORTS) return handleShortTouch(event);
             if (page != Page.HOME || activeChannel != null) return false;
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
                 pullStartY = event.getY();
@@ -358,6 +363,7 @@ public final class MobileBrowseActivity extends Activity {
             VideoItem item = items.get(position);
             if (page == Page.CHANNELS && activeChannel == null) showChannel(item);
             else if (page == Page.SHORTS) {
+                shortSelectedKey = item.stableKey();
                 Card card = (Card) view.getTag();
                 if (shortsPlayback.isSelected(card.artwork)) shortsPlayback.toggle();
                 else {
@@ -408,17 +414,19 @@ public final class MobileBrowseActivity extends Activity {
 
     private void show(Page target) {
         cancelShortSelection();
+        shortSelectedKey = null;
         if (target != Page.SHORTS) shortsPlayback.stopPreloading();
         shortsPlayback.clear();
         cancelQueuedSearch();
         cancel();
         page = target;
         activeChannel = null;
-        items.clear(); baseItems.clear(); candidates.clear(); history.clear();
+        items.clear(); baseItems.clear(); candidates.clear(); history.clear(); regularHistory.clear();
         historyEntries.clear(); watchedKeys.clear();
         historyEntries.addAll(WatchHistoryStore.load(this));
         for (WatchHistoryStore.Entry entry : historyEntries) {
             history.add(entry.item);
+            if (!entry.shorts) regularHistory.add(entry.item);
             watchedKeys.add(entry.item.stableKey());
         }
         actions.removeAllViews();
@@ -431,8 +439,8 @@ public final class MobileBrowseActivity extends Activity {
         switch (target) {
             case HOME:
                 heading.setText("Главная");
-                if (MobileBrowsePreferences.recommendHistory(this) && !history.isEmpty()) {
-                    List<String> queries = RecommendationEngine.queries(history);
+                if (MobileBrowsePreferences.recommendHistory(this) && !regularHistory.isEmpty()) {
+                    List<String> queries = RecommendationEngine.queries(regularHistory);
                     for (String value : queries) searchAll(value, false);
                 }
                 if (MobileBrowsePreferences.recommendSubscriptions(this)) {
@@ -451,6 +459,10 @@ public final class MobileBrowseActivity extends Activity {
                 break;
             case SHORTS:
                 heading.setText("Shorts");
+                for (VideoItem item : discoveredShorts.values())
+                    if (MobileBrowsePreferences.sourceEnabled(this, item.source)
+                            && !watchedKeys.contains(item.stableKey())) candidates.add(item);
+                baseItems.addAll(candidates);
                 searchShorts();
                 break;
             case LIVE:
@@ -613,6 +625,83 @@ public final class MobileBrowseActivity extends Activity {
         queuedShortSelection = null;
     }
 
+    private boolean handleShortTouch(MotionEvent event) {
+        switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                shortTouchStartX = event.getX();
+                shortTouchStartY = event.getY();
+                shortTouchStartedAt = android.os.SystemClock.uptimeMillis();
+                shortTouchPosition = selectedShortPosition();
+                shortTouchMoving = false;
+                return true;
+            case MotionEvent.ACTION_MOVE:
+                if (!shortTouchMoving && Math.abs(event.getY() - shortTouchStartY) > dp(16)) {
+                    shortTouchMoving = true;
+                    shortsPlayback.pauseForScroll();
+                }
+                return true;
+            case MotionEvent.ACTION_UP:
+                float deltaY = event.getY() - shortTouchStartY;
+                if (Math.abs(deltaY) >= dp(48)
+                        && Math.abs(deltaY) > Math.abs(event.getX() - shortTouchStartX)) {
+                    snapToShort(shortTouchPosition + (deltaY < 0 ? 1 : -1));
+                } else {
+                    int position = list.pointToPosition((int) event.getX(), (int) event.getY());
+                    if (position < 0 || position >= items.size()) position = shortTouchPosition;
+                    if (shortTouchMoving) selectCenteredShort();
+                    if (position >= 0 && position < items.size()) {
+                        VideoItem item = items.get(position);
+                        if (android.os.SystemClock.uptimeMillis() - shortTouchStartedAt >= 550
+                                && !shortTouchMoving) {
+                            VideoActions.show(this, item, () -> showChannel(item));
+                        } else if (!shortTouchMoving) {
+                            View child = list.getChildAt(position - list.getFirstVisiblePosition());
+                            if (child != null) list.performItemClick(child, position, adapter.getItemId(position));
+                        }
+                    }
+                }
+                shortTouchMoving = false;
+                return true;
+            case MotionEvent.ACTION_CANCEL:
+                shortTouchMoving = false;
+                return true;
+            default:
+                return true;
+        }
+    }
+
+    private int centeredShortPosition() {
+        if (items.isEmpty() || list.getChildCount() == 0) return -1;
+        int first = list.getFirstVisiblePosition();
+        if (first < 0 || first >= items.size()) return -1;
+        int center = list.getHeight() / 2;
+        int closest = -1;
+        int distance = Integer.MAX_VALUE;
+        for (int i = 0; i < list.getChildCount(); i++) {
+            View child = list.getChildAt(i);
+            int delta = Math.abs((child.getTop() + child.getBottom()) / 2 - center);
+            if (delta < distance) {
+                closest = first + i;
+                distance = delta;
+            }
+        }
+        return closest >= items.size() ? -1 : closest;
+    }
+
+    private int selectedShortPosition() {
+        if (shortSelectedKey != null) for (int i = 0; i < items.size(); i++)
+            if (shortSelectedKey.equals(items.get(i).stableKey())) return i;
+        return centeredShortPosition();
+    }
+
+    private void snapToShort(int requested) {
+        if (items.isEmpty()) return;
+        int target = Math.max(0, Math.min(items.size() - 1, requested));
+        shortSelectedKey = items.get(target).stableKey();
+        list.setSelection(target);
+        list.post(this::queueShortSelection);
+    }
+
     private void queueShortSelection() {
         cancelShortSelection();
         if (page != Page.SHORTS || items.isEmpty() || scrollState != AbsListView.OnScrollListener.SCROLL_STATE_IDLE)
@@ -627,28 +716,44 @@ public final class MobileBrowseActivity extends Activity {
     private void selectCenteredShort() {
         if (page != Page.SHORTS || list.getChildCount() == 0 || scrollState
                 != AbsListView.OnScrollListener.SCROLL_STATE_IDLE) return;
+        int first = list.getFirstVisiblePosition();
+        if (first < 0 || first >= items.size()) return;
         int center = list.getHeight() / 2;
         View nearest = null;
         int distance = Integer.MAX_VALUE;
         int position = -1;
-        for (int i = 0; i < list.getChildCount(); i++) {
+        if (shortSelectedKey != null) for (int i = 0; i < items.size(); i++) {
+            if (shortSelectedKey.equals(items.get(i).stableKey())) {
+                position = i;
+                nearest = list.getChildAt(i - first);
+                if (nearest == null) {
+                    list.setSelection(i);
+                    list.postDelayed(this::queueShortSelection, 40);
+                    return;
+                }
+                break;
+            }
+        }
+        if (nearest == null) for (int i = 0; i < list.getChildCount(); i++) {
             View child = list.getChildAt(i);
             int delta = Math.abs((child.getTop() + child.getBottom()) / 2 - center);
             if (delta < distance) {
                 nearest = child;
                 distance = delta;
-                position = list.getFirstVisiblePosition() + i;
+                position = first + i;
             }
         }
         if (nearest == null || position < 0 || position >= items.size()) return;
+        if (shortSelectedKey != null
+                && Math.abs((nearest.getTop() + nearest.getBottom()) / 2 - center) > dp(24)) {
+            list.setSelection(position);
+            list.postDelayed(this::queueShortSelection, 40);
+            return;
+        }
+        shortSelectedKey = items.get(position).stableKey();
         Card card = (Card) nearest.getTag();
         shortsPlayback.select(items.get(position), card.artwork, card.image, card.shortCue);
         shortsPlayback.preload(items, position);
-        if (distance > dp(12) && shortSnapAttempts++ < 3) {
-            int offset = (nearest.getTop() + nearest.getBottom()) / 2 - center;
-            list.smoothScrollBy(offset, 220);
-            list.postDelayed(this::queueShortSelection, 300);
-        }
     }
 
     private void settings() {
@@ -666,6 +771,7 @@ public final class MobileBrowseActivity extends Activity {
         for (String source : FeedRepository.SOURCES) {
             enqueue(source, () -> repository.shorts(source, "shorts"));
             enqueue(source, () -> repository.shorts(source, "шортс"));
+            enqueue(source, () -> repository.shorts(source, "популярное"));
             if ("VK VIDEO".equals(source))
                 enqueue(source, () -> repository.shorts(source, "клипы"));
         }
@@ -689,13 +795,26 @@ public final class MobileBrowseActivity extends Activity {
             final boolean failedRequest = failure;
             runOnUiThread(() -> {
                 if (isFinishing() || current != generation) return;
+                int previousShort = page == Page.SHORTS ? centeredShortPosition() : -1;
+                String previousShortKey = page == Page.SHORTS && shortSelectedKey != null
+                        ? shortSelectedKey : previousShort >= 0 && previousShort < items.size()
+                        ? items.get(previousShort).stableKey() : null;
                 pending--;
                 if (failedRequest && !failed.contains(source)) failed.add(source);
+                if (page == Page.HOME || page == Page.POPULAR || page == Page.SEARCH) {
+                    for (VideoItem item : result) if (ShortsCatalog.accepts(item))
+                        discoveredShorts.put(item.stableKey(), item);
+                    while (discoveredShorts.size() > 200)
+                        discoveredShorts.remove(discoveredShorts.keySet().iterator().next());
+                }
                 candidates.addAll(result);
                 baseItems.clear();
                 if (page == Page.HOME && MobileBrowsePreferences.recommendHistory(this)
-                        && !history.isEmpty() && activeChannel == null) {
-                    baseItems.addAll(RecommendationEngine.rank(candidates, history));
+                        && !regularHistory.isEmpty() && activeChannel == null) {
+                    List<VideoItem> regular = new ArrayList<>();
+                    for (VideoItem item : candidates)
+                        if (!ShortsCatalog.accepts(item)) regular.add(item);
+                    baseItems.addAll(RecommendationEngine.rank(regular, regularHistory));
                 } else {
                     Map<String, VideoItem> unique = new LinkedHashMap<>();
                     for (VideoItem item : candidates) unique.put(item.stableKey(), item);
@@ -706,10 +825,17 @@ public final class MobileBrowseActivity extends Activity {
                     while (iterator.hasNext())
                         if (watchedKeys.contains(iterator.next().stableKey())) iterator.remove();
                 }
+                if (page == Page.HOME) baseItems.removeIf(ShortsCatalog::accepts);
                 if (page == Page.POPULAR) Collections.sort(baseItems,
                         (a, b) -> Long.compare(b.views, a.views));
                 applySort();
                 render();
+                if (previousShortKey != null) for (int i = 0; i < items.size(); i++) {
+                    if (previousShortKey.equals(items.get(i).stableKey())) {
+                        list.setSelection(i);
+                        break;
+                    }
+                }
             });
         }));
     }
@@ -774,8 +900,15 @@ public final class MobileBrowseActivity extends Activity {
     }
 
     private void updateShortsPadding() {
-        int padding = page == Page.SHORTS
-                ? Math.max(dp(18), Math.round(list.getHeight() * .12f)) : 0;
+        int padding = 0;
+        if (page == Page.SHORTS && list.getHeight() > 0) {
+            int width = Math.max(dp(180), list.getWidth() - dp(28));
+            float ratio = MobileBrowsePreferences.shortsFrameRatio(this) == 1 ? 5f / 4f : 16f / 9f;
+            int cardHeight = MobileBrowsePreferences.shortsFrameRatio(this) == 2
+                    ? list.getHeight() - dp(30)
+                    : Math.min(Math.round(width * ratio), list.getHeight() - dp(30));
+            padding = Math.max(dp(15), (list.getHeight() - cardHeight) / 2);
+        }
         int bottom = page == Page.SHORTS ? padding : dp(18);
         if (list.getPaddingTop() != padding || list.getPaddingBottom() != bottom)
             list.setPadding(dp(14), padding, dp(14), bottom);
@@ -813,7 +946,7 @@ public final class MobileBrowseActivity extends Activity {
                 : page == Page.SEARCH && searchQuery.length() < 2 ? "Введите хотя бы два символа"
                 : page == Page.SUBSCRIPTIONS ? "Подпишитесь на канал через меню видео"
                 : page == Page.LIVE ? "Сейчас нет подтверждённых эфиров"
-                : page == Page.SHORTS ? "Короткие вертикальные видео пока не найдены"
+                : page == Page.SHORTS ? "Вертикальные видео пока не найдены"
                 : page == Page.FAVORITES ? "Сохранённые видео появятся здесь"
                 : page == Page.HISTORY && shortsHistory ? "Просмотренных Shorts пока нет"
                 : page == Page.LIBRARY || page == Page.HISTORY ? "История просмотра пока пуста"

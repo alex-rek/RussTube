@@ -21,6 +21,10 @@ public final class ShortsCatalogTest {
         assertFalse(ShortsCatalog.accepts(video("Кот #shorts", "https://vk.com/video3", 30_000, 1280, 720)));
         assertFalse(ShortsCatalog.accepts(video("Кот", "https://vk.com/video4", 30_000, 0, 0)));
         assertFalse(ShortsCatalog.accepts(video("Кот #shorts", "https://vk.com/video5", 181_000, 0, 0)));
+        assertTrue(ShortsCatalog.accepts(video("Длинный вертикальный ролик", "https://vk.com/video7",
+                3_600_000, 720, 1280)));
+        assertFalse(ShortsCatalog.accepts(video("Длинный горизонтальный ролик #shorts",
+                "https://vk.com/video8", 3_600_000, 1280, 720)));
         assertFalse(ShortsCatalog.accepts(video("Кот #shorts", "https://vk.com/video6", 30_000, 0, 0)
                 .withChannel("", "", "", true)));
     }

@@ -32,6 +32,7 @@ final class MobileShortsPlayback {
     private final ExecutorService resolver = Executors.newSingleThreadExecutor();
     private final ExecutorService preloader = Executors.newSingleThreadExecutor();
     private final Map<String, PlaybackInfo> prepared = new ConcurrentHashMap<>();
+    private String preloadCurrentKey;
     private Future<?> preloadJob;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Runnable progress = new Runnable() {
@@ -81,7 +82,9 @@ final class MobileShortsPlayback {
 
     void preload(List<VideoItem> feed, int position) {
         int count = MobileBrowsePreferences.shortsPreloadCount(activity);
-        if (preloadJob != null) preloadJob.cancel(true);
+        String currentKey = feed.get(position).stableKey() + "\n" + count;
+        if (currentKey.equals(preloadCurrentKey)) return;
+        preloadCurrentKey = currentKey;
         Set<String> nextKeys = new HashSet<>();
         List<VideoItem> next = new ArrayList<>();
         for (int i = position + 1; i < feed.size() && next.size() < count; i++) {
@@ -89,8 +92,11 @@ final class MobileShortsPlayback {
             if (nextKeys.add(candidate.stableKey())) next.add(candidate);
         }
         if (item != null) nextKeys.add(item.stableKey());
+        if (preloadJob != null) preloadJob.cancel(true);
         prepared.keySet().retainAll(nextKeys);
         if (next.isEmpty()) return;
+        if (BuildConfig.DEBUG) android.util.Log.i("RussTubeShortsPreload",
+                "scheduled=" + next.size() + " current=" + currentKey.hashCode());
         preloadJob = preloader.submit(() -> {
             for (VideoItem candidate : next) {
                 if (Thread.currentThread().isInterrupted()) return;
@@ -101,7 +107,10 @@ final class MobileShortsPlayback {
                         prepared.put(candidate.stableKey(), stream);
                     }
                     PlaybackEngineFactory.preloadShort(activity, candidate, stream);
-                } catch (Exception ignored) {
+                } catch (Exception error) {
+                    if (BuildConfig.DEBUG) android.util.Log.i("RussTubeShortsPreload",
+                            "failed source=" + candidate.source + " reason="
+                                    + error.getClass().getSimpleName());
                     // Continue with the remaining cards; selection can resolve again.
                 }
             }
@@ -177,6 +186,7 @@ final class MobileShortsPlayback {
     void stopPreloading() {
         if (preloadJob != null) preloadJob.cancel(true);
         preloadJob = null;
+        preloadCurrentKey = null;
     }
 
     private void resetDecoder() {

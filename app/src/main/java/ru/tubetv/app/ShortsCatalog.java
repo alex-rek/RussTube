@@ -4,15 +4,16 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
-/** Selects short-form videos using source metadata rather than thumbnail shape. */
+/** Selects vertical videos using stream metadata rather than thumbnail shape. */
 final class ShortsCatalog {
-    private static final long MAX_DURATION_MS = 180_000L;
+    private static final long UNKNOWN_ORIENTATION_MAX_MS = 180_000L;
 
     static boolean accepts(VideoItem item) {
-        if (item == null || item.isLive || item.durationMs <= 0
-                || item.durationMs > MAX_DURATION_MS) return false;
+        if (item == null || item.isLive) return false;
         if (item.maxWidth > 0 && item.maxHeight > 0)
             return item.maxHeight > item.maxWidth;
+        // A title/URL hint cannot prove that a long video is vertical.
+        if (item.durationMs <= 0 || item.durationMs > UNKNOWN_ORIENTATION_MAX_MS) return false;
         String title = item.title == null ? "" : item.title.toLowerCase(Locale.ROOT);
         String page = item.pageUrl == null ? "" : item.pageUrl.toLowerCase(Locale.ROOT);
         return title.contains("#shorts") || title.contains("#шортс")
