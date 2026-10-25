@@ -18,6 +18,7 @@ import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.BaseAdapter;
+import android.widget.AbsListView;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -91,6 +92,13 @@ public final class BrowseActivity extends Activity {
     private ScrollView menuContainer;
     private LinearLayout content;
     private boolean menuExpanded;
+    private int interfaceScaleStep;
+    private int gridScaleStep;
+    private String focusKey;
+    private int focusPosition;
+    private boolean focusPending = true;
+    private boolean returningFromPlayer;
+    private int lastPrefetchPosition;
     private long lastBackAt;
     private TextView clock;
     private final Handler timer = new Handler(Looper.getMainLooper());
@@ -111,6 +119,8 @@ public final class BrowseActivity extends Activity {
                 .getString("video_sort", VideoSort.Mode.NEWEST.name()));
         qualityFilter = Math.max(0, Math.min(QUALITY_LABELS.length - 1,
                 getSharedPreferences("browse", 0).getInt("tv_quality_filter", 0)));
+        interfaceScaleStep = TvScalePreferences.getStep(this, TvScalePreferences.INTERFACE);
+        gridScaleStep = TvScalePreferences.getStep(this, TvScalePreferences.GRID);
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN
                 | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
         setContentView(createContent());
@@ -118,6 +128,8 @@ public final class BrowseActivity extends Activity {
             try { page = Page.valueOf(state.getString("page", "HOME")); }
             catch (IllegalArgumentException ignored) { page = Page.HOME; }
             query.setText(state.getString("query", ""));
+            focusKey = state.getString("focus_key");
+            focusPosition = state.getInt("focus_position", 0);
         }
         show(page);
         String channel = getIntent().getStringExtra("channel");
@@ -140,8 +152,9 @@ public final class BrowseActivity extends Activity {
         for (int i = 0; i < NAV_NAMES.length; i++) {
             final Page target = NAV_PAGES[i];
             Button button = navigationButton(NAV_NAMES[i], NAV_ICONS[i], () -> {
-                setMenuExpanded(false); show(target);
-                if (!items.isEmpty()) grid.requestFocus();
+                setMenuExpanded(false);
+                if (page != target) { focusKey = null; focusPosition = 0; focusPending = true; }
+                show(target);
             });
             button.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
             rail.addView(button, new LinearLayout.LayoutParams(-1, dp(44)));
@@ -194,7 +207,7 @@ public final class BrowseActivity extends Activity {
         query.setSingleLine(true);
         query.setTextColor(Color.WHITE);
         query.setHintTextColor(Color.rgb(145, 156, 175));
-        query.setTextSize(17);
+        query.setTextSize(17 * TvScalePreferences.get(this, TvScalePreferences.INTERFACE));
         query.setHint("Название видео или канала");
         query.setBackgroundResource(R.drawable.search_field_background);
         query.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
@@ -227,11 +240,12 @@ public final class BrowseActivity extends Activity {
         FrameLayout results = new FrameLayout(this);
         grid = new GridView(this);
         grid.setId(View.generateViewId());
-        float width = getResources().getDisplayMetrics().widthPixels / getResources().getDisplayMetrics().density;
-        grid.setNumColumns(width >= 1150 ? 4 : 3);
-        grid.setHorizontalSpacing(dp(14));
-        grid.setVerticalSpacing(dp(16));
-        grid.setPadding(dp(5), dp(5), dp(5), dp(10));
+        grid.setNumColumns(GridView.AUTO_FIT);
+        grid.setColumnWidth(cardDp(Math.round(250 * TvScalePreferences.get(this, TvScalePreferences.GRID))));
+        grid.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
+        grid.setHorizontalSpacing(cardDp(14));
+        grid.setVerticalSpacing(cardDp(16));
+        grid.setPadding(cardDp(5), cardDp(5), cardDp(5), cardDp(10));
         grid.setClipToPadding(false);
         grid.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         grid.setSelector(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
@@ -239,14 +253,25 @@ public final class BrowseActivity extends Activity {
         adapter = new Cards();
         grid.setAdapter(adapter);
         grid.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
-            @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view, int p, long id) { updateCardFocus(); }
+            @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view, int p, long id) {
+                prefetchNear(p, Integer.compare(p, lastPrefetchPosition));
+                lastPrefetchPosition = p;
+                updateCardFocus();
+            }
             @Override public void onNothingSelected(android.widget.AdapterView<?> parent) { updateCardFocus(); }
         });
         grid.setOnFocusChangeListener((v, focused) -> updateCardFocus());
+        grid.setOnScrollListener(new AbsListView.OnScrollListener() {
+            @Override public void onScrollStateChanged(AbsListView view, int state) { }
+            @Override public void onScroll(AbsListView view, int first, int visible, int total) {
+                if (grid != null && visible > 0) prefetchNear(first + visible - 1, 1);
+            }
+        });
         grid.setOnItemClickListener((p, v, position, id) -> {
             if (position < items.size()) {
                 VideoItem item = items.get(position);
-                if (channelsMode) showChannel(item); else VideoActions.play(this, item);
+                if (channelsMode) showChannel(item);
+                else { rememberFocus(); returningFromPlayer = true; VideoActions.play(this, item); }
             }
         });
         grid.setOnItemLongClickListener((p, v, position, id) -> {
@@ -286,6 +311,7 @@ public final class BrowseActivity extends Activity {
     }
 
     private void show(Page target) {
+        if (target == page && !focusPending) rememberFocus();
         cancel();
         page = target;
         activeChannel = null;
@@ -416,6 +442,7 @@ public final class BrowseActivity extends Activity {
     }
 
     private void showChannels() {
+        focusKey = null; focusPosition = 0; focusPending = true;
         cancel(); channelsMode = true; activeChannel = null;
         baseItems.clear(); baseItems.addAll(SubscriptionStore.load(this));
         if (sortButton != null) sortButton.setVisibility(View.GONE);
@@ -447,6 +474,7 @@ public final class BrowseActivity extends Activity {
     }
 
     private void showChannel(VideoItem channel) {
+        focusKey = null; focusPosition = 0; focusPending = true;
         cancel(); channelsMode = false; activeChannel = channel;
         searchRow.setVisibility(View.GONE);
         items.clear(); baseItems.clear(); candidates.clear();
@@ -477,6 +505,7 @@ public final class BrowseActivity extends Activity {
         boolean filmMode = page == Page.FILMS && activeChannel == null;
         pending++;
         jobs.add(io.submit(() -> {
+            long started = android.os.SystemClock.elapsedRealtime();
             List<VideoItem> loaded = new ArrayList<>();
             String error = null;
             try {
@@ -485,6 +514,10 @@ public final class BrowseActivity extends Activity {
                 }
             }
             catch (Exception failure) { error = source; }
+            if (BuildConfig.DEBUG) android.util.Log.i("RussTubeImagePerf", "catalog=" + source
+                    + " urlReadyMs=" + (android.os.SystemClock.elapsedRealtime() - started)
+                    + " thumbnails=" + loaded.stream().filter(item -> item.thumbnail != null
+                    && !item.thumbnail.isEmpty()).count());
             final List<VideoItem> result = loaded;
             final String problem = error;
             runOnUiThread(() -> {
@@ -563,7 +596,48 @@ public final class BrowseActivity extends Activity {
                 + (failed.isEmpty() ? "" : "  ·  Недоступны: " + String.join(", ", failed)));
         empty.setVisibility(items.isEmpty() ? View.VISIBLE : View.GONE);
         empty.setText(loading ? "Подбираем видео…" : emptyText);
-        grid.post(this::updateCardFocus);
+        grid.post(() -> { restoreGridFocus(); updateCardFocus(); });
+    }
+
+    private void rememberFocus() {
+        int position = grid.getSelectedItemPosition();
+        if (position >= 0 && position < items.size()) {
+            focusKey = items.get(position).stableKey();
+            focusPosition = position;
+            focusPending = true;
+        }
+    }
+
+    private void prefetchNear(int position, int direction) {
+        if (position < 0 || items.isEmpty()) return;
+        int width = grid.getColumnWidth();
+        if (width <= 0) width = cardDp(Math.round(250 * TvScalePreferences.get(this, TvScalePreferences.GRID)));
+        int columns = Math.max(1, grid.getNumColumns());
+        int start = direction < 0 ? Math.max(0, position - columns * 2) : position + 1;
+        int end = direction < 0 ? position : Math.min(items.size(), position + columns * 2 + 1);
+        for (int i = start; i < end; i++)
+            ((TubeApplication) getApplication()).imageLoader().prefetch(items.get(i).thumbnail,
+                    width, width * 9 / 16);
+    }
+
+    private void restoreGridFocus() {
+        if (!focusPending) return;
+        if (items.isEmpty()) {
+            if (pending == 0 && !query.hasFocus()) {
+                if (page == Page.SEARCH) query.requestFocus();
+                else if (!menuExpanded) openNavigation();
+            }
+            return;
+        }
+        int position = -1;
+        if (focusKey != null) for (int i = 0; i < items.size(); i++) {
+            if (focusKey.equals(items.get(i).stableKey())) { position = i; break; }
+        }
+        if (position < 0 && focusKey != null && pending > 0) return;
+        if (position < 0) position = Math.min(focusPosition, items.size() - 1);
+        grid.setSelection(position);
+        if (!menuExpanded) grid.requestFocus();
+        focusPending = false;
     }
 
     private void cancel() {
@@ -589,8 +663,11 @@ public final class BrowseActivity extends Activity {
         VideoSort.Mode[] modes = VideoSort.Mode.values();
         String[] labels = new String[modes.length];
         for (int i = 0; i < modes.length; i++) labels[i] = modes[i].label;
-        new AlertDialog.Builder(this).setTitle("Порядок видео")
-                .setSingleChoiceItems(labels, sortMode.ordinal(), (dialog, choice) -> {
+        TextView title = label("Порядок видео", 22, Color.WHITE);
+        title.setPadding(dp(24), dp(16), dp(24), dp(8));
+        AlertDialog dialog = new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setCustomTitle(title)
+                .setSingleChoiceItems(new TvChoiceAdapter(this, labels), sortMode.ordinal(), (window, choice) -> {
                     sortMode = modes[choice];
                     getSharedPreferences("browse", 0).edit()
                             .putString("video_sort", sortMode.name()).apply();
@@ -598,8 +675,11 @@ public final class BrowseActivity extends Activity {
                     applySort();
                     grid.setSelection(0);
                     display("Видео не найдены.");
-                    dialog.dismiss();
-                }).setNegativeButton("Отмена", null).show();
+                    window.dismiss();
+                }).setNegativeButton("Отмена", null).create();
+        dialog.show();
+        dialog.getWindow().setLayout(Math.min(dp(520),
+                getResources().getDisplayMetrics().widthPixels - dp(48)), -2);
     }
 
     private void applySort() {
@@ -626,7 +706,7 @@ public final class BrowseActivity extends Activity {
 
     private Button button(String text, Runnable action) {
         Button b = new Button(this);
-        b.setText(text); b.setTextSize(13); b.setAllCaps(false); b.setTextColor(Color.WHITE);
+        b.setText(text); b.setTextSize(13 * TvScalePreferences.get(this, TvScalePreferences.INTERFACE)); b.setAllCaps(false); b.setTextColor(Color.WHITE);
         b.setPadding(dp(12), 0, dp(12), 0); b.setMinimumWidth(0); b.setMinimumHeight(0);
         b.setBackgroundResource(R.drawable.navigation_item);
         b.setOnClickListener(v -> action.run());
@@ -635,7 +715,7 @@ public final class BrowseActivity extends Activity {
 
     private Button navigationButton(String text, String icon, Runnable action) {
         Button button = button(text, action);
-        button.setTextSize(16);
+        button.setTextSize(16 * TvScalePreferences.get(this, TvScalePreferences.INTERFACE));
         button.setPadding(dp(16), 0, dp(8), 0);
         button.setCompoundDrawablePadding(dp(12));
         button.setCompoundDrawables(TvIcons.icon(icon, Color.rgb(175, 181, 191), dp(24)),
@@ -653,7 +733,7 @@ public final class BrowseActivity extends Activity {
         for (int i = 0; i < navigation.size(); i++) {
             Button button = navigation.get(i);
             boolean selected = NAV_PAGES[i] == page;
-            button.setTextSize(selected ? 20 : 16);
+            button.setTextSize((selected ? 20 : 16) * TvScalePreferences.get(this, TvScalePreferences.INTERFACE));
             button.setTypeface(selected ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
             button.setTextColor(selected ? Color.WHITE : Color.rgb(185, 191, 200));
             button.setCompoundDrawables(TvIcons.icon(NAV_ICONS[i],
@@ -670,6 +750,11 @@ public final class BrowseActivity extends Activity {
     }
 
     private TextView label(String value, int size, int color) {
+        TextView t = new TextView(this); t.setText(value);
+        t.setTextSize(size * TvScalePreferences.get(this, TvScalePreferences.INTERFACE)); t.setTextColor(color);
+        t.setGravity(Gravity.CENTER_VERTICAL); return t;
+    }
+    private TextView cardLabel(String value, int size, int color) {
         TextView t = new TextView(this); t.setText(value); t.setTextSize(size); t.setTextColor(color);
         t.setGravity(Gravity.CENTER_VERTICAL); return t;
     }
@@ -677,7 +762,9 @@ public final class BrowseActivity extends Activity {
         LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(width < 0 ? width : dp(width), dp(height));
         p.setMargins(dp(left), 0, dp(6), dp(bottom)); return p;
     }
-    private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
+    private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density
+            * TvScalePreferences.get(this, TvScalePreferences.INTERFACE)); }
+    private int cardDp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
     private interface Load { List<VideoItem> run() throws Exception; }
 
     private void goBack() {
@@ -720,12 +807,33 @@ public final class BrowseActivity extends Activity {
     @Override public void onBackPressed() { goBack(); }
     @Override protected void onSaveInstanceState(Bundle state) {
         state.putString("page", page.name()); state.putString("query", query.getText().toString());
+        state.putString("focus_key", focusKey);
+        state.putInt("focus_position", focusPosition);
         super.onSaveInstanceState(state);
     }
     @Override protected void onResume() {
         super.onResume();
         updates.onResume();
         if (firstResume) { firstResume = false; return; }
+        int newInterfaceStep = TvScalePreferences.getStep(this, TvScalePreferences.INTERFACE);
+        int newGridStep = TvScalePreferences.getStep(this, TvScalePreferences.GRID);
+        if (newInterfaceStep != interfaceScaleStep) {
+            rememberFocus();
+            recreate();
+            return;
+        }
+        if (newGridStep != gridScaleStep) {
+            gridScaleStep = newGridStep;
+            grid.setColumnWidth(cardDp(Math.round(250 * TvScalePreferences.get(this, TvScalePreferences.GRID))));
+            grid.requestLayout();
+        }
+        if (returningFromPlayer && page != Page.FAVORITES) {
+            returningFromPlayer = false;
+            adapter.notifyDataSetChanged();
+            grid.post(this::restoreGridFocus);
+            return;
+        }
+        returningFromPlayer = false;
         sortMode = VideoSort.parse(getSharedPreferences("browse", 0)
                 .getString("video_sort", VideoSort.Mode.NEWEST.name()));
         if (activeChannel != null) { showChannel(activeChannel); return; }
@@ -760,7 +868,7 @@ public final class BrowseActivity extends Activity {
                 card.setOrientation(LinearLayout.VERTICAL);
                 card.setClipToOutline(true);
                 GradientDrawable background = new GradientDrawable();
-                background.setColor(Color.rgb(23, 26, 33)); background.setCornerRadius(dp(12)); card.setBackground(background);
+                background.setColor(Color.rgb(23, 26, 33)); background.setCornerRadius(cardDp(12)); card.setBackground(background);
                 FrameLayout artwork = new FrameLayout(BrowseActivity.this) {
                     @Override protected void onMeasure(int widthSpec, int heightSpec) {
                         int width = View.MeasureSpec.getSize(widthSpec);
@@ -771,35 +879,35 @@ public final class BrowseActivity extends Activity {
                 ImageView image = new ImageView(BrowseActivity.this);
                 image.setScaleType(ImageView.ScaleType.CENTER_CROP);
                 artwork.addView(image, new FrameLayout.LayoutParams(-1, -1));
-                TextView platform = label("", 11, Color.WHITE);
-                platform.setPadding(dp(7), 0, dp(7), 0);
+                TextView platform = cardLabel("", 11, Color.WHITE);
+                platform.setPadding(cardDp(7), 0, cardDp(7), 0);
                 platform.setBackgroundColor(Color.rgb(28, 31, 38));
-                FrameLayout.LayoutParams platformParams = new FrameLayout.LayoutParams(-2, dp(24), Gravity.TOP | Gravity.START);
-                platformParams.setMargins(dp(8), dp(8), 0, 0); artwork.addView(platform, platformParams);
-                TextView duration = label("", 11, Color.WHITE);
-                duration.setPadding(dp(6), 0, dp(6), 0); duration.setBackgroundColor(Color.rgb(16, 18, 22));
-                FrameLayout.LayoutParams durationParams = new FrameLayout.LayoutParams(-2, dp(22), Gravity.BOTTOM | Gravity.END);
-                durationParams.setMargins(0, 0, dp(8), dp(8)); artwork.addView(duration, durationParams);
-                TextView more = label("⋮", 23, Color.WHITE); more.setGravity(Gravity.CENTER);
+                FrameLayout.LayoutParams platformParams = new FrameLayout.LayoutParams(-2, cardDp(24), Gravity.TOP | Gravity.START);
+                platformParams.setMargins(cardDp(8), cardDp(8), 0, 0); artwork.addView(platform, platformParams);
+                TextView duration = cardLabel("", 11, Color.WHITE);
+                duration.setPadding(cardDp(6), 0, cardDp(6), 0); duration.setBackgroundColor(Color.rgb(16, 18, 22));
+                FrameLayout.LayoutParams durationParams = new FrameLayout.LayoutParams(-2, cardDp(22), Gravity.BOTTOM | Gravity.END);
+                durationParams.setMargins(0, 0, cardDp(8), cardDp(8)); artwork.addView(duration, durationParams);
+                TextView more = cardLabel("⋮", 23, Color.WHITE); more.setGravity(Gravity.CENTER);
                 more.setBackgroundColor(Color.rgb(28, 31, 38));
-                FrameLayout.LayoutParams moreParams = new FrameLayout.LayoutParams(dp(24), dp(28), Gravity.TOP | Gravity.END);
-                moreParams.setMargins(0, dp(8), dp(8), 0); artwork.addView(more, moreParams);
+                FrameLayout.LayoutParams moreParams = new FrameLayout.LayoutParams(cardDp(24), cardDp(28), Gravity.TOP | Gravity.END);
+                moreParams.setMargins(0, cardDp(8), cardDp(8), 0); artwork.addView(more, moreParams);
                 ProgressBar progress = new ProgressBar(BrowseActivity.this, null, android.R.attr.progressBarStyleHorizontal);
                 progress.setMax(1000); progress.setProgressTintList(android.content.res.ColorStateList.valueOf(Color.rgb(229, 57, 53)));
                 progress.setProgressBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.TRANSPARENT));
-                artwork.addView(progress, new FrameLayout.LayoutParams(-1, dp(3), Gravity.BOTTOM));
+                artwork.addView(progress, new FrameLayout.LayoutParams(-1, cardDp(3), Gravity.BOTTOM));
                 card.addView(artwork, new LinearLayout.LayoutParams(-1, -2));
                 LinearLayout details = new LinearLayout(BrowseActivity.this);
-                details.setOrientation(LinearLayout.VERTICAL); details.setPadding(dp(12), dp(10), dp(12), dp(10));
-                TextView title = label("", 14, Color.WHITE); title.setMaxLines(2);
+                details.setOrientation(LinearLayout.VERTICAL); details.setPadding(cardDp(12), cardDp(10), cardDp(12), cardDp(10));
+                TextView title = cardLabel("", 14, Color.WHITE); title.setMaxLines(2);
                 title.setEllipsize(TextUtils.TruncateAt.END);
-                details.addView(title, new LinearLayout.LayoutParams(-1, dp(40)));
-                TextView channel = label("", 12, Color.rgb(174, 187, 204)); channel.setSingleLine(true);
-                details.addView(channel, new LinearLayout.LayoutParams(-1, dp(19)));
-                TextView views = label("", 12, Color.rgb(174, 187, 204)); views.setSingleLine(true);
-                details.addView(views, new LinearLayout.LayoutParams(-1, dp(19)));
-                TextView date = label("", 12, Color.rgb(174, 187, 204)); date.setSingleLine(true);
-                details.addView(date, new LinearLayout.LayoutParams(-1, dp(19)));
+                details.addView(title, new LinearLayout.LayoutParams(-1, cardDp(40)));
+                TextView channel = cardLabel("", 12, Color.rgb(174, 187, 204)); channel.setSingleLine(true);
+                details.addView(channel, new LinearLayout.LayoutParams(-1, cardDp(19)));
+                TextView views = cardLabel("", 12, Color.rgb(174, 187, 204)); views.setSingleLine(true);
+                details.addView(views, new LinearLayout.LayoutParams(-1, cardDp(19)));
+                TextView date = cardLabel("", 12, Color.rgb(174, 187, 204)); date.setSingleLine(true);
+                details.addView(date, new LinearLayout.LayoutParams(-1, cardDp(19)));
                 card.addView(details, new LinearLayout.LayoutParams(-1, -2));
                 holder = new Card(image, title, channel, views, date, platform, duration, progress);
                 card.setTag(holder); recycled = card;
@@ -824,9 +932,12 @@ public final class BrowseActivity extends Activity {
             holder.title.setSingleLine(false); holder.title.setSelected(false);
             holder.title.setEllipsize(TextUtils.TruncateAt.END);
             GradientDrawable background = new GradientDrawable();
-            background.setColor(Color.rgb(23, 26, 33)); background.setCornerRadius(dp(12)); recycled.setBackground(background);
+            background.setColor(Color.rgb(23, 26, 33)); background.setCornerRadius(cardDp(12)); recycled.setBackground(background);
             recycled.setScaleX(1); recycled.setScaleY(1);
-            ((TubeApplication) getApplication()).imageLoader().load(item.thumbnail, holder.image);
+            int width = grid.getColumnWidth();
+            if (width <= 0) width = cardDp(Math.round(250 * TvScalePreferences.get(BrowseActivity.this, TvScalePreferences.GRID)));
+            ((TubeApplication) getApplication()).imageLoader().load(item.thumbnail, holder.image,
+                    width, width * 9 / 16);
             return recycled;
         }
     }

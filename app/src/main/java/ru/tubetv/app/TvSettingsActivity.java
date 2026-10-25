@@ -37,6 +37,8 @@ public final class TvSettingsActivity extends Activity {
     private GridView grid;
     private int category = -1;
     private int drawerWidth;
+    private SideSelectionPanel selectionPanel;
+    private View selectionOrigin;
     private EditText proxyHost, proxyPort, proxyUser, proxyPassword;
     private TextView proxyStatus;
     private String proxyType;
@@ -54,11 +56,11 @@ public final class TvSettingsActivity extends Activity {
         root.setBackgroundColor(0xff0b0f14);
         root.setPadding(dp(48), dp(28), dp(48), dp(24));
         TextView title = new TextView(this);
-        title.setText("Настройки"); title.setTextSize(30); title.setTextColor(Color.WHITE);
+        title.setText("Настройки"); title.setTextSize(30 * TvScalePreferences.get(this, TvScalePreferences.INTERFACE)); title.setTextColor(Color.WHITE);
         root.addView(title);
         TextView hint = new TextView(this);
         hint.setText("Выберите раздел · Назад — вернуться в каталог");
-        hint.setTextSize(14); hint.setTextColor(0xffaeb9cc);
+        hint.setTextSize(14 * TvScalePreferences.get(this, TvScalePreferences.INTERFACE)); hint.setTextColor(0xffaeb9cc);
         LinearLayout.LayoutParams hintParams = new LinearLayout.LayoutParams(-1, dp(40));
         hintParams.bottomMargin = dp(16);
         root.addView(hint, hintParams);
@@ -84,11 +86,11 @@ public final class TvSettingsActivity extends Activity {
                 tile.setFocusable(false);
                 tile.setBackground(tileBackground(false));
                 TextView symbol = new TextView(TvSettingsActivity.this);
-                symbol.setText(SYMBOLS[position]); symbol.setTextSize(34);
+                symbol.setText(SYMBOLS[position]); symbol.setTextSize(34 * TvScalePreferences.get(TvSettingsActivity.this, TvScalePreferences.INTERFACE));
                 symbol.setTextColor(0xffe53935); symbol.setGravity(Gravity.CENTER);
                 tile.addView(symbol, new LinearLayout.LayoutParams(-1, dp(54)));
                 TextView label = new TextView(TvSettingsActivity.this);
-                label.setText(CATEGORIES[position]); label.setTextSize(19);
+                label.setText(CATEGORIES[position]); label.setTextSize(19 * TvScalePreferences.get(TvSettingsActivity.this, TvScalePreferences.INTERFACE));
                 label.setTextColor(Color.WHITE); label.setGravity(Gravity.CENTER);
                 tile.addView(label, new LinearLayout.LayoutParams(-1, dp(48)));
                 tile.setOnClickListener(v -> openCategory(position));
@@ -228,6 +230,13 @@ public final class TvSettingsActivity extends Activity {
     }
 
     private void interfaceSettings() {
+        section("Размеры");
+        row("Масштаб интерфейса", TvScalePreferences.label(
+                TvScalePreferences.getStep(this, TvScalePreferences.INTERFACE)),
+                () -> openScale("Масштаб интерфейса", TvScalePreferences.INTERFACE));
+        row("Масштаб сетки видео", TvScalePreferences.label(
+                TvScalePreferences.getStep(this, TvScalePreferences.GRID)),
+                () -> openScale("Масштаб сетки видео", TvScalePreferences.GRID));
         section("Порядок видео");
         VideoSort.Mode current = VideoSort.parse(getSharedPreferences("browse", 0)
                 .getString("video_sort", VideoSort.Mode.NEWEST.name()));
@@ -237,10 +246,37 @@ public final class TvSettingsActivity extends Activity {
             row(modes[i].label, modes[i] == current ? "✓" : "", () -> {
                 getSharedPreferences("browse", 0).edit()
                         .putString("video_sort", modes[index].name()).apply();
-                renderPanel(index);
+                renderPanel(index + 2);
             });
         }
         note("Выбор применяется к ленте после возврата в каталог.");
+    }
+
+    private void openScale(String title, String key) {
+        selectionOrigin = getCurrentFocus();
+        String[] labels = new String[TvScalePreferences.LAST_STEP + 1];
+        for (int i = 0; i < labels.length; i++) labels[i] = TvScalePreferences.label(i);
+        selectionPanel = new SideSelectionPanel(this, title, labels,
+                TvScalePreferences.getStep(this, key), selected -> {
+                    TvScalePreferences.setStep(this, key, selected);
+                    closeSelection();
+                    renderPanel(TvScalePreferences.GRID.equals(key) ? 1 : 0);
+                });
+        int width = Math.min(dp(390), Math.round(getResources().getDisplayMetrics().widthPixels * .42f));
+        screen.addView(selectionPanel, new FrameLayout.LayoutParams(width, -1, Gravity.RIGHT));
+        selectionPanel.setTranslationX(width);
+        selectionPanel.animate().translationX(0).setDuration(180).start();
+    }
+
+    private void closeSelection() {
+        if (selectionPanel == null) return;
+        SideSelectionPanel panel = selectionPanel;
+        selectionPanel = null;
+        panel.animate().translationX(panel.getWidth()).setDuration(160)
+                .withEndAction(() -> screen.removeView(panel)).start();
+        if (selectionOrigin != null && selectionOrigin.isAttachedToWindow())
+            selectionOrigin.requestFocus();
+        selectionOrigin = null;
     }
 
     private void playerSettings() {
@@ -422,7 +458,7 @@ public final class TvSettingsActivity extends Activity {
     private TextView text(String value, int size, int color) {
         TextView result = new TextView(this);
         result.setText(value);
-        result.setTextSize(size);
+        result.setTextSize(size * TvScalePreferences.get(this, TvScalePreferences.INTERFACE));
         result.setTextColor(color);
         result.setGravity(Gravity.CENTER_VERTICAL);
         return result;
@@ -446,7 +482,8 @@ public final class TvSettingsActivity extends Activity {
     }
 
     @Override public void onBackPressed() {
-        if (category >= 0) closePanel();
+        if (selectionPanel != null) closeSelection();
+        else if (category >= 0) closePanel();
         else super.onBackPressed();
     }
 
@@ -475,5 +512,6 @@ public final class TvSettingsActivity extends Activity {
         super.onSaveInstanceState(state);
     }
 
-    private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
+    private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density
+            * TvScalePreferences.get(this, TvScalePreferences.INTERFACE)); }
 }

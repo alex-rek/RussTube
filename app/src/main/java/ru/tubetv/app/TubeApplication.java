@@ -3,10 +3,11 @@ package ru.tubetv.app;
 import android.app.Application;
 
 public final class TubeApplication extends Application {
-    private final ImageLoader imageLoader = new ImageLoader();
+    private ImageLoader imageLoader;
 
     @Override public void onCreate() {
         super.onCreate();
+        imageLoader = new ImageLoader(this);
         ScopedCookies.install();
         NetworkProxy.install(this);
         clearObsoleteCrashAfterUpdate();

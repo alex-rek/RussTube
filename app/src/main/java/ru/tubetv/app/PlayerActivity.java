@@ -2,6 +2,7 @@ package ru.tubetv.app;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.res.Configuration;
 import android.graphics.Color;
@@ -21,6 +22,7 @@ import android.view.ViewConfiguration;
 import android.view.WindowManager;
 import android.view.animation.OvershootInterpolator;
 import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
@@ -35,9 +37,11 @@ import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.media3.common.C;
+import androidx.media3.common.Format;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
 import androidx.media3.common.Tracks;
+import androidx.media3.common.TrackSelectionOverride;
 import androidx.media3.common.VideoSize;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.exoplayer.ExoPlayer;
@@ -125,6 +129,7 @@ public final class PlayerActivity extends Activity {
     private boolean windowFocused = true;
     private boolean playbackFailed;
     private boolean captionsDisabled;
+    private boolean captionsMenuVisible;
     private boolean destroyed;
     private final Runnable openMenuFromLongCenter = () -> {
         if (centerKeyHeld && player != null) {
@@ -221,7 +226,7 @@ public final class PlayerActivity extends Activity {
         root.addView(loading, new FrameLayout.LayoutParams(dp(64), dp(64), Gravity.CENTER));
         message = new TextView(this);
         message.setTextColor(Color.WHITE);
-        message.setTextSize(18);
+        message.setTextSize(18 * tvUiScale());
         message.setGravity(Gravity.CENTER);
         message.setPadding(dp(30), dp(20), dp(30), dp(20));
         root.addView(message, new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER));
@@ -237,7 +242,8 @@ public final class PlayerActivity extends Activity {
 
         playbackMenu = createPlaybackMenu();
         FrameLayout.LayoutParams menuParams = new FrameLayout.LayoutParams(
-                mobileMode ? -1 : getResources().getDisplayMetrics().widthPixels * 34 / 100,
+                mobileMode ? -1 : Math.min(getResources().getDisplayMetrics().widthPixels * 55 / 100,
+                        Math.round(getResources().getDisplayMetrics().widthPixels * .34f * tvUiScale())),
                 mobileMode ? -2 : -1, mobileMode ? Gravity.BOTTOM : Gravity.END);
         root.addView(playbackMenu, menuParams);
 
@@ -269,7 +275,7 @@ public final class PlayerActivity extends Activity {
             updateControls();
         }, false);
         if (!mobileMode) addPlayerControl(row, "1×", "Скорость воспроизведения", () -> setPlaybackMenuVisible(true), false);
-        if (!mobileMode) captionsState = addPlayerControl(row, "CC", "Субтитры", this::toggleCaptions, false);
+        if (!mobileMode) captionsState = addPlayerControl(row, "CC", "Субтитры", this::showCaptionsMenu, false);
         if (captionsState != null) captionsState.setVisibility(View.GONE);
         if (!mobileMode && !historyItem.channelId.isEmpty()) subscriptionState = addPlayerControl(row, "⊕",
                 "Подписаться на канал", this::toggleSubscription, false);
@@ -278,7 +284,14 @@ public final class PlayerActivity extends Activity {
                 setPlaybackMenuVisible(!playbackMenuVisible), false);
         row.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
         row.addView(time, new LinearLayout.LayoutParams(dp(mobileMode ? 78 : isCompactPlayer() ? 108 : 150), dp(58)));
-        controls.addView(row, new LinearLayout.LayoutParams(-1, dp(58)));
+        if (mobileMode) controls.addView(row, new LinearLayout.LayoutParams(-1, dp(58)));
+        else {
+            HorizontalScrollView scrollingControls = new HorizontalScrollView(this);
+            scrollingControls.setFillViewport(true);
+            scrollingControls.setHorizontalScrollBarEnabled(false);
+            scrollingControls.addView(row, new HorizontalScrollView.LayoutParams(-2, dp(58)));
+            controls.addView(scrollingControls, new LinearLayout.LayoutParams(-1, dp(58)));
+        }
 
         timeline = new SeekBar(this);
         timeline.setFocusable(true);
@@ -346,7 +359,7 @@ public final class PlayerActivity extends Activity {
         TextView label = new TextView(this);
         label.setText(value == null ? "" : value);
         label.setTextColor(Color.WHITE);
-        label.setTextSize(sp);
+        label.setTextSize(sp * tvUiScale());
         return label;
     }
 
@@ -536,9 +549,10 @@ public final class PlayerActivity extends Activity {
 
             @Override public void onTracksChanged(Tracks tracks) {
                 boolean captionsAvailable = false;
-                for (Tracks.Group group : tracks.getGroups()) {
-                    if (group.getType() == C.TRACK_TYPE_TEXT) captionsAvailable = true;
-                }
+                for (Tracks.Group group : tracks.getGroups())
+                    if (group.getType() == C.TRACK_TYPE_TEXT)
+                        for (int i = 0; i < group.length; i++)
+                            if (group.isTrackSupported(i)) captionsAvailable = true;
                 if (captionsState != null) captionsState.setVisibility(captionsAvailable ? View.VISIBLE : View.GONE);
             }
 
@@ -578,7 +592,7 @@ public final class PlayerActivity extends Activity {
 
     private void scheduleControlsHide() {
         ui.removeCallbacks(hideControls);
-        if (audioOnly || playbackMenuVisible || scrubbing || dpadScrubbing
+        if (audioOnly || playbackMenuVisible || captionsMenuVisible || scrubbing || dpadScrubbing
                 || timeline.hasFocus()
                 || controlsDragging || player == null
                 || controls.getVisibility() != View.VISIBLE
@@ -675,11 +689,74 @@ public final class PlayerActivity extends Activity {
         } catch (Exception error) { focusedHint.setText(error.getMessage()); }
     }
 
-    private void toggleCaptions() {
-        captionsDisabled = !captionsDisabled;
-        if (player != null) player.setTrackSelectionParameters(player.getTrackSelectionParameters()
-                .buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, captionsDisabled).build());
-        captionsState.setAlpha(captionsDisabled ? .5f : 1f);
+    private static final class SubtitleChoice {
+        final Tracks.Group group;
+        final int track;
+        final String label;
+        final int order;
+        SubtitleChoice(Tracks.Group group, int track, String label, int order) {
+            this.group = group; this.track = track; this.label = label; this.order = order;
+        }
+    }
+
+    private void showCaptionsMenu() {
+        if (player == null || captionsState == null) return;
+        List<SubtitleChoice> choices = new ArrayList<>();
+        int selected = captionsDisabled ? 0 : -1;
+        for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
+            if (group.getType() != C.TRACK_TYPE_TEXT) continue;
+            for (int track = 0; track < group.length; track++) {
+                if (!group.isTrackSupported(track)) continue;
+                Format format = group.getTrackFormat(track);
+                String language = format.language == null ? "" : format.language;
+                String code = Locale.forLanguageTag(language).getLanguage();
+                String name = "ru".equals(code) ? "Русский" : "en".equals(code) ? "English"
+                        : language.isEmpty() || "und".equals(language) ? "Субтитры"
+                        : Locale.forLanguageTag(language).getDisplayLanguage(new Locale("ru"));
+                String label = format.label == null || format.label.isEmpty() ? name
+                        : name + " · " + format.label;
+                int order = "ru".equals(code) ? 0 : "en".equals(code) ? 1 : 2;
+                choices.add(new SubtitleChoice(group, track, label, order));
+            }
+        }
+        if (choices.isEmpty()) return;
+        choices.sort((a, b) -> Integer.compare(a.order, b.order));
+        String[] labels = new String[choices.size() + 1];
+        labels[0] = "Выключено";
+        for (int i = 0; i < choices.size(); i++) {
+            SubtitleChoice choice = choices.get(i);
+            labels[i + 1] = choice.label;
+            if (!captionsDisabled && choice.group.isTrackSelected(choice.track)) selected = i + 1;
+        }
+        captionsMenuVisible = true;
+        ui.removeCallbacks(hideControls);
+        TextView title = label("Субтитры", 22);
+        title.setPadding(dp(24), dp(16), dp(24), dp(8));
+        AlertDialog dialog = new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setCustomTitle(title)
+                .setSingleChoiceItems(new TvChoiceAdapter(this, labels), selected, (window, index) -> {
+                    androidx.media3.common.TrackSelectionParameters.Builder parameters =
+                            player.getTrackSelectionParameters().buildUpon()
+                                    .clearOverridesOfType(C.TRACK_TYPE_TEXT);
+                    captionsDisabled = index == 0;
+                    parameters.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, captionsDisabled);
+                    if (!captionsDisabled) {
+                        SubtitleChoice choice = choices.get(index - 1);
+                        parameters.setOverrideForType(new TrackSelectionOverride(
+                                choice.group.getMediaTrackGroup(), choice.track));
+                    }
+                    player.setTrackSelectionParameters(parameters.build());
+                    captionsState.setAlpha(captionsDisabled ? .5f : 1f);
+                    window.dismiss();
+                }).create();
+        dialog.setOnDismissListener(ignored -> {
+            captionsMenuVisible = false;
+            showControls();
+            captionsState.requestFocus();
+        });
+        dialog.show();
+        dialog.getWindow().setLayout(Math.min(dp(520),
+                getResources().getDisplayMetrics().widthPixels - dp(48)), -2);
     }
 
     private void updateScreenAwake() {
@@ -1156,5 +1233,11 @@ public final class PlayerActivity extends Activity {
         updateScreenAwake();
     }
 
-    private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
+    private float tvUiScale() {
+        return mobileMode ? 1f : TvScalePreferences.get(this, TvScalePreferences.INTERFACE);
+    }
+
+    private int dp(int value) {
+        return Math.round(value * getResources().getDisplayMetrics().density * tvUiScale());
+    }
 }

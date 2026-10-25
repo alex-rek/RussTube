@@ -329,7 +329,14 @@ public final class MobileBrowseActivity extends Activity {
                     cancelShortSelection(); shortsPlayback.pauseForScroll();
                 }
             }
-            @Override public void onScroll(AbsListView view, int first, int count, int total) { }
+            @Override public void onScroll(AbsListView view, int first, int count, int total) {
+                if (page == Page.SHORTS || count <= 0) return;
+                int width = list.getColumnWidth();
+                if (width <= 0) width = Math.max(dp(180), getResources().getDisplayMetrics().widthPixels - dp(28));
+                for (int i = first + count; i < Math.min(items.size(), first + count + 4); i++)
+                    ((TubeApplication) getApplication()).imageLoader().prefetch(
+                            items.get(i).thumbnail, width, width * 9 / 16);
+            }
         });
         list.setOnTouchListener((view, event) -> {
             if (page != Page.HOME || activeChannel != null) return false;
@@ -669,10 +676,15 @@ public final class MobileBrowseActivity extends Activity {
         int current = generation;
         pending++;
         jobs.add(io.submit(() -> {
+            long started = android.os.SystemClock.elapsedRealtime();
             List<VideoItem> loaded = new ArrayList<>();
             boolean failure = false;
             try { loaded = operation.run(); }
             catch (Exception error) { failure = true; }
+            if (BuildConfig.DEBUG) android.util.Log.i("RussTubeImagePerf", "catalog=" + source
+                    + " urlReadyMs=" + (android.os.SystemClock.elapsedRealtime() - started)
+                    + " thumbnails=" + loaded.stream().filter(item -> item.thumbnail != null
+                    && !item.thumbnail.isEmpty()).count());
             final List<VideoItem> result = loaded;
             final boolean failedRequest = failure;
             runOnUiThread(() -> {
@@ -1078,7 +1090,11 @@ public final class MobileBrowseActivity extends Activity {
             if (total > 0) card.progress.setProgress((int) Math.min(1000, watched.positionMs * 1000 / total));
             card.more.setOnClickListener(v -> VideoActions.show(MobileBrowseActivity.this, item,
                     () -> showChannel(item)));
-            ((TubeApplication) getApplication()).imageLoader().load(item.thumbnail, card.image);
+            int thumbnailWidth = list.getColumnWidth();
+            if (thumbnailWidth <= 0) thumbnailWidth = Math.max(dp(180),
+                    getResources().getDisplayMetrics().widthPixels - dp(28));
+            ((TubeApplication) getApplication()).imageLoader().load(item.thumbnail, card.image,
+                    thumbnailWidth, thumbnailWidth * 9 / 16);
             return recycled;
         }
     }
