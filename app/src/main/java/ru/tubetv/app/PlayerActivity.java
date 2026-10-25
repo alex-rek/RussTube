@@ -702,7 +702,7 @@ public final class PlayerActivity extends Activity {
     private void showCaptionsMenu() {
         if (player == null || captionsState == null) return;
         List<SubtitleChoice> choices = new ArrayList<>();
-        int selected = captionsDisabled ? 0 : -1;
+        int selected = 0;
         for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
             if (group.getType() != C.TRACK_TYPE_TEXT) continue;
             for (int track = 0; track < group.length; track++) {
