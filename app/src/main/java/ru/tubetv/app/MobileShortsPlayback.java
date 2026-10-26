@@ -25,12 +25,12 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.function.Consumer;
 
 /** One video decoder for the centered card in the mobile Shorts feed. */
 final class MobileShortsPlayback {
+    interface UnavailableListener { void onUnavailable(VideoItem item); }
     private final Activity activity;
-    private final Consumer<VideoItem> onUnavailable;
+    private final UnavailableListener onUnavailable;
     private final ExecutorService resolver = Executors.newSingleThreadExecutor();
     private final ExecutorService preloader = Executors.newSingleThreadExecutor();
     private final Map<String, PlaybackInfo> prepared = new ConcurrentHashMap<>();
@@ -60,7 +60,7 @@ final class MobileShortsPlayback {
     private int videoHeight;
     private float pixelRatio = 1f;
 
-    MobileShortsPlayback(Activity activity, Consumer<VideoItem> onUnavailable) {
+    MobileShortsPlayback(Activity activity, UnavailableListener onUnavailable) {
         this.activity = activity;
         this.onUnavailable = onUnavailable;
     }
@@ -234,7 +234,7 @@ final class MobileShortsPlayback {
                     UnavailableVideoStore.add(activity, target);
                     resolving = null;
                     indicator.setText("Не удалось воспроизвести · нажмите для повтора");
-                    main.post(() -> onUnavailable.accept(target));
+                    main.post(() -> onUnavailable.onUnavailable(target));
                 });
                 return;
             }
@@ -299,7 +299,7 @@ final class MobileShortsPlayback {
                     indicator.setVisibility(View.VISIBLE);
                     thumbnail.setVisibility(View.VISIBLE);
                     keepScreenAwake();
-                    main.post(() -> onUnavailable.accept(target));
+                    main.post(() -> onUnavailable.onUnavailable(target));
                 }
             });
             player.setMediaItem(PlaybackEngineFactory.mediaItem(stream.streamUrl,
@@ -315,7 +315,7 @@ final class MobileShortsPlayback {
             indicator.setText("Ошибка видео · нажмите для повтора");
             indicator.setTextSize(15);
             indicator.setVisibility(View.VISIBLE);
-            main.post(() -> onUnavailable.accept(target));
+            main.post(() -> onUnavailable.onUnavailable(target));
         }
     }
 

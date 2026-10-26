@@ -72,6 +72,7 @@ public final class MobileBrowseActivity extends Activity {
     private final List<VideoItem> items = new ArrayList<>();
     private final List<VideoItem> baseItems = new ArrayList<>();
     private final List<VideoItem> candidates = new ArrayList<>();
+    private final List<VideoItem> subscriptionCandidates = new ArrayList<>();
     private final Map<String, VideoItem> discoveredShorts = new LinkedHashMap<>();
     private final List<VideoItem> history = new ArrayList<>();
     private final List<VideoItem> regularHistory = new ArrayList<>();
@@ -421,7 +422,8 @@ public final class MobileBrowseActivity extends Activity {
         cancel();
         page = target;
         activeChannel = null;
-        items.clear(); baseItems.clear(); candidates.clear(); history.clear(); regularHistory.clear();
+        items.clear(); baseItems.clear(); candidates.clear(); subscriptionCandidates.clear();
+        history.clear(); regularHistory.clear();
         historyEntries.clear(); watchedKeys.clear();
         historyEntries.addAll(WatchHistoryStore.load(this));
         for (WatchHistoryStore.Entry entry : historyEntries) {
@@ -445,7 +447,7 @@ public final class MobileBrowseActivity extends Activity {
                 }
                 if (MobileBrowsePreferences.recommendSubscriptions(this)) {
                     for (VideoItem channel : SubscriptionStore.load(this))
-                        enqueue(channel.source, () -> repository.channel(channel));
+                        enqueueSubscription(channel);
                 }
                 searchAll("популярное", false);
                 break;
@@ -779,6 +781,14 @@ public final class MobileBrowseActivity extends Activity {
     }
 
     private void enqueue(String source, Load operation) {
+        enqueue(source, operation, false);
+    }
+
+    private void enqueueSubscription(VideoItem channel) {
+        enqueue(channel.source, () -> repository.channel(channel), true);
+    }
+
+    private void enqueue(String source, Load operation, boolean subscription) {
         if (!MobileBrowsePreferences.sourceEnabled(this, source)) return;
         int current = generation;
         pending++;
@@ -788,10 +798,14 @@ public final class MobileBrowseActivity extends Activity {
             boolean failure = false;
             try { loaded = operation.run(); }
             catch (Exception error) { failure = true; }
-            if (BuildConfig.DEBUG) android.util.Log.i("RussTubeImagePerf", "catalog=" + source
-                    + " urlReadyMs=" + (android.os.SystemClock.elapsedRealtime() - started)
-                    + " thumbnails=" + loaded.stream().filter(item -> item.thumbnail != null
-                    && !item.thumbnail.isEmpty()).count());
+            if (BuildConfig.DEBUG) {
+                int thumbnailCount = 0;
+                for (VideoItem item : loaded)
+                    if (item.thumbnail != null && !item.thumbnail.isEmpty()) thumbnailCount++;
+                android.util.Log.i("RussTubeImagePerf", "catalog=" + source
+                        + " urlReadyMs=" + (android.os.SystemClock.elapsedRealtime() - started)
+                        + " thumbnails=" + thumbnailCount);
+            }
             final List<VideoItem> result = loaded;
             final boolean failedRequest = failure;
             runOnUiThread(() -> {
@@ -809,13 +823,11 @@ public final class MobileBrowseActivity extends Activity {
                         discoveredShorts.remove(discoveredShorts.keySet().iterator().next());
                 }
                 candidates.addAll(result);
+                if (subscription) subscriptionCandidates.addAll(result);
                 baseItems.clear();
-                if (page == Page.HOME && MobileBrowsePreferences.recommendHistory(this)
-                        && !regularHistory.isEmpty() && activeChannel == null) {
-                    List<VideoItem> regular = new ArrayList<>();
-                    for (VideoItem item : candidates)
-                        if (!ShortsCatalog.accepts(item)) regular.add(item);
-                    baseItems.addAll(RecommendationEngine.rank(regular, regularHistory));
+                if (page == Page.HOME && activeChannel == null) {
+                    baseItems.addAll(HomeFeed.combine(subscriptionCandidates, candidates,
+                            regularHistory, MobileBrowsePreferences.recommendHistory(this)));
                 } else {
                     Map<String, VideoItem> unique = new LinkedHashMap<>();
                     for (VideoItem item : candidates) unique.put(item.stableKey(), item);
@@ -826,7 +838,11 @@ public final class MobileBrowseActivity extends Activity {
                     while (iterator.hasNext())
                         if (watchedKeys.contains(iterator.next().stableKey())) iterator.remove();
                 }
-                if (page == Page.HOME) baseItems.removeIf(ShortsCatalog::accepts);
+                if (page == Page.HOME) {
+                    Iterator<VideoItem> iterator = baseItems.iterator();
+                    while (iterator.hasNext())
+                        if (ShortsCatalog.accepts(iterator.next())) iterator.remove();
+                }
                 if (page == Page.POPULAR) Collections.sort(baseItems,
                         (a, b) -> Long.compare(b.views, a.views));
                 applySort();
@@ -943,8 +959,12 @@ public final class MobileBrowseActivity extends Activity {
         int position = Math.max(0, centeredShortPosition());
         String key = unavailable.stableKey();
         discoveredShorts.remove(key);
-        candidates.removeIf(item -> key.equals(item.stableKey()));
-        baseItems.removeIf(item -> key.equals(item.stableKey()));
+        Iterator<VideoItem> candidateIterator = candidates.iterator();
+        while (candidateIterator.hasNext())
+            if (key.equals(candidateIterator.next().stableKey())) candidateIterator.remove();
+        Iterator<VideoItem> baseIterator = baseItems.iterator();
+        while (baseIterator.hasNext())
+            if (key.equals(baseIterator.next().stableKey())) baseIterator.remove();
         shortsPlayback.clear();
         applySort();
         render();

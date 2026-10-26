@@ -6,26 +6,72 @@ import org.json.JSONObject;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 
 /** Discovers public videos via SepiaSearch and loads subscribed channels from their origin. */
 final class PeerTubeFeedClient {
     private static final String SEPIA = "https://sepiasearch.org/api/v1/search/videos";
+    private static final String PEERSEEK = "https://peerseek.video/v1/search";
     private static final int LIMIT = 20;
     private static final int MAX_JSON_BYTES = 1024 * 1024;
+    private static final ExpiringCache<String, List<VideoItem>> SEARCH_CACHE =
+            new ExpiringCache<>(32, 3 * 60_000L);
 
     interface Reader { String read(String url) throws Exception; }
 
     static List<VideoItem> search(String query) throws Exception {
-        return search(query, PeerTubeFeedClient::get);
+        String key = query == null ? "" : query.trim();
+        List<VideoItem> cached = SEARCH_CACHE.get(key);
+        if (cached != null) return new ArrayList<>(cached);
+        List<VideoItem> result = search(key, PeerTubeFeedClient::get);
+        if (!result.isEmpty()) SEARCH_CACHE.put(key, new ArrayList<>(result));
+        return result;
     }
 
     static List<VideoItem> search(String query, Reader reader) throws Exception {
         String value = query == null ? "" : query.trim();
         if (value.isEmpty()) return new ArrayList<>();
-        String url = SEPIA + "?search=" + encode(value)
+        String sepiaUrl = SEPIA + "?search=" + encode(value)
                 + "&count=" + LIMIT + "&start=0&nsfw=false&isLive=false";
-        return parse(new JSONObject(reader.read(url)));
+        String peerSeekUrl = PEERSEEK + "?q=" + encode(value)
+                + "&size=" + LIMIT + "&page=1&include_nsfw=false&include_live=false";
+        LinkedHashMap<String, VideoItem> unique = new LinkedHashMap<>();
+        for (List<VideoItem> found : ParallelTasks.map(Arrays.asList(sepiaUrl, peerSeekUrl),
+                2, url -> url.startsWith(PEERSEEK)
+                        ? parsePeerSeek(new JSONObject(reader.read(url)))
+                        : parse(new JSONObject(reader.read(url))))) {
+            for (VideoItem item : found)
+                if (!unique.containsKey(item.stableKey())) unique.put(item.stableKey(), item);
+        }
+        return new ArrayList<>(unique.values());
+    }
+
+    static List<VideoItem> parsePeerSeek(JSONObject response) {
+        List<VideoItem> result = new ArrayList<>();
+        JSONArray videos = response.optJSONArray("videos");
+        if (videos == null) return result;
+        for (int i = 0; i < Math.min(videos.length(), LIMIT); i++) {
+            JSONObject entry = videos.optJSONObject(i);
+            PeerTubeSearch.Candidate candidate = PeerTubeSearch.Candidate.from(entry, true);
+            if (candidate == null) continue;
+            String channelUrl = "";
+            String handle = entry.optString("channelHandle", "");
+            if (handle.matches("[A-Za-z0-9._@-]+")) {
+                URI page = URI.create(candidate.pageUrl);
+                channelUrl = page.getScheme() + "://" + page.getRawAuthority()
+                        + "/video-channels/" + handle;
+            }
+            VideoItem item = new VideoItem(PeerTubeClient.SOURCE, candidate.title, "",
+                    candidate.thumbnail == null ? "" : candidate.thumbnail,
+                    candidate.apiUrl, candidate.pageUrl, candidate.durationSeconds * 1000L);
+            if (!channelUrl.isEmpty()) item = item.withChannel(channelUrl,
+                    entry.optString("channel", ""), channelUrl, false);
+            result.add(item.withMetrics(entry.optLong("views", -1),
+                    VideoPresentation.timestamp(entry.optString("publishedAt"))));
+        }
+        return result;
     }
 
     static List<VideoItem> live(String query) throws Exception {

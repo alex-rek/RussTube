@@ -30,7 +30,7 @@ final class MobileBrowsePreferences {
     }
 
     static boolean recommendSubscriptions(Context context) {
-        return preferences(context).getBoolean("recommend_subscriptions", false);
+        return preferences(context).getBoolean("recommend_subscriptions", true);
     }
 
     static void setRecommendHistory(Context context, boolean enabled) {

@@ -347,6 +347,13 @@ public final class TvSettingsActivity extends Activity {
                     .putBoolean("recommendations", !enabled).apply();
             renderPanel(0);
         });
+        boolean subscriptions = getSharedPreferences("browse", 0)
+                .getBoolean("recommend_subscriptions", true);
+        row("По подпискам", subscriptions ? "Включено" : "Выключено", () -> {
+            getSharedPreferences("browse", 0).edit()
+                    .putBoolean("recommend_subscriptions", !subscriptions).apply();
+            renderPanel(1);
+        });
         note("История остаётся на устройстве. Поиск тем выполняется на видеоплатформах.");
     }
 

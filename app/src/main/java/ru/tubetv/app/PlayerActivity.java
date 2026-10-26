@@ -765,7 +765,7 @@ public final class PlayerActivity extends Activity {
             }
         }
         if (choices.isEmpty()) return;
-        choices.sort((a, b) -> Integer.compare(a.order, b.order));
+        java.util.Collections.sort(choices, (a, b) -> Integer.compare(a.order, b.order));
         String[] labels = new String[choices.size() + 5];
         labels[0] = "Выключено";
         for (int i = 0; i < choices.size(); i++) {

@@ -86,7 +86,7 @@ final class ThumbnailDiskCache {
         long size = 0;
         for (File file : files) size += file.length();
         if (size <= LIMIT) return;
-        Arrays.sort(files, Comparator.comparingLong(File::lastModified));
+        Arrays.sort(files, (a, b) -> Long.compare(a.lastModified(), b.lastModified()));
         for (File file : files) {
             if (size <= LIMIT) break;
             long length = file.length();

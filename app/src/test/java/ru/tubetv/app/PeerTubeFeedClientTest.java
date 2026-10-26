@@ -37,10 +37,17 @@ public final class PeerTubeFeedClientTest {
 
     @Test public void searchIncludesShortVideoAndPlayableOriginUrl() throws Exception {
         List<VideoItem> videos = PeerTubeFeedClient.search("  кот и пёс  ", url -> {
-            assertTrue(url.startsWith("https://sepiasearch.org/api/v1/search/videos?search="));
             assertTrue(url.contains("%D0%BA%D0%BE%D1%82"));
-            assertTrue(url.contains("&nsfw=false&isLive=false"));
-            return response();
+            if (url.startsWith("https://sepiasearch.org/")) {
+                assertTrue(url.contains("&nsfw=false&isLive=false"));
+                return response();
+            }
+            assertTrue(url.startsWith("https://peerseek.video/v1/search?q="));
+            assertTrue(url.contains("include_nsfw=false"));
+            return new JSONObject().put("videos", new org.json.JSONArray()
+                    .put(new JSONObject().put("videoUrl", ORIGIN + "/w/" + UUID)
+                            .put("title", "Короткое видео").put("durationSeconds", 75)))
+                    .toString();
         });
         assertEquals(1, videos.size());
         VideoItem video = videos.get(0);
@@ -54,6 +61,35 @@ public final class PeerTubeFeedClientTest {
         assertEquals(142L, video.views);
         assertTrue(video.publishedAtMs > 0);
         assertFalse(video.isLive);
+    }
+
+    @Test public void peerSeekAddsDistinctVideosAndRejectsUnsafeLinks() throws Exception {
+        String secondId = "e8a1af4e-414a-4d58-bfe6-2146eed06d10";
+        JSONObject result = new JSONObject().put("videos", new org.json.JSONArray()
+                .put(new JSONObject().put("videoUrl", ORIGIN + "/w/" + secondId)
+                        .put("title", "Наука").put("durationSeconds", 120)
+                        .put("thumbnailUrl", "https://images.example/thumb.jpg")
+                        .put("channelHandle", "science").put("channel", "Наука")
+                        .put("views", 900).put("publishedAt", "2026-10-20T11:00:00Z"))
+                .put(new JSONObject().put("videoUrl", "http://insecure.example/w/" + UUID)
+                        .put("title", "Недопустимый адрес")));
+        List<VideoItem> videos = PeerTubeFeedClient.parsePeerSeek(result);
+        assertEquals(1, videos.size());
+        assertEquals(ORIGIN + "/api/v1/videos/" + secondId, videos.get(0).playUrl);
+        assertEquals(CHANNEL, videos.get(0).channelId);
+        assertEquals(900L, videos.get(0).views);
+    }
+
+    @Test public void peerSeekStillProvidesResultsWhenSepiaFails() throws Exception {
+        List<VideoItem> videos = PeerTubeFeedClient.search("наука", url -> {
+            if (url.startsWith("https://sepiasearch.org/")) throw new Exception("index unavailable");
+            return new JSONObject().put("videos", new org.json.JSONArray()
+                    .put(new JSONObject().put("videoUrl", ORIGIN + "/w/" + UUID)
+                            .put("title", "Наука").put("durationSeconds", 120)))
+                    .toString();
+        });
+        assertEquals(1, videos.size());
+        assertEquals(ORIGIN + "/api/v1/videos/" + UUID, videos.get(0).playUrl);
     }
 
     @Test public void channelUsesOriginApiAndKeepsChannelIdentity() throws Exception {

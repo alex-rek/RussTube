@@ -594,22 +594,34 @@ public final class MobilePlayerActivity extends Activity {
     }
 
     private void selectPreferredCaption(Tracks tracks) {
-        int preferred = CaptionPreferences.language(this);
-        if (preferred == 0 || player == null) return;
-        String code = CaptionPreferences.LANGUAGE_CODES[preferred];
+        if (player == null || captionsDisabled) return;
+        String code = CaptionPreferences.LANGUAGE_CODES[CaptionPreferences.language(this)];
+        Tracks.Group fallbackGroup = null;
+        int fallbackTrack = -1;
         for (Tracks.Group group : tracks.getGroups()) {
             if (group.getType() != C.TRACK_TYPE_TEXT) continue;
             for (int i = 0; i < group.length; i++) {
-                if (!group.isTrackSupported(i) || group.getTrackFormat(i).language == null
-                        || !group.getTrackFormat(i).language.startsWith(code)) continue;
-                if (!group.isTrackSelected(i)) player.setTrackSelectionParameters(
-                        player.getTrackSelectionParameters().buildUpon()
-                                .clearOverridesOfType(C.TRACK_TYPE_TEXT)
-                                .setOverrideForType(new TrackSelectionOverride(
-                                        group.getMediaTrackGroup(), i)).build());
-                return;
+                if (!group.isTrackSupported(i)) continue;
+                if (fallbackGroup == null || group.isTrackSelected(i)) {
+                    fallbackGroup = group;
+                    fallbackTrack = i;
+                }
+                String language = group.getTrackFormat(i).language;
+                if (!code.isEmpty() && language != null && language.startsWith(code)) {
+                    selectCaptionTrack(group, i);
+                    return;
+                }
             }
         }
+        if (fallbackGroup != null) selectCaptionTrack(fallbackGroup, fallbackTrack);
+    }
+
+    private void selectCaptionTrack(Tracks.Group group, int track) {
+        if (group.isTrackSelected(track)) return;
+        player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
+                .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                .setOverrideForType(new TrackSelectionOverride(
+                        group.getMediaTrackGroup(), track)).build());
     }
 
     private void showControls() {

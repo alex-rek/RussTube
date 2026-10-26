@@ -63,6 +63,7 @@ public final class BrowseActivity extends Activity {
     private final List<VideoItem> items = new ArrayList<>();
     private final List<VideoItem> baseItems = new ArrayList<>();
     private final List<VideoItem> candidates = new ArrayList<>();
+    private final List<VideoItem> subscriptionCandidates = new ArrayList<>();
     private final List<VideoItem> history = new ArrayList<>();
     private final Set<String> qualityRequested = new HashSet<>();
     private final List<Button> navigation = new ArrayList<>();
@@ -326,7 +327,7 @@ public final class BrowseActivity extends Activity {
         page = target;
         activeChannel = null;
         channelsMode = false;
-        candidates.clear(); items.clear(); baseItems.clear(); history.clear();
+        candidates.clear(); subscriptionCandidates.clear(); items.clear(); baseItems.clear(); history.clear();
         for (WatchHistoryStore.Entry entry : WatchHistoryStore.load(this)) history.add(entry.item);
         updateNavigation();
         searchRow.setVisibility(page == Page.SEARCH || page == Page.LIVE ? View.VISIBLE : View.GONE);
@@ -342,16 +343,26 @@ public final class BrowseActivity extends Activity {
                 addAction("Наука", () -> discover("наука"));
                 addAction("Путешествия", () -> discover("путешествия"));
                 addAction("Технологии", () -> discover("технологии"));
-                if (!getSharedPreferences("browse", 0).getBoolean("recommendations", true)) {
-                    display("Рекомендации отключены. Их можно включить в настройках."); return;
+                boolean byHistory = getSharedPreferences("browse", 0)
+                        .getBoolean("recommendations", true);
+                boolean bySubscriptions = getSharedPreferences("browse", 0)
+                        .getBoolean("recommend_subscriptions", true);
+                if (bySubscriptions) {
+                    for (VideoItem channel : SubscriptionStore.load(this))
+                        enqueueSubscription(channel);
                 }
-                List<String> queries = RecommendationEngine.queries(history);
-                if (queries.isEmpty()) {
-                    display("Посмотрите несколько видео — здесь появятся рекомендации.\nНачните с поиска или выберите интересную тему выше.");
+                if (byHistory) {
+                    List<String> queries = RecommendationEngine.queries(history);
+                    if (!queries.isEmpty()) {
+                        description.setText("Новые видео подписок и рекомендации · "
+                                + String.join(" · ", queries));
+                        for (String value : queries) searchAll(value, false);
+                    }
+                }
+                if (pending == 0) {
+                    display("Подпишитесь на каналы или посмотрите несколько видео — здесь появятся новые видео и рекомендации.");
                     return;
                 }
-                description.setText("На основе просмотров · " + String.join(" · ", queries));
-                for (String value : queries) searchAll(value, false);
                 break;
             case SEARCH:
                 heading.setText("Поиск");
@@ -509,6 +520,14 @@ public final class BrowseActivity extends Activity {
     }
 
     private void enqueue(String source, Load operation) {
+        enqueue(source, operation, false);
+    }
+
+    private void enqueueSubscription(VideoItem channel) {
+        enqueue(channel.source, () -> repository.channel(channel), true);
+    }
+
+    private void enqueue(String source, Load operation, boolean subscription) {
         int current = generation;
         boolean filmMode = page == Page.FILMS && activeChannel == null;
         pending++;
@@ -522,10 +541,14 @@ public final class BrowseActivity extends Activity {
                 }
             }
             catch (Exception failure) { error = source; }
-            if (BuildConfig.DEBUG) android.util.Log.i("RussTubeImagePerf", "catalog=" + source
-                    + " urlReadyMs=" + (android.os.SystemClock.elapsedRealtime() - started)
-                    + " thumbnails=" + loaded.stream().filter(item -> item.thumbnail != null
-                    && !item.thumbnail.isEmpty()).count());
+            if (BuildConfig.DEBUG) {
+                int thumbnailCount = 0;
+                for (VideoItem item : loaded)
+                    if (item.thumbnail != null && !item.thumbnail.isEmpty()) thumbnailCount++;
+                android.util.Log.i("RussTubeImagePerf", "catalog=" + source
+                        + " urlReadyMs=" + (android.os.SystemClock.elapsedRealtime() - started)
+                        + " thumbnails=" + thumbnailCount);
+            }
             final List<VideoItem> result = loaded;
             final String problem = error;
             runOnUiThread(() -> {
@@ -533,6 +556,7 @@ public final class BrowseActivity extends Activity {
                 pending--;
                 if (problem != null && !failed.contains(problem)) failed.add(problem);
                 candidates.addAll(result);
+                if (subscription) subscriptionCandidates.addAll(result);
                 scheduleResults(page == Page.FILMS ? "Полнометражные видео пока не найдены. Выберите другую тему."
                         : page == Page.LIVE ? "Активные эфиры не найдены. Попробуйте тему или обновите позже."
                         : "Видео не найдены. Попробуйте поиск или обновите позже.");
@@ -544,7 +568,8 @@ public final class BrowseActivity extends Activity {
     private void rebuildBaseItems() {
         baseItems.clear();
         if ((page == Page.HOME || page == Page.RECOMMENDATIONS) && activeChannel == null) {
-            baseItems.addAll(RecommendationEngine.rank(candidates, history));
+            baseItems.addAll(HomeFeed.combine(subscriptionCandidates, candidates, history,
+                    getSharedPreferences("browse", 0).getBoolean("recommendations", true)));
         } else {
             Map<String, VideoItem> unique = new LinkedHashMap<>();
             if (page == Page.FILMS && activeChannel == null)
