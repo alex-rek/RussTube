@@ -48,15 +48,23 @@ final class ImageLoader {
     }
 
     void load(String url, ImageView target) {
+        load(null, url, target);
+    }
+
+    void load(String platform, String url, ImageView target) {
         int width = target.getWidth();
         if (width <= 0) width = Math.min(target.getResources().getDisplayMetrics().widthPixels,
                 Math.round(360 * target.getResources().getDisplayMetrics().density));
-        load(url, target, width, Math.max(1, width * 9 / 16));
+        load(platform, url, target, width, Math.max(1, width * 9 / 16));
     }
 
     void load(String url, ImageView target, int width, int height) {
+        load(null, url, target, width, height);
+    }
+
+    void load(String platform, String url, ImageView target, int width, int height) {
         long startedBinding = SystemClock.elapsedRealtimeNanos();
-        String key = key(url, width, height);
+        String key = platform + ":" + key(url, width, height);
         boolean same = key.equals(target.getTag());
         target.setTag(key);
         if (!same) target.setImageDrawable(new ColorDrawable(0xff10243b));
@@ -85,7 +93,7 @@ final class ImageLoader {
             }
             return;
         }
-        request = new Request(url, key, width, height, false);
+        request = new Request(platform, url, key, width, height, false);
         request.targets.add(new WeakReference<>(target));
         makeRoom();
         pending.put(key, request);
@@ -94,24 +102,29 @@ final class ImageLoader {
     }
 
     void prefetch(String url, int width, int height) {
-        if (url == null || url.isEmpty() || scheduledPrefetch.size() >= 16) return;
-        String key = key(url, width, height);
-        if (cache.get(key) != null || pending.containsKey(key) || !scheduledPrefetch.add(key)) return;
-        ui.postDelayed(() -> runPrefetch(url, key, width, height, 0), 350);
+        prefetch(null, url, width, height);
     }
 
-    private void runPrefetch(String url, String key, int width, int height, int attempt) {
+    void prefetch(String platform, String url, int width, int height) {
+        if (url == null || url.isEmpty() || scheduledPrefetch.size() >= 16) return;
+        String key = platform + ":" + key(url, width, height);
+        if (cache.get(key) != null || pending.containsKey(key) || !scheduledPrefetch.add(key)) return;
+        ui.postDelayed(() -> runPrefetch(platform, url, key, width, height, 0), 350);
+    }
+
+    private void runPrefetch(String platform, String url, String key,
+                             int width, int height, int attempt) {
         if (cache.get(key) != null || pending.containsKey(key)) {
             scheduledPrefetch.remove(key); return;
         }
         // Let visible requests consume all workers before starting the next neighbor.
         if (executor.getActiveCount() > 0 || !queue.isEmpty()) {
-            if (attempt < 30) ui.postDelayed(() -> runPrefetch(url, key, width, height, attempt + 1), 200);
+            if (attempt < 30) ui.postDelayed(() -> runPrefetch(platform, url, key, width, height, attempt + 1), 200);
             else scheduledPrefetch.remove(key);
             return;
         }
         scheduledPrefetch.remove(key);
-        Request request = new Request(url, key, width, height, true);
+        Request request = new Request(platform, url, key, width, height, true);
         pending.put(key, request);
         executor.execute(request);
     }
@@ -143,15 +156,16 @@ final class ImageLoader {
     }
 
     private final class Request implements Runnable {
-        final String url, key;
+        final String platform, url, key;
         final int width, height;
         boolean prefetch;
         volatile boolean cancelled;
         volatile HttpURLConnection connection;
         final List<WeakReference<ImageView>> targets = new ArrayList<>();
         final long queuedAt = SystemClock.elapsedRealtime();
-        Request(String url, String key, int width, int height, boolean prefetch) {
-            this.url = url; this.key = key; this.width = width; this.height = height;
+        Request(String platform, String url, String key, int width, int height, boolean prefetch) {
+            this.platform = platform; this.url = url; this.key = key;
+            this.width = width; this.height = height;
             this.prefetch = prefetch;
         }
 
@@ -176,7 +190,7 @@ final class ImageLoader {
                     byte[] bytes = disk.read(url);
                     if (bytes == null) {
                         source = "network";
-                        connection = NetworkProxy.openConnection(url);
+                        connection = NetworkProxy.openConnection(platform, url);
                         connection.setConnectTimeout(5000);
                         connection.setReadTimeout(5000);
                         int code = connection.getResponseCode();

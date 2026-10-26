@@ -646,7 +646,11 @@ final class StreamResolver {
 
     private static String get(String address, String referer, String userAgent) throws Exception {
         BoundedHttpReader.checkInterrupted();
-        HttpURLConnection connection = NetworkProxy.openConnection(address);
+        String platform = DzenClient.USER_AGENT.equals(userAgent) ? "ДЗЕН"
+                : NetworkProxy.sourceForUrl(referer);
+        if (platform == null) platform = NetworkProxy.sourceForUrl(address);
+        if (platform == null) platform = "RUTUBE";
+        HttpURLConnection connection = NetworkProxy.openConnection(platform, address);
         connection.setConnectTimeout(8000);
         connection.setReadTimeout(8000);
         connection.setRequestProperty("Accept", "application/json,text/html,*/*");
@@ -664,7 +668,7 @@ final class StreamResolver {
 
     private static String postVk(String body) throws Exception {
         BoundedHttpReader.checkInterrupted();
-        HttpURLConnection connection = NetworkProxy.openConnection("https://vk.com/al_video.php");
+        HttpURLConnection connection = NetworkProxy.openConnection("VK VIDEO", "https://vk.com/al_video.php");
         connection.setConnectTimeout(8000);
         connection.setReadTimeout(10_000);
         connection.setRequestMethod("POST");

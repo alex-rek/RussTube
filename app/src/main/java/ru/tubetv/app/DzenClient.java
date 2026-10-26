@@ -163,7 +163,7 @@ final class DzenClient {
     private static JSONObject getJsonPage(String address) throws Exception {
         for (int attempt = 0; attempt < 3; attempt++) {
             BoundedHttpReader.checkInterrupted();
-            HttpURLConnection connection = NetworkProxy.openConnection(address);
+            HttpURLConnection connection = NetworkProxy.openConnection("ДЗЕН", address);
             connection.setInstanceFollowRedirects(false);
             connection.setConnectTimeout(TIMEOUT_MS);
             connection.setReadTimeout(TIMEOUT_MS);
@@ -191,7 +191,7 @@ final class DzenClient {
         // and avoids loading either SSO web page or executing JavaScript.
         for (int attempt = 0; attempt < 4; attempt++) {
             BoundedHttpReader.checkInterrupted();
-            HttpURLConnection connection = NetworkProxy.openConnection(address);
+            HttpURLConnection connection = NetworkProxy.openConnection("ДЗЕН", address);
             connection.setInstanceFollowRedirects(false);
             connection.setConnectTimeout(TIMEOUT_MS);
             connection.setReadTimeout(TIMEOUT_MS);

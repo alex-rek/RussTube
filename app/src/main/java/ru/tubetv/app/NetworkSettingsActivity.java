@@ -8,6 +8,7 @@ import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.RadioButton;
@@ -24,6 +25,7 @@ public final class NetworkSettingsActivity extends Activity {
     private RadioGroup types;
     private EditText host, port, user, password;
     private TextView connectionStatus;
+    private CheckBox[] sourceChecks;
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
@@ -62,6 +64,22 @@ public final class NetworkSettingsActivity extends Activity {
         user = field(root, "Логин (необязательно)", saved.user, InputType.TYPE_CLASS_TEXT);
         password = field(root, "Пароль (необязательно)", saved.password,
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        TextView sourcesTitle = text("Площадки через прокси", 18, Color.WHITE);
+        sourcesTitle.setPadding(0, dp(20), 0, dp(6));
+        root.addView(sourcesTitle);
+        TextView sourcesNote = text("Отмеченные площадки используют прокси для поиска, обложек и видео. Остальные подключаются напрямую.",
+                14, 0xffaeb9cc);
+        root.addView(sourcesNote);
+        sourceChecks = new CheckBox[NetworkProxy.SOURCES.length];
+        for (int i = 0; i < sourceChecks.length; i++) {
+            CheckBox check = new CheckBox(this);
+            check.setText(NetworkProxy.SOURCE_LABELS[i]);
+            check.setTextColor(Color.WHITE);
+            check.setButtonTintList(ColorStateList.valueOf(accent));
+            check.setChecked(NetworkProxy.isSourceEnabled(this, NetworkProxy.SOURCES[i]));
+            root.addView(check, new LinearLayout.LayoutParams(-1, dp(44)));
+            sourceChecks[i] = check;
+        }
         Button save = new Button(this);
         save.setText("Сохранить");
         save.setAllCaps(false);
@@ -128,6 +146,9 @@ public final class NetworkSettingsActivity extends Activity {
         }
         NetworkProxy.save(this, type, address, number,
                 user.getText().toString(), password.getText().toString());
+        for (int i = 0; i < sourceChecks.length; i++)
+            NetworkProxy.setSourceEnabled(this, NetworkProxy.SOURCES[i],
+                    sourceChecks[i].isChecked());
         if (finishAfterSave) {
             Toast.makeText(this, "Настройки сети сохранены", Toast.LENGTH_SHORT).show();
             finish();

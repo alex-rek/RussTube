@@ -417,7 +417,7 @@ final class OkClient {
 
     private static String followHead(String address) throws Exception {
         HttpURLConnection connection = configure(
-                NetworkProxy.openConnection(address), REFERER);
+                NetworkProxy.openConnection("OK", address), REFERER);
         connection.setRequestMethod("HEAD");
         connection.setInstanceFollowRedirects(true);
         try {
@@ -432,7 +432,7 @@ final class OkClient {
     private static String get(String address, String referer, int limit) throws Exception {
         BoundedHttpReader.checkInterrupted();
         HttpURLConnection connection = configure(
-                NetworkProxy.openConnection(address), referer);
+                NetworkProxy.openConnection("OK", address), referer);
         try {
             int code = connection.getResponseCode();
             if (code < 200 || code >= 300) throw new Exception("OK: HTTP " + code);
@@ -445,7 +445,7 @@ final class OkClient {
     private static String post(String address, String body, String referer, int limit) throws Exception {
         BoundedHttpReader.checkInterrupted();
         HttpURLConnection connection = configure(
-                NetworkProxy.openConnection(address), referer);
+                NetworkProxy.openConnection("OK", address), referer);
         connection.setRequestMethod("POST");
         connection.setDoOutput(true);
         connection.setRequestProperty("Content-Type",

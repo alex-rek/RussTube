@@ -378,6 +378,18 @@ public final class TvSettingsActivity extends Activity {
         proxyUser = field("Логин (необязательно)", draftUser, InputType.TYPE_CLASS_TEXT);
         proxyPassword = field("Пароль (необязательно)", draftPassword,
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        section("Площадки через прокси");
+        note("Отмеченные площадки используют прокси для поиска, обложек и видео. Остальные — напрямую.");
+        for (int i = 0; i < NetworkProxy.SOURCES.length; i++) {
+            String source = NetworkProxy.SOURCES[i];
+            boolean enabled = NetworkProxy.isSourceEnabled(this, source);
+            int focusRow = i + 5; // Mode row followed by four editable server fields.
+            row(NetworkProxy.SOURCE_LABELS[i], enabled ? "☑" : "☐", () -> {
+                captureProxyDraft();
+                NetworkProxy.setSourceEnabled(this, source, !enabled);
+                renderPanel(focusRow);
+            });
+        }
         row("Сохранить прокси", "✓", this::saveProxy);
         row("Сохранить и проверить соединение", "↻", this::checkProxy);
         proxyStatus = text("", 14, SECONDARY);

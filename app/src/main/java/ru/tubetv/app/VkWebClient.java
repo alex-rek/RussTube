@@ -330,7 +330,7 @@ final class VkWebClient {
 
     private static JSONObject getJson(String address) throws Exception {
         BoundedHttpReader.checkInterrupted();
-        HttpURLConnection connection = configure(NetworkProxy.openConnection(address));
+        HttpURLConnection connection = configure(NetworkProxy.openConnection("VK VIDEO", address));
         try {
             int code = connection.getResponseCode();
             if (code < 200 || code >= 300) throw new Exception("VK Video: HTTP " + code);
@@ -342,7 +342,7 @@ final class VkWebClient {
 
     private static JSONObject postJson(String address, String body) throws Exception {
         BoundedHttpReader.checkInterrupted();
-        HttpURLConnection connection = configure(NetworkProxy.openConnection(address));
+        HttpURLConnection connection = configure(NetworkProxy.openConnection("VK VIDEO", address));
         connection.setRequestMethod("POST");
         connection.setDoOutput(true);
         connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");

@@ -651,7 +651,8 @@ public final class BrowseActivity extends Activity {
         int start = direction < 0 ? Math.max(0, position - columns * 2) : position + 1;
         int end = direction < 0 ? position : Math.min(items.size(), position + columns * 2 + 1);
         for (int i = start; i < end; i++)
-            ((TubeApplication) getApplication()).imageLoader().prefetch(items.get(i).thumbnail,
+            ((TubeApplication) getApplication()).imageLoader().prefetch(items.get(i).source,
+                    items.get(i).thumbnail,
                     width, width * 9 / 16);
     }
 
@@ -986,7 +987,7 @@ public final class BrowseActivity extends Activity {
             }
             int width = grid.getColumnWidth();
             if (width <= 0) width = cardDp(Math.round(250 * TvScalePreferences.get(BrowseActivity.this, TvScalePreferences.GRID)));
-            ((TubeApplication) getApplication()).imageLoader().load(item.thumbnail, holder.image,
+            ((TubeApplication) getApplication()).imageLoader().load(item.source, item.thumbnail, holder.image,
                     width, width * 9 / 16);
             long bindMs = android.os.SystemClock.elapsedRealtime() - bindStarted;
             if (BuildConfig.DEBUG && bindMs > 12)

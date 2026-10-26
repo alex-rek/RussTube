@@ -16,9 +16,11 @@ import java.net.URL;
 import java.util.Collections;
 import java.util.List;
 
-/** App-wide proxy settings for explicit HTTP connections and Media3's proxy reader. */
+/** Proxy settings and per-platform routing for catalog, artwork and media requests. */
 final class NetworkProxy {
     private static final String PREFS = "network_proxy";
+    static final String[] SOURCES = {"RUTUBE", "VK VIDEO", "PEERTUBE", "OK", "ДЗЕН"};
+    static final String[] SOURCE_LABELS = {"RuTube", "VK Видео", "PeerTube", "OK", "Дзен"};
     private static volatile boolean installed;
     private static volatile Context appContext;
 
@@ -38,6 +40,9 @@ final class NetworkProxy {
                         return fallback == null ? Collections.singletonList(Proxy.NO_PROXY)
                                 : fallback.select(uri);
                     }
+                    String source = sourceForUrl(uri.toString());
+                    if (source != null && !isSourceEnabled(app, source))
+                        return Collections.singletonList(Proxy.NO_PROXY);
                     return Collections.singletonList(new Proxy(config.type,
                             new InetSocketAddress(config.host, config.port)));
                 }
@@ -64,16 +69,55 @@ final class NetworkProxy {
     }
 
     static HttpURLConnection openConnection(String address) throws IOException {
+        return openConnection(null, address);
+    }
+
+    static HttpURLConnection openConnection(String source, String address) throws IOException {
         URL url = new URL(address);
         Context context = appContext;
         Config config = context == null ? null : load(context);
-        if (config == null || config.type == Proxy.Type.DIRECT)
-            return (HttpURLConnection) url.openConnection();
+        if (config == null || config.type == Proxy.Type.DIRECT
+                || (source != null && !isSourceEnabled(context, source)))
+            return (HttpURLConnection) url.openConnection(Proxy.NO_PROXY);
         if (config.type == Proxy.Type.HTTP && !config.user.isEmpty())
             return new AuthenticatedHttpProxyConnection(url, config);
         Proxy proxy = new Proxy(config.type,
                 new InetSocketAddress(config.host, config.port));
         return (HttpURLConnection) url.openConnection(proxy);
+    }
+
+    static boolean isSourceEnabled(Context context, String source) {
+        return isSourceEnabled(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE), source);
+    }
+
+    static boolean isSourceEnabled(SharedPreferences prefs, String source) {
+        return source == null || prefs.getBoolean("source_" + source, true);
+    }
+
+    static void setSourceEnabled(Context context, String source, boolean enabled) {
+        setSourceEnabled(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE), source, enabled);
+    }
+
+    static void setSourceEnabled(SharedPreferences prefs, String source, boolean enabled) {
+        prefs.edit().putBoolean("source_" + source, enabled).apply();
+    }
+
+    /** Only recognizable first-party hosts are inferred; CDN requests carry their source explicitly. */
+    static String sourceForUrl(String address) {
+        try {
+            String host = new URL(address).getHost().toLowerCase(java.util.Locale.ROOT);
+            if (domain(host, "rutube.ru")) return "RUTUBE";
+            if (domain(host, "vk.com") || domain(host, "vkvideo.ru")) return "VK VIDEO";
+            if (domain(host, "ok.ru") || domain(host, "odnoklassniki.ru")) return "OK";
+            if (domain(host, "dzen.ru") || domain(host, "zen.yandex.ru")) return "ДЗЕН";
+            if (domain(host, "sepiasearch.org") || domain(host, "peerseek.video"))
+                return "PEERTUBE";
+        } catch (Exception ignored) { }
+        return null;
+    }
+
+    private static boolean domain(String host, String domain) {
+        return host.equals(domain) || host.endsWith("." + domain);
     }
 
     static Config load(Context context) {

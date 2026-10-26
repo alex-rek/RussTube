@@ -340,7 +340,7 @@ public final class MobileBrowseActivity extends Activity {
                 if (width <= 0) width = Math.max(dp(180), getResources().getDisplayMetrics().widthPixels - dp(28));
                 for (int i = first + count; i < Math.min(items.size(), first + count + 4); i++)
                     ((TubeApplication) getApplication()).imageLoader().prefetch(
-                            items.get(i).thumbnail, width, width * 9 / 16);
+                            items.get(i).source, items.get(i).thumbnail, width, width * 9 / 16);
             }
         });
         list.setOnTouchListener((view, event) -> {
@@ -1270,7 +1270,7 @@ public final class MobileBrowseActivity extends Activity {
             int thumbnailWidth = list.getColumnWidth();
             if (thumbnailWidth <= 0) thumbnailWidth = Math.max(dp(180),
                     getResources().getDisplayMetrics().widthPixels - dp(28));
-            ((TubeApplication) getApplication()).imageLoader().load(item.thumbnail, card.image,
+            ((TubeApplication) getApplication()).imageLoader().load(item.source, item.thumbnail, card.image,
                     thumbnailWidth, thumbnailWidth * 9 / 16);
             return recycled;
         }

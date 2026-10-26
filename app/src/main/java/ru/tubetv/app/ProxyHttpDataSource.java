@@ -23,16 +23,18 @@ import java.util.Map;
 final class ProxyHttpDataSource extends BaseDataSource {
     private final Map<String, String> headers;
     private final String userAgent;
+    private final String platform;
     private HttpURLConnection connection;
     private InputStream input;
     private Uri resolvedUri;
     private long remaining;
     private boolean opened;
 
-    ProxyHttpDataSource(Map<String, String> headers, String userAgent) {
+    ProxyHttpDataSource(Map<String, String> headers, String userAgent, String platform) {
         super(true);
         this.headers = new HashMap<>(headers);
         this.userAgent = userAgent;
+        this.platform = platform;
     }
 
     @Override public long open(DataSpec spec) throws IOException {
@@ -40,7 +42,7 @@ final class ProxyHttpDataSource extends BaseDataSource {
         URL target = new URL(spec.uri.toString());
         try {
             for (int attempt = 0; attempt < 6; attempt++) {
-                connection = NetworkProxy.openConnection(target.toString());
+                connection = NetworkProxy.openConnection(platform, target.toString());
                 connection.setConnectTimeout(8_000);
                 connection.setReadTimeout(10_000);
                 connection.setInstanceFollowRedirects(false);

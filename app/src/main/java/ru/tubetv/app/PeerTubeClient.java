@@ -470,7 +470,7 @@ final class PeerTubeClient {
                           Map<String, String> headers) throws IOException {
         return ScopedCookies.with(ScopedCookies.NONE, () -> {
             BoundedHttpReader.checkInterrupted();
-            HttpURLConnection connection = NetworkProxy.openConnection(address);
+            HttpURLConnection connection = NetworkProxy.openConnection(SOURCE, address);
             connection.setConnectTimeout(requestTimeout(deadline));
             connection.setReadTimeout(requestTimeout(deadline));
             for (Map.Entry<String, String> header : headers.entrySet()) {

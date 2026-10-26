@@ -1129,7 +1129,7 @@ public final class MainActivity extends Activity {
             } else {
                 holder.progress.setVisibility(View.GONE);
             }
-            imageLoader.load(item.thumbnail, holder.image);
+            imageLoader.load(item.source, item.thumbnail, holder.image);
             return recycled;
         }
     }

@@ -249,7 +249,7 @@ final class PlaybackEngineFactory {
                 : ScopedCookies.NONE;
         boolean proxyEnabled = NetworkProxy.load(context).type != Proxy.Type.DIRECT;
         return () -> new CookieDataSource(proxyEnabled
-                ? new ProxyHttpDataSource(headers, userAgent) : http.createDataSource(), cookies);
+                ? new ProxyHttpDataSource(headers, userAgent, source) : http.createDataSource(), cookies);
     }
 
     private static final class CookieDataSource implements DataSource {
