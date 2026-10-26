@@ -98,10 +98,20 @@ public final class BrowseActivity extends Activity {
     private int focusPosition;
     private boolean focusPending = true;
     private boolean returningFromPlayer;
+    private int cardRevision;
     private int lastPrefetchPosition;
     private long lastBackAt;
     private TextView clock;
     private final Handler timer = new Handler(Looper.getMainLooper());
+    private String pendingResultsEmptyText;
+    private final Runnable renderResults = () -> {
+        long started = android.os.SystemClock.elapsedRealtime();
+        rebuildBaseItems();
+        applySort();
+        display(pendingResultsEmptyText);
+        if (BuildConfig.DEBUG) android.util.Log.i("RussTubeTvPerf", "renderResultsMs="
+                + (android.os.SystemClock.elapsedRealtime() - started) + " cards=" + items.size());
+    };
     private final Runnable autoSearch = () -> {
         if (page == Page.SEARCH) startSearch(query.getText().toString().trim(), false);
     };
@@ -457,9 +467,7 @@ public final class BrowseActivity extends Activity {
             boolean focused = grid.hasFocus() && grid.getFirstVisiblePosition() + i == grid.getSelectedItemPosition();
             if (view.getTag() instanceof Card) {
                 Card card = (Card) view.getTag();
-                GradientDrawable background = new GradientDrawable();
-                background.setColor(focused ? Color.WHITE : Color.rgb(23, 26, 33));
-                background.setCornerRadius(dp(12)); view.setBackground(background);
+                view.setBackground(focused ? card.focusedBackground : card.normalBackground);
                 card.title.setTextColor(focused ? Color.BLACK : Color.WHITE);
                 int secondary = focused ? Color.DKGRAY : Color.rgb(174, 187, 204);
                 card.channel.setTextColor(secondary);
@@ -525,9 +533,7 @@ public final class BrowseActivity extends Activity {
                 pending--;
                 if (problem != null && !failed.contains(problem)) failed.add(problem);
                 candidates.addAll(result);
-                rebuildBaseItems();
-                applySort();
-                display(page == Page.FILMS ? "Полнометражные видео пока не найдены. Выберите другую тему."
+                scheduleResults(page == Page.FILMS ? "Полнометражные видео пока не найдены. Выберите другую тему."
                         : page == Page.LIVE ? "Активные эфиры не найдены. Попробуйте тему или обновите позже."
                         : "Видео не найдены. Попробуйте поиск или обновите позже.");
                 if (page == Page.SEARCH && qualityFilter > 0) inspectQualities(result);
@@ -581,9 +587,7 @@ public final class BrowseActivity extends Activity {
                     VideoItem replacement = byKey.get(candidates.get(i).stableKey());
                     if (replacement != null) candidates.set(i, replacement);
                 }
-                rebuildBaseItems();
-                applySort();
-                display("Видео указанного качества не найдены.");
+                scheduleResults("Видео указанного качества не найдены.");
             });
         }));
         display("Проверяем качество видео…");
@@ -597,6 +601,12 @@ public final class BrowseActivity extends Activity {
         empty.setVisibility(items.isEmpty() ? View.VISIBLE : View.GONE);
         empty.setText(loading ? "Подбираем видео…" : emptyText);
         grid.post(() -> { restoreGridFocus(); updateCardFocus(); });
+    }
+
+    private void scheduleResults(String emptyText) {
+        pendingResultsEmptyText = emptyText;
+        timer.removeCallbacks(renderResults);
+        timer.postDelayed(renderResults, items.isEmpty() ? 0 : 100);
     }
 
     private void rememberFocus() {
@@ -642,6 +652,7 @@ public final class BrowseActivity extends Activity {
 
     private void cancel() {
         generation++;
+        timer.removeCallbacks(renderResults);
         for (Future<?> job : jobs) job.cancel(true);
         jobs.clear(); io.purge(); pending = 0; failed.clear(); qualityRequested.clear();
     }
@@ -686,8 +697,10 @@ public final class BrowseActivity extends Activity {
         items.clear();
         int minWidth = page == Page.SEARCH && activeChannel == null
                 ? QUALITY_WIDTHS[qualityFilter] : 0;
+        Set<String> unavailable = UnavailableVideoStore.keys(this);
         for (VideoItem item : baseItems) {
-            if (item.maxWidth >= minWidth) items.add(item);
+            if (item.maxWidth >= minWidth && (page == Page.HISTORY || page == Page.FAVORITES
+                    || channelsMode || !unavailable.contains(item.stableKey()))) items.add(item);
         }
         if (!channelsMode) VideoSort.apply(items, sortMode);
         if (page == Page.FILMS && activeChannel == null) {
@@ -829,6 +842,8 @@ public final class BrowseActivity extends Activity {
         }
         if (returningFromPlayer && page != Page.FAVORITES) {
             returningFromPlayer = false;
+            cardRevision++;
+            applySort();
             adapter.notifyDataSetChanged();
             grid.post(this::restoreGridFocus);
             return;
@@ -862,6 +877,8 @@ public final class BrowseActivity extends Activity {
         @Override public VideoItem getItem(int p) { return items.get(p); }
         @Override public long getItemId(int p) { return getItem(p).stableKey().hashCode(); }
         @Override public View getView(int position, View recycled, ViewGroup parent) {
+            long bindStarted = android.os.SystemClock.elapsedRealtime();
+            boolean created = recycled == null;
             Card holder;
             if (recycled == null) {
                 LinearLayout card = new LinearLayout(BrowseActivity.this);
@@ -869,6 +886,8 @@ public final class BrowseActivity extends Activity {
                 card.setClipToOutline(true);
                 GradientDrawable background = new GradientDrawable();
                 background.setColor(Color.rgb(23, 26, 33)); background.setCornerRadius(cardDp(12)); card.setBackground(background);
+                GradientDrawable focusedBackground = new GradientDrawable();
+                focusedBackground.setColor(Color.WHITE); focusedBackground.setCornerRadius(cardDp(12));
                 FrameLayout artwork = new FrameLayout(BrowseActivity.this) {
                     @Override protected void onMeasure(int widthSpec, int heightSpec) {
                         int width = View.MeasureSpec.getSize(widthSpec);
@@ -909,35 +928,45 @@ public final class BrowseActivity extends Activity {
                 TextView date = cardLabel("", 12, Color.rgb(174, 187, 204)); date.setSingleLine(true);
                 details.addView(date, new LinearLayout.LayoutParams(-1, cardDp(19)));
                 card.addView(details, new LinearLayout.LayoutParams(-1, -2));
-                holder = new Card(image, title, channel, views, date, platform, duration, progress);
+                holder = new Card(image, title, channel, views, date, platform, duration,
+                        progress, background, focusedBackground);
                 card.setTag(holder); recycled = card;
             } else holder = (Card) recycled.getTag();
             VideoItem item = getItem(position);
-            holder.title.setText(channelsMode ? (item.channelName.isEmpty() ? "Канал " + item.channelId : item.channelName) : item.title);
-            holder.channel.setText(channelsMode ? item.source
-                    : item.source + " · " + VideoPresentation.channel(item));
-            holder.views.setText(channelsMode ? "" : VideoPresentation.views(item));
-            holder.date.setText(channelsMode ? "" : VideoPresentation.published(item));
-            holder.platform.setText(item.isLive && !channelsMode ? "● В ЭФИРЕ" : item.source);
-            holder.duration.setText(item.isLive ? "В ЭФИРЕ" : VideoPresentation.duration(item.durationMs));
-            holder.duration.setVisibility(item.isLive || item.durationMs > 0 ? View.VISIBLE : View.GONE);
-            WatchProgressStore.Progress watched = WatchProgressStore.get(BrowseActivity.this, item);
-            long total = watched.durationMs > 0 ? watched.durationMs : item.durationMs;
-            holder.progress.setVisibility(watched.positionMs > 0 && total > 0 ? View.VISIBLE : View.GONE);
-            if (total > 0) holder.progress.setProgress((int) Math.min(1000, watched.positionMs * 1000 / total));
-            holder.title.setTextColor(Color.WHITE);
-            holder.channel.setTextColor(Color.rgb(174, 187, 204));
-            holder.views.setTextColor(Color.rgb(174, 187, 204));
-            holder.date.setTextColor(Color.rgb(174, 187, 204));
-            holder.title.setSingleLine(false); holder.title.setSelected(false);
-            holder.title.setEllipsize(TextUtils.TruncateAt.END);
-            GradientDrawable background = new GradientDrawable();
-            background.setColor(Color.rgb(23, 26, 33)); background.setCornerRadius(cardDp(12)); recycled.setBackground(background);
-            recycled.setScaleX(1); recycled.setScaleY(1);
+            if (holder.boundItem != item || holder.channelsMode != channelsMode
+                    || holder.revision != cardRevision) {
+                holder.boundItem = item;
+                holder.channelsMode = channelsMode;
+                holder.revision = cardRevision;
+                holder.title.setText(channelsMode ? (item.channelName.isEmpty() ? "Канал " + item.channelId : item.channelName) : item.title);
+                holder.channel.setText(channelsMode ? item.source
+                        : item.source + " · " + VideoPresentation.channel(item));
+                holder.views.setText(channelsMode ? "" : VideoPresentation.views(item));
+                holder.date.setText(channelsMode ? "" : VideoPresentation.published(item));
+                holder.platform.setText(item.isLive && !channelsMode ? "● В ЭФИРЕ" : item.source);
+                holder.duration.setText(item.isLive ? "В ЭФИРЕ" : VideoPresentation.duration(item.durationMs));
+                holder.duration.setVisibility(item.isLive || item.durationMs > 0 ? View.VISIBLE : View.GONE);
+                WatchProgressStore.Progress watched = WatchProgressStore.get(BrowseActivity.this, item);
+                long total = watched.durationMs > 0 ? watched.durationMs : item.durationMs;
+                holder.progress.setVisibility(watched.positionMs > 0 && total > 0 ? View.VISIBLE : View.GONE);
+                if (total > 0) holder.progress.setProgress((int) Math.min(1000, watched.positionMs * 1000 / total));
+                holder.title.setTextColor(Color.WHITE);
+                holder.channel.setTextColor(Color.rgb(174, 187, 204));
+                holder.views.setTextColor(Color.rgb(174, 187, 204));
+                holder.date.setTextColor(Color.rgb(174, 187, 204));
+                holder.title.setSingleLine(false); holder.title.setSelected(false);
+                holder.title.setEllipsize(TextUtils.TruncateAt.END);
+                recycled.setBackground(holder.normalBackground);
+                recycled.setScaleX(1); recycled.setScaleY(1);
+            }
             int width = grid.getColumnWidth();
             if (width <= 0) width = cardDp(Math.round(250 * TvScalePreferences.get(BrowseActivity.this, TvScalePreferences.GRID)));
             ((TubeApplication) getApplication()).imageLoader().load(item.thumbnail, holder.image,
                     width, width * 9 / 16);
+            long bindMs = android.os.SystemClock.elapsedRealtime() - bindStarted;
+            if (BuildConfig.DEBUG && bindMs > 12)
+                android.util.Log.i("RussTubeTvPerf", "cardBindMs=" + bindMs
+                        + " position=" + position + " created=" + created);
             return recycled;
         }
     }
@@ -945,10 +974,16 @@ public final class BrowseActivity extends Activity {
         final ImageView image;
         final TextView title, channel, views, date, platform, duration;
         final ProgressBar progress;
+        final GradientDrawable normalBackground, focusedBackground;
+        VideoItem boundItem;
+        boolean channelsMode;
+        int revision;
         Card(ImageView image, TextView title, TextView channel, TextView views, TextView date,
-             TextView platform, TextView duration, ProgressBar progress) {
+             TextView platform, TextView duration, ProgressBar progress,
+             GradientDrawable normalBackground, GradientDrawable focusedBackground) {
             this.image = image; this.title = title; this.channel = channel; this.views = views;
             this.date = date; this.platform = platform; this.duration = duration; this.progress = progress;
+            this.normalBackground = normalBackground; this.focusedBackground = focusedBackground;
         }
     }
 }

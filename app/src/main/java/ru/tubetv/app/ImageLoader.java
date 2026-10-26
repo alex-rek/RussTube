@@ -35,6 +35,7 @@ final class ImageLoader {
     // Only accessed on the UI thread. Queued work never holds an Activity or View strongly.
     private final Map<String, Request> pending = new HashMap<>();
     private final Set<String> scheduledPrefetch = new HashSet<>();
+    private long lastPruneAt;
 
     ImageLoader(Context context) {
         disk = new ThumbnailDiskCache(context.getCacheDir());
@@ -59,13 +60,19 @@ final class ImageLoader {
         boolean same = key.equals(target.getTag());
         target.setTag(key);
         if (!same) target.setImageDrawable(new ColorDrawable(0xff10243b));
-        pruneRequests();
+        long now = SystemClock.uptimeMillis();
+        if (pending.size() > 48 || (pending.size() > 12 && now - lastPruneAt >= 120)) {
+            pruneRequests();
+            lastPruneAt = now;
+        }
         if (url == null || url.isEmpty()) return;
         Bitmap cached = cache.get(key);
         if (cached != null) {
             target.setImageBitmap(cached);
-            if (BuildConfig.DEBUG) Log.i("RussTubeImagePerf", "source=memory host=" + host(url)
-                    + " bindUs=" + ((SystemClock.elapsedRealtimeNanos() - startedBinding) / 1000));
+            long bindUs = (SystemClock.elapsedRealtimeNanos() - startedBinding) / 1000;
+            if (BuildConfig.DEBUG && bindUs > 5_000)
+                Log.i("RussTubeImagePerf", "source=memory host=" + host(url)
+                        + " bindUs=" + bindUs);
             return;
         }
         Request request = pending.get(key);

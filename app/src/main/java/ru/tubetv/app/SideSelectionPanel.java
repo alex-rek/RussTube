@@ -26,10 +26,11 @@ final class SideSelectionPanel extends LinearLayout {
         setPadding(dp(14), dp(16), dp(14), dp(16));
         TextView heading = new TextView(context);
         heading.setText(title);
-        heading.setTextSize(23 * TvScalePreferences.get(context, TvScalePreferences.INTERFACE));
+        heading.setTextSize(20 * TvScalePreferences.get(context, TvScalePreferences.INTERFACE));
         heading.setTextColor(Color.WHITE);
         heading.setGravity(Gravity.CENTER_VERTICAL);
-        addView(heading, new LayoutParams(-1, dp(56)));
+        heading.setMaxLines(2);
+        addView(heading, new LayoutParams(-1, dp(86)));
         scroll = new ScrollView(context);
         scroll.setFillViewport(false);
         rows = new LinearLayout(context);

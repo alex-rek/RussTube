@@ -10,6 +10,7 @@ import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.IdentityHashMap;
 
 /** Small local content-based model. History stays on the device. */
 final class RecommendationEngine {
@@ -46,7 +47,9 @@ final class RecommendationEngine {
             if (!watched.contains(item.stableKey()) && !item.isLive) unique.put(item.stableKey(), item);
         }
         List<VideoItem> result = new ArrayList<>(unique.values());
-        Collections.sort(result, (a, b) -> Integer.compare(score(b, topics, channels), score(a, topics, channels)));
+        Map<VideoItem, Integer> scores = new IdentityHashMap<>();
+        for (VideoItem item : result) scores.put(item, score(item, topics, channels));
+        Collections.sort(result, (a, b) -> Integer.compare(scores.get(b), scores.get(a)));
         return result.subList(0, Math.min(60, result.size()));
     }
 
@@ -59,8 +62,14 @@ final class RecommendationEngine {
     private static Set<String> words(String title) {
         Set<String> result = new LinkedHashSet<>();
         for (String word : title.toLowerCase(Locale.ROOT).split("[^\\p{L}\\p{N}]+")) {
-            if (word.length() >= 3 && !STOP.contains(word) && !word.matches("[0-9]+")) result.add(word);
+            if (word.length() >= 3 && !STOP.contains(word) && !digitsOnly(word)) result.add(word);
         }
         return result;
+    }
+
+    private static boolean digitsOnly(String value) {
+        for (int i = 0; i < value.length(); i++)
+            if (!Character.isDigit(value.charAt(i))) return false;
+        return true;
     }
 }

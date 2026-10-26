@@ -126,7 +126,7 @@ public final class MobileBrowseActivity extends Activity {
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
         updates = new UpdateCoordinator(this);
-        shortsPlayback = new MobileShortsPlayback(this);
+        shortsPlayback = new MobileShortsPlayback(this, this::onShortUnavailable);
         getWindow().setStatusBarColor(BACKGROUND);
         getWindow().setNavigationBarColor(BACKGROUND);
         sortMode = VideoSort.parse(getSharedPreferences("browse", 0)
@@ -461,7 +461,8 @@ public final class MobileBrowseActivity extends Activity {
                 heading.setText("Shorts");
                 for (VideoItem item : discoveredShorts.values())
                     if (MobileBrowsePreferences.sourceEnabled(this, item.source)
-                            && !watchedKeys.contains(item.stableKey())) candidates.add(item);
+                            && !watchedKeys.contains(item.stableKey())
+                            && !UnavailableVideoStore.contains(this, item)) candidates.add(item);
                 baseItems.addAll(candidates);
                 searchShorts();
                 break;
@@ -930,8 +931,27 @@ public final class MobileBrowseActivity extends Activity {
 
     private void applySort() {
         items.clear();
-        items.addAll(baseItems);
+        Set<String> unavailable = UnavailableVideoStore.keys(this);
+        for (VideoItem item : baseItems)
+            if ((page != Page.HOME && page != Page.SHORTS)
+                    || !unavailable.contains(item.stableKey())) items.add(item);
         if (page != Page.CHANNELS || activeChannel != null) VideoSort.apply(items, sortMode);
+    }
+
+    private void onShortUnavailable(VideoItem unavailable) {
+        if (page != Page.SHORTS || unavailable == null) return;
+        int position = Math.max(0, centeredShortPosition());
+        String key = unavailable.stableKey();
+        discoveredShorts.remove(key);
+        candidates.removeIf(item -> key.equals(item.stableKey()));
+        baseItems.removeIf(item -> key.equals(item.stableKey()));
+        shortsPlayback.clear();
+        applySort();
+        render();
+        if (!items.isEmpty()) {
+            list.setSelection(Math.min(position, items.size() - 1));
+            list.post(this::queueShortSelection);
+        }
     }
 
     private void render() {
@@ -1027,7 +1047,11 @@ public final class MobileBrowseActivity extends Activity {
         super.onResume();
         updates.onResume();
         shortsPlayback.onResume();
-        if (page == Page.SHORTS) queueShortSelection();
+        if (page == Page.SHORTS) {
+            applySort();
+            render();
+            queueShortSelection();
+        }
         if (firstResume) { firstResume = false; return; }
         if (skipResumeReload) { skipResumeReload = false; render(); return; }
         if (activeChannel != null) showChannel(activeChannel);

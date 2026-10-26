@@ -611,7 +611,8 @@ public final class MainActivity extends Activity {
         int minWidth = trafficMode ? TRAFFIC_FILTER_WIDTHS[selectedFilter] : NORMAL_FILTER_WIDTHS[selectedFilter];
         searchItems.clear();
         for (VideoItem item : allItems) {
-            if (minWidth == 0 || item.maxWidth >= minWidth) searchItems.add(item);
+            if (!UnavailableVideoStore.contains(this, item)
+                    && (minWidth == 0 || item.maxWidth >= minWidth)) searchItems.add(item);
         }
         Collections.sort(searchItems, VideoRanker.comparator(currentSearchQuery, trafficMode));
         if (historyMode) {

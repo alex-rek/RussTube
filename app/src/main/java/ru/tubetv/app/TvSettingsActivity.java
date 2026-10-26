@@ -1,6 +1,7 @@
 package ru.tubetv.app;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
@@ -227,6 +228,15 @@ public final class TvSettingsActivity extends Activity {
             renderPanel(0);
         });
         note("Первое нажатие открывает меню, второе завершает приложение.");
+        section("Рекомендации");
+        row("Вернуть недоступные видео", String.valueOf(UnavailableVideoStore.count(this)), () ->
+                new AlertDialog.Builder(this).setTitle("Вернуть видео в каталог?")
+                        .setMessage("Ранее неработающие видео снова появятся в рекомендациях и поиске.")
+                        .setNegativeButton("Отмена", null)
+                        .setPositiveButton("Вернуть", (dialog, which) -> {
+                            UnavailableVideoStore.clear(this);
+                            renderPanel(1);
+                        }).show());
     }
 
     private void interfaceSettings() {
@@ -241,14 +251,11 @@ public final class TvSettingsActivity extends Activity {
         VideoSort.Mode current = VideoSort.parse(getSharedPreferences("browse", 0)
                 .getString("video_sort", VideoSort.Mode.NEWEST.name()));
         VideoSort.Mode[] modes = VideoSort.Mode.values();
-        for (int i = 0; i < modes.length; i++) {
-            final int index = i;
-            row(modes[i].label, modes[i] == current ? "✓" : "", () -> {
-                getSharedPreferences("browse", 0).edit()
-                        .putString("video_sort", modes[index].name()).apply();
-                renderPanel(index + 2);
-            });
-        }
+        String[] sortLabels = new String[modes.length];
+        for (int i = 0; i < modes.length; i++) sortLabels[i] = modes[i].label;
+        row("Порядок видео", current.label, () -> openChoices("Порядок видео", sortLabels,
+                current.ordinal(), 2, choice -> getSharedPreferences("browse", 0).edit()
+                        .putString("video_sort", modes[choice].name()).apply()));
         note("Выбор применяется к ленте после возврата в каталог.");
     }
 
@@ -280,17 +287,55 @@ public final class TvSettingsActivity extends Activity {
     }
 
     private void playerSettings() {
-        section("Скорость по умолчанию");
+        section("Воспроизведение");
         float[] speeds = {.75f, 1f, 1.25f, 1.5f, 2f};
         String[] labels = {"0,75×", "1×", "1,25×", "1,5×", "2×"};
-        float current = StateStore.playbackSpeed(this);
-        for (int i = 0; i < speeds.length; i++) {
-            final int index = i;
-            row(labels[i], Math.abs(current - speeds[i]) < .01f ? "✓" : "", () -> {
-                StateStore.savePlaybackSpeed(this, speeds[index]);
-                renderPanel(index);
-            });
-        }
+        int speedIndex = 1;
+        for (int i = 0; i < speeds.length; i++)
+            if (Math.abs(StateStore.playbackSpeed(this) - speeds[i]) < .01f) speedIndex = i;
+        int selectedSpeed = speedIndex;
+        row("Скорость по умолчанию", labels[speedIndex], () ->
+                openChoices("Скорость по умолчанию", labels, selectedSpeed, 0,
+                        choice -> StateStore.savePlaybackSpeed(this, speeds[choice])));
+        section("Часы");
+        boolean clock = TvPlayerPreferences.showClock(this);
+        row("Время в правом верхнем углу", clock ? "Включено" : "Выключено", () -> {
+            TvPlayerPreferences.setShowClock(this, !clock);
+            renderPanel(1);
+        });
+        row("Размер часов", TvPlayerPreferences.CLOCK_SIZES[TvPlayerPreferences.clockSize(this)],
+                () -> openChoices("Размер часов", TvPlayerPreferences.CLOCK_SIZES,
+                        TvPlayerPreferences.clockSize(this), 2,
+                        choice -> TvPlayerPreferences.setClockSize(this, choice)));
+        section("Субтитры");
+        row("Язык", CaptionPreferences.LANGUAGES[CaptionPreferences.language(this)],
+                () -> openChoices("Язык субтитров", CaptionPreferences.LANGUAGES,
+                        CaptionPreferences.language(this), 3,
+                        choice -> CaptionPreferences.setLanguage(this, choice)));
+        row("Размер", CaptionPreferences.SIZES[CaptionPreferences.size(this)],
+                () -> openChoices("Размер субтитров", CaptionPreferences.SIZES,
+                        CaptionPreferences.size(this), 4,
+                        choice -> CaptionPreferences.setSize(this, choice)));
+        row("Цвет", CaptionPreferences.COLORS[CaptionPreferences.color(this)],
+                () -> openChoices("Цвет субтитров", CaptionPreferences.COLORS,
+                        CaptionPreferences.color(this), 5,
+                        choice -> CaptionPreferences.setColor(this, choice)));
+    }
+
+    private interface ChoiceAction { void apply(int choice); }
+
+    private void openChoices(String title, String[] labels, int selected, int focusRow,
+                             ChoiceAction action) {
+        selectionOrigin = getCurrentFocus();
+        selectionPanel = new SideSelectionPanel(this, title, labels, selected, choice -> {
+            action.apply(choice);
+            closeSelection();
+            renderPanel(focusRow);
+        });
+        int width = Math.min(dp(390), Math.round(getResources().getDisplayMetrics().widthPixels * .42f));
+        screen.addView(selectionPanel, new FrameLayout.LayoutParams(width, -1, Gravity.RIGHT));
+        selectionPanel.setTranslationX(width);
+        selectionPanel.animate().translationX(0).setDuration(180).start();
     }
 
     private void searchSettings() {
@@ -310,14 +355,15 @@ public final class TvSettingsActivity extends Activity {
         note("Для поиска, обложек и видеопотоков HTTPS. Доступны HTTP и SOCKS5; UDP не используется.");
         String[] types = {"off", "http", "socks5"};
         String[] names = {"Без прокси", "HTTP", "SOCKS5"};
-        for (int i = 0; i < types.length; i++) {
-            final int index = i;
-            row(names[i], types[i].equals(proxyType) ? "✓" : "", () -> {
-                captureProxyDraft();
-                proxyType = types[index];
-                renderPanel(index);
-            });
-        }
+        int selectedType = 0;
+        for (int i = 0; i < types.length; i++)
+            if (types[i].equals(proxyType)) selectedType = i;
+        int currentType = selectedType;
+        row("Режим прокси", names[selectedType], () -> openChoices("Режим прокси",
+                names, currentType, 0, choice -> {
+                    captureProxyDraft();
+                    proxyType = types[choice];
+                }));
         section("Сервер");
         proxyHost = field("Адрес", draftHost, InputType.TYPE_CLASS_TEXT
                 | InputType.TYPE_TEXT_VARIATION_URI);
@@ -403,6 +449,7 @@ public final class TvSettingsActivity extends Activity {
         section("RussTubeTV " + BuildConfig.VERSION_NAME);
         note("Поиск видео на RUTUBE, VK Видео, OK, Дзене и PeerTube.");
         note("История и подписки хранятся на устройстве.");
+        note("Artic Fox app, California. 2026.");
         row("Проверить обновление", "↻", updates::checkNow);
     }
 

@@ -38,6 +38,9 @@ import androidx.core.view.WindowInsetsCompat;
 import androidx.media3.common.C;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
+import androidx.media3.common.Tracks;
+import androidx.media3.common.TrackSelectionOverride;
+import androidx.media3.common.text.CueGroup;
 import androidx.media3.common.VideoSize;
 import androidx.media3.exoplayer.ExoPlayer;
 
@@ -73,6 +76,8 @@ public final class MobilePlayerActivity extends Activity {
     private TextView errorText;
     private TextView playButton;
     private TextView fullscreenButton;
+    private TextView captionsButton;
+    private TextView captionText;
     private TextView aspectButton;
     private TextView time;
     private TextView favoriteButton;
@@ -86,6 +91,7 @@ public final class MobilePlayerActivity extends Activity {
     private boolean started;
     private boolean focused = true;
     private boolean failed;
+    private boolean captionsDisabled = true;
     private boolean scrubbing;
     private boolean recorded;
     private boolean backgroundStarted;
@@ -215,6 +221,14 @@ public final class MobilePlayerActivity extends Activity {
             });
         }
         videoFrame.addView(tapLayer, new FrameLayout.LayoutParams(-1, -1));
+        captionText = label("", CaptionPreferences.SIZE_SP[CaptionPreferences.size(this)],
+                CaptionPreferences.COLOR_VALUES[CaptionPreferences.color(this)]);
+        captionText.setGravity(Gravity.CENTER);
+        captionText.setShadowLayer(dp(3), dp(1), dp(1), Color.BLACK);
+        captionText.setVisibility(View.GONE);
+        FrameLayout.LayoutParams captionParams = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
+        captionParams.setMargins(dp(18), 0, dp(18), dp(82));
+        videoFrame.addView(captionText, captionParams);
         loading = new ProgressBar(this);
         loading.setIndeterminateTintList(ColorStateList.valueOf(ACCENT));
         videoFrame.addView(loading, new FrameLayout.LayoutParams(dp(42), dp(42), Gravity.CENTER));
@@ -272,6 +286,10 @@ public final class MobilePlayerActivity extends Activity {
         time = label("0:00 / 0:00", 12, Color.WHITE);
         time.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
         controlRow.addView(time, new LinearLayout.LayoutParams(0, dp(42), 1));
+        captionsButton = addControl(controlRow, "CC", this::toggleCaptions);
+        captionsButton.setContentDescription("Включить субтитры");
+        captionsButton.setVisibility(View.GONE);
+        captionsButton.setTextSize(16);
         aspectButton = addControl(controlRow, "Авто", this::cycleAspect);
         aspectButton.setTextSize(12);
         updateAspectButton();
@@ -451,7 +469,7 @@ public final class MobilePlayerActivity extends Activity {
         TextView button = label(text, 19, Color.WHITE);
         button.setGravity(Gravity.CENTER);
         button.setOnClickListener(v -> { action.run(); showControls(); });
-        row.addView(button, size(54, 44));
+        row.addView(button, size(44, 44));
         return button;
     }
 
@@ -518,11 +536,33 @@ public final class MobilePlayerActivity extends Activity {
                     pixelRatio = size.pixelWidthHeightRatio > 0 ? size.pixelWidthHeightRatio : 1f;
                     videoFrame.post(MobilePlayerActivity.this::fitSurface);
                 }
+                @Override public void onTracksChanged(Tracks tracks) {
+                    boolean available = false;
+                    for (Tracks.Group group : tracks.getGroups())
+                        if (group.getType() == C.TRACK_TYPE_TEXT)
+                            for (int i = 0; i < group.length; i++)
+                                if (group.isTrackSupported(i)) available = true;
+                    captionsButton.setVisibility(available ? View.VISIBLE : View.GONE);
+                    if (available && !captionsDisabled) selectPreferredCaption(tracks);
+                }
+                @Override public void onCues(CueGroup cues) {
+                    StringBuilder lines = new StringBuilder();
+                    for (androidx.media3.common.text.Cue cue : cues.cues)
+                        if (cue.text != null) {
+                            if (lines.length() > 0) lines.append('\n');
+                            lines.append(cue.text);
+                        }
+                    captionText.setText(lines.toString());
+                    captionText.setVisibility(!captionsDisabled && lines.length() > 0
+                            ? View.VISIBLE : View.GONE);
+                }
                 @Override public void onPlayerError(PlaybackException error) {
                     showError("Ошибка воспроизведения: " + error.getErrorCodeName());
                 }
             });
             player.setMediaItem(PlaybackEngineFactory.mediaItem(streamUrl, streamMimeType));
+            player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
+                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, captionsDisabled).build());
             if (resumePosition > 0) player.seekTo(resumePosition);
             player.setPlaybackSpeed(StateStore.playbackSpeed(this));
             player.setPlayWhenReady(autoResume);
@@ -535,10 +575,41 @@ public final class MobilePlayerActivity extends Activity {
     }
 
     private void showError(String text) {
+        UnavailableVideoStore.add(this, video);
         failed = true; updateScreenAwake();
         loading.setVisibility(View.GONE);
         errorText.setVisibility(View.VISIBLE);
         errorText.setText(text + "\nОткройте видео на платформе кнопкой ↗");
+    }
+
+    private void toggleCaptions() {
+        if (player == null) return;
+        captionsDisabled = !captionsDisabled;
+        player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, captionsDisabled).build());
+        if (!captionsDisabled) selectPreferredCaption(player.getCurrentTracks());
+        else captionText.setVisibility(View.GONE);
+        captionsButton.setAlpha(captionsDisabled ? .5f : 1f);
+        captionsButton.setContentDescription(captionsDisabled ? "Включить субтитры" : "Выключить субтитры");
+    }
+
+    private void selectPreferredCaption(Tracks tracks) {
+        int preferred = CaptionPreferences.language(this);
+        if (preferred == 0 || player == null) return;
+        String code = CaptionPreferences.LANGUAGE_CODES[preferred];
+        for (Tracks.Group group : tracks.getGroups()) {
+            if (group.getType() != C.TRACK_TYPE_TEXT) continue;
+            for (int i = 0; i < group.length; i++) {
+                if (!group.isTrackSupported(i) || group.getTrackFormat(i).language == null
+                        || !group.getTrackFormat(i).language.startsWith(code)) continue;
+                if (!group.isTrackSelected(i)) player.setTrackSelectionParameters(
+                        player.getTrackSelectionParameters().buildUpon()
+                                .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                                .setOverrideForType(new TrackSelectionOverride(
+                                        group.getMediaTrackGroup(), i)).build());
+                return;
+            }
+        }
     }
 
     private void showControls() {

@@ -76,6 +76,17 @@ final class MobileSettingsPanel extends ScrollView {
         fill.setOnCheckedChangeListener((button, checked) ->
                 MobileBrowsePreferences.setShortsFill(activity, checked));
 
+        section("Плеер");
+        row("Язык субтитров: " + CaptionPreferences.LANGUAGES[CaptionPreferences.language(activity)],
+                () -> chooseCaption("Язык субтитров", CaptionPreferences.LANGUAGES,
+                        CaptionPreferences.language(activity), CaptionPreferences::setLanguage));
+        row("Размер субтитров: " + CaptionPreferences.SIZES[CaptionPreferences.size(activity)],
+                () -> chooseCaption("Размер субтитров", CaptionPreferences.SIZES,
+                        CaptionPreferences.size(activity), CaptionPreferences::setSize));
+        row("Цвет субтитров: " + CaptionPreferences.COLORS[CaptionPreferences.color(activity)],
+                () -> chooseCaption("Цвет субтитров", CaptionPreferences.COLORS,
+                        CaptionPreferences.color(activity), CaptionPreferences::setColor));
+
         section("История");
         description("Удалить просмотры за выбранный период");
         for (int days : new int[]{1, 2, 3, 7}) {
@@ -84,9 +95,37 @@ final class MobileSettingsPanel extends ScrollView {
             deleteRow(label, days, historyChanged);
         }
         deleteRow("Всю историю", 0, historyChanged);
+        row("Вернуть недоступные видео (" + UnavailableVideoStore.count(activity) + ")", () ->
+                new AlertDialog.Builder(activity).setTitle("Вернуть видео в рекомендации?")
+                        .setMessage("Ранее неработающие видео снова появятся в ленте и Shorts.")
+                        .setNegativeButton("Отмена", null)
+                        .setPositiveButton("Вернуть", (dialog, which) -> {
+                            UnavailableVideoStore.clear(activity);
+                            historyChanged.run();
+                        }).show());
 
         section("Сеть");
         row("Прокси  ›", openNetwork);
+        section("О программе");
+        description("RussTube " + BuildConfig.VERSION_NAME);
+        description("Artic Fox app, California. 2026.");
+    }
+
+    private interface CaptionSetter { void set(Activity activity, int value); }
+
+    private void chooseCaption(String title, String[] choices, int selected, CaptionSetter setter) {
+        new AlertDialog.Builder(activity).setTitle(title)
+                .setSingleChoiceItems(choices, selected, (dialog, which) -> {
+                    setter.set(activity, which);
+                    dialog.dismiss();
+                    for (int i = 0; i < content.getChildCount(); i++) {
+                        if (content.getChildAt(i) instanceof TextView) {
+                            TextView view = (TextView) content.getChildAt(i);
+                            if (view.getText().toString().startsWith(title + ":"))
+                                view.setText(title + ": " + choices[which]);
+                        }
+                    }
+                }).setNegativeButton("Отмена", null).show();
     }
 
     private void deleteRow(String label, int days, Runnable changed) {

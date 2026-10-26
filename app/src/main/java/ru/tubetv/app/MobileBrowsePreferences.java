@@ -66,7 +66,7 @@ final class MobileBrowsePreferences {
     }
 
     static int shortsPreloadCount(Context context) {
-        return Math.max(0, Math.min(5, preferences(context).getInt("shorts_preload_count", 2)));
+        return Math.max(0, Math.min(5, preferences(context).getInt("shorts_preload_count", 5)));
     }
 
     static void setShortsPreloadCount(Context context, int count) {
@@ -83,7 +83,7 @@ final class MobileBrowsePreferences {
     }
 
     static boolean shortsFill(Context context) {
-        return preferences(context).getBoolean("shorts_fill", false);
+        return preferences(context).getBoolean("shorts_fill", true);
     }
 
     static void setShortsFill(Context context, boolean fill) {

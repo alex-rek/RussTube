@@ -25,10 +25,12 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.function.Consumer;
 
 /** One video decoder for the centered card in the mobile Shorts feed. */
 final class MobileShortsPlayback {
     private final Activity activity;
+    private final Consumer<VideoItem> onUnavailable;
     private final ExecutorService resolver = Executors.newSingleThreadExecutor();
     private final ExecutorService preloader = Executors.newSingleThreadExecutor();
     private final Map<String, PlaybackInfo> prepared = new ConcurrentHashMap<>();
@@ -58,7 +60,10 @@ final class MobileShortsPlayback {
     private int videoHeight;
     private float pixelRatio = 1f;
 
-    MobileShortsPlayback(Activity activity) { this.activity = activity; }
+    MobileShortsPlayback(Activity activity, Consumer<VideoItem> onUnavailable) {
+        this.activity = activity;
+        this.onUnavailable = onUnavailable;
+    }
 
     boolean isSelected(FrameLayout view) { return artwork == view; }
 
@@ -82,15 +87,18 @@ final class MobileShortsPlayback {
 
     void preload(List<VideoItem> feed, int position) {
         int count = MobileBrowsePreferences.shortsPreloadCount(activity);
-        String currentKey = feed.get(position).stableKey() + "\n" + count;
-        if (currentKey.equals(preloadCurrentKey)) return;
-        preloadCurrentKey = currentKey;
         Set<String> nextKeys = new HashSet<>();
         List<VideoItem> next = new ArrayList<>();
         for (int i = position + 1; i < feed.size() && next.size() < count; i++) {
             VideoItem candidate = feed.get(i);
-            if (nextKeys.add(candidate.stableKey())) next.add(candidate);
+            if (!UnavailableVideoStore.contains(activity, candidate)
+                    && nextKeys.add(candidate.stableKey())) next.add(candidate);
         }
+        StringBuilder signature = new StringBuilder(feed.get(position).stableKey()).append('\n').append(count);
+        for (VideoItem candidate : next) signature.append('\n').append(candidate.stableKey());
+        String currentKey = signature.toString();
+        if (currentKey.equals(preloadCurrentKey)) return;
+        preloadCurrentKey = currentKey;
         if (item != null) nextKeys.add(item.stableKey());
         if (preloadJob != null) preloadJob.cancel(true);
         prepared.keySet().retainAll(nextKeys);
@@ -223,8 +231,10 @@ final class MobileShortsPlayback {
             catch (Exception error) {
                 main.post(() -> {
                     if (token != requestId || indicator == null) return;
+                    UnavailableVideoStore.add(activity, target);
                     resolving = null;
                     indicator.setText("Не удалось воспроизвести · нажмите для повтора");
+                    main.post(() -> onUnavailable.accept(target));
                 });
                 return;
             }
@@ -238,6 +248,7 @@ final class MobileShortsPlayback {
     }
 
     private void attach(PlaybackInfo stream) {
+        VideoItem target = item;
         try {
             surface = new MirrorVideoView(activity);
             surface.setSurfaceListener(new MirrorVideoView.SurfaceListener() {
@@ -281,12 +292,14 @@ final class MobileShortsPlayback {
                 }
 
                 @Override public void onPlayerError(androidx.media3.common.PlaybackException error) {
+                    UnavailableVideoStore.add(activity, target);
                     failed = true;
                     indicator.setText("Ошибка видео · нажмите для повтора");
                     indicator.setTextSize(15);
                     indicator.setVisibility(View.VISIBLE);
                     thumbnail.setVisibility(View.VISIBLE);
                     keepScreenAwake();
+                    main.post(() -> onUnavailable.accept(target));
                 }
             });
             player.setMediaItem(PlaybackEngineFactory.mediaItem(stream.streamUrl,
@@ -296,11 +309,13 @@ final class MobileShortsPlayback {
             main.postDelayed(progress, 5000);
         } catch (Throwable error) {
             CrashLog.save(activity, error);
+            UnavailableVideoStore.add(activity, target);
             resetDecoder();
             failed = true;
             indicator.setText("Ошибка видео · нажмите для повтора");
             indicator.setTextSize(15);
             indicator.setVisibility(View.VISIBLE);
+            main.post(() -> onUnavailable.accept(target));
         }
     }
 

@@ -2,7 +2,6 @@ package ru.tubetv.app;
 
 import android.Manifest;
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.res.Configuration;
 import android.graphics.Color;
@@ -43,6 +42,7 @@ import androidx.media3.common.Player;
 import androidx.media3.common.Tracks;
 import androidx.media3.common.TrackSelectionOverride;
 import androidx.media3.common.VideoSize;
+import androidx.media3.common.text.CueGroup;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.exoplayer.ExoPlayer;
 
@@ -61,6 +61,7 @@ public final class PlayerActivity extends Activity {
     private final Runnable progressTicker = new Runnable() {
         @Override public void run() {
             updateControls();
+            updateWallClock();
             if (activityStarted && !audioMovedToBackground) ui.postDelayed(this, 1000);
         }
     };
@@ -76,6 +77,9 @@ public final class PlayerActivity extends Activity {
     private TextView favoriteState;
     private TextView subscriptionState;
     private TextView captionsState;
+    private TextView captionText;
+    private TextView wallClock;
+    private SideSelectionPanel captionPanel;
     private TextView focusedHint;
     private FrameLayout playerRoot;
     private LinearLayout controls;
@@ -128,7 +132,7 @@ public final class PlayerActivity extends Activity {
     private boolean activityStarted;
     private boolean windowFocused = true;
     private boolean playbackFailed;
-    private boolean captionsDisabled;
+    private boolean captionsDisabled = true;
     private boolean captionsMenuVisible;
     private boolean destroyed;
     private final Runnable openMenuFromLongCenter = () -> {
@@ -199,7 +203,8 @@ public final class PlayerActivity extends Activity {
         root.setBackgroundColor(Color.BLACK);
         root.setOnTouchListener((view, event) -> {
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
-                if (playbackMenuVisible) setPlaybackMenuVisible(false);
+                if (captionPanel != null) closeCaptionPanel();
+                else if (playbackMenuVisible) setPlaybackMenuVisible(false);
                 else showControls();
             }
             return true;
@@ -216,6 +221,25 @@ public final class PlayerActivity extends Activity {
             }
         });
         root.addView(videoSurface, new FrameLayout.LayoutParams(-1, -1));
+        if (!mobileMode) {
+            captionText = label("", CaptionPreferences.SIZE_SP[CaptionPreferences.size(this)]);
+            captionText.setTextColor(CaptionPreferences.COLOR_VALUES[CaptionPreferences.color(this)]);
+            captionText.setGravity(Gravity.CENTER);
+            captionText.setShadowLayer(dp(3), dp(1), dp(1), Color.BLACK);
+            captionText.setVisibility(View.GONE);
+            FrameLayout.LayoutParams captionParams = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
+            captionParams.setMargins(dp(80), 0, dp(80), dp(100));
+            root.addView(captionText, captionParams);
+            wallClock = label("", TvPlayerPreferences.CLOCK_SIZE_SP[TvPlayerPreferences.clockSize(this)]);
+            wallClock.setGravity(Gravity.RIGHT | Gravity.TOP);
+            wallClock.setShadowLayer(dp(3), dp(1), dp(1), Color.BLACK);
+            wallClock.setVisibility(TvPlayerPreferences.showClock(this) ? View.VISIBLE : View.GONE);
+            FrameLayout.LayoutParams clockParams = new FrameLayout.LayoutParams(-2, -2,
+                    Gravity.RIGHT | Gravity.TOP);
+            clockParams.setMargins(dp(24), dp(24), dp(48), 0);
+            root.addView(wallClock, clockParams);
+            updateWallClock();
+        }
         ImageView speaker = new ImageView(this);
         speaker.setImageResource(R.drawable.ic_speaker);
         speaker.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
@@ -266,16 +290,21 @@ public final class PlayerActivity extends Activity {
         row.setGravity(Gravity.CENTER_VERTICAL);
         time = label("0:00 / 0:00", isCompactPlayer() ? 12 : 14);
         time.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
-        addPlayerControl(row, "−10", "Назад на 10 секунд", () -> seekBy(-10_000), false);
+        addPlayerControl(row, "◀◀", "Назад на 10 секунд", () -> seekBy(-10_000), false);
         playState = addPlayerControl(row, "▶", "Пауза / воспроизведение", this::togglePlayback, true);
-        addPlayerControl(row, "+10", "Вперёд на 10 секунд", () -> seekBy(10_000), false);
+        addPlayerControl(row, "▶▶", "Вперёд на 10 секунд", () -> seekBy(10_000), false);
         if (!mobileMode) repeatState = addPlayerControl(row, "↻", "Повтор видео", () -> {
             if (player != null) player.setRepeatMode(player.getRepeatMode() == Player.REPEAT_MODE_ONE
                     ? Player.REPEAT_MODE_OFF : Player.REPEAT_MODE_ONE);
             updateControls();
         }, false);
         if (!mobileMode) addPlayerControl(row, "1×", "Скорость воспроизведения", () -> setPlaybackMenuVisible(true), false);
-        if (!mobileMode) captionsState = addPlayerControl(row, "CC", "Субтитры", this::showCaptionsMenu, false);
+        if (!mobileMode) captionsState = addPlayerControl(row, "CC", "Субтитры · удержать для настроек",
+                this::toggleCaptions, false);
+        if (captionsState != null) captionsState.setOnLongClickListener(v -> {
+            showCaptionsMenu();
+            return true;
+        });
         if (captionsState != null) captionsState.setVisibility(View.GONE);
         if (!mobileMode && !historyItem.channelId.isEmpty()) subscriptionState = addPlayerControl(row, "⊕",
                 "Подписаться на канал", this::toggleSubscription, false);
@@ -554,6 +583,20 @@ public final class PlayerActivity extends Activity {
                         for (int i = 0; i < group.length; i++)
                             if (group.isTrackSupported(i)) captionsAvailable = true;
                 if (captionsState != null) captionsState.setVisibility(captionsAvailable ? View.VISIBLE : View.GONE);
+                if (captionsAvailable && !captionsDisabled) selectPreferredCaption(tracks);
+            }
+
+            @Override public void onCues(CueGroup cues) {
+                if (captionText == null) return;
+                StringBuilder lines = new StringBuilder();
+                for (androidx.media3.common.text.Cue cue : cues.cues)
+                    if (cue.text != null) {
+                        if (lines.length() > 0) lines.append('\n');
+                        lines.append(cue.text);
+                    }
+                captionText.setText(lines.toString());
+                captionText.setVisibility(!captionsDisabled && lines.length() > 0
+                        ? View.VISIBLE : View.GONE);
             }
 
             @Override public void onVideoSizeChanged(VideoSize size) {
@@ -569,6 +612,8 @@ public final class PlayerActivity extends Activity {
             }
         });
         player.setMediaItem(PlaybackEngineFactory.mediaItem(streamUrl, streamMimeType));
+        player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, captionsDisabled).build());
         if (resumePosition > 0) player.seekTo(resumePosition);
         player.setPlaybackSpeed(playbackSpeed);
         player.setPlayWhenReady(autoPlay);
@@ -721,42 +766,121 @@ public final class PlayerActivity extends Activity {
         }
         if (choices.isEmpty()) return;
         choices.sort((a, b) -> Integer.compare(a.order, b.order));
-        String[] labels = new String[choices.size() + 1];
+        String[] labels = new String[choices.size() + 5];
         labels[0] = "Выключено";
         for (int i = 0; i < choices.size(); i++) {
             SubtitleChoice choice = choices.get(i);
             labels[i + 1] = choice.label;
             if (!captionsDisabled && choice.group.isTrackSelected(choice.track)) selected = i + 1;
         }
+        int extra = choices.size() + 1;
+        labels[extra] = "Язык: " + CaptionPreferences.LANGUAGES[CaptionPreferences.language(this)];
+        labels[extra + 1] = "Размер: " + CaptionPreferences.SIZES[CaptionPreferences.size(this)];
+        labels[extra + 2] = "Цвет: " + CaptionPreferences.COLORS[CaptionPreferences.color(this)];
+        labels[extra + 3] = "Канал: " + VideoPresentation.channel(historyItem);
         captionsMenuVisible = true;
         ui.removeCallbacks(hideControls);
-        TextView title = label("Субтитры", 22);
-        title.setPadding(dp(24), dp(16), dp(24), dp(8));
-        AlertDialog dialog = new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setCustomTitle(title)
-                .setSingleChoiceItems(new TvChoiceAdapter(this, labels), selected, (window, index) -> {
-                    androidx.media3.common.TrackSelectionParameters.Builder parameters =
-                            player.getTrackSelectionParameters().buildUpon()
-                                    .clearOverridesOfType(C.TRACK_TYPE_TEXT);
-                    captionsDisabled = index == 0;
-                    parameters.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, captionsDisabled);
-                    if (!captionsDisabled) {
-                        SubtitleChoice choice = choices.get(index - 1);
-                        parameters.setOverrideForType(new TrackSelectionOverride(
-                                choice.group.getMediaTrackGroup(), choice.track));
-                    }
-                    player.setTrackSelectionParameters(parameters.build());
-                    captionsState.setAlpha(captionsDisabled ? .5f : 1f);
-                    window.dismiss();
-                }).create();
-        dialog.setOnDismissListener(ignored -> {
-            captionsMenuVisible = false;
-            showControls();
-            captionsState.requestFocus();
+        openCaptionPanel("Субтитры · " + historyItem.source, labels, selected, index -> {
+            if (index < extra) {
+                androidx.media3.common.TrackSelectionParameters.Builder parameters =
+                        player.getTrackSelectionParameters().buildUpon()
+                                .clearOverridesOfType(C.TRACK_TYPE_TEXT);
+                captionsDisabled = index == 0;
+                parameters.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, captionsDisabled);
+                if (!captionsDisabled) {
+                    SubtitleChoice choice = choices.get(index - 1);
+                    parameters.setOverrideForType(new TrackSelectionOverride(
+                            choice.group.getMediaTrackGroup(), choice.track));
+                }
+                player.setTrackSelectionParameters(parameters.build());
+                captionsState.setAlpha(captionsDisabled ? .5f : 1f);
+                if (captionsDisabled && captionText != null) captionText.setVisibility(View.GONE);
+                closeCaptionPanel();
+            } else if (index == extra) {
+                openCaptionSetting("Язык субтитров", CaptionPreferences.LANGUAGES,
+                        CaptionPreferences.language(this), choice -> {
+                            CaptionPreferences.setLanguage(this, choice);
+                            selectPreferredCaption(player.getCurrentTracks());
+                        });
+            } else if (index == extra + 1) {
+                openCaptionSetting("Размер субтитров", CaptionPreferences.SIZES,
+                        CaptionPreferences.size(this), choice -> {
+                            CaptionPreferences.setSize(this, choice);
+                            captionText.setTextSize(CaptionPreferences.SIZE_SP[choice]);
+                        });
+            } else if (index == extra + 2) {
+                openCaptionSetting("Цвет субтитров", CaptionPreferences.COLORS,
+                        CaptionPreferences.color(this), choice -> {
+                            CaptionPreferences.setColor(this, choice);
+                            captionText.setTextColor(CaptionPreferences.COLOR_VALUES[choice]);
+                        });
+            } else if (!historyItem.channelUrl.isEmpty()) {
+                closeCaptionPanel();
+                VideoActions.openChannel(this, historyItem);
+            }
         });
-        dialog.show();
-        dialog.getWindow().setLayout(Math.min(dp(520),
-                getResources().getDisplayMetrics().widthPixels - dp(48)), -2);
+    }
+
+    private interface CaptionAction { void apply(int index); }
+
+    private void openCaptionSetting(String title, String[] labels, int selected,
+                                    CaptionAction action) {
+        openCaptionPanel(title, labels, selected, index -> {
+            action.apply(index);
+            closeCaptionPanel();
+            showCaptionsMenu();
+        });
+    }
+
+    private void openCaptionPanel(String title, String[] labels, int selected,
+                                  CaptionAction action) {
+        if (captionPanel != null) playerRoot.removeView(captionPanel);
+        captionPanel = new SideSelectionPanel(this, title, labels, selected, action::apply);
+        int width = Math.min(dp(480), Math.round(getResources().getDisplayMetrics().widthPixels * .42f));
+        playerRoot.addView(captionPanel, new FrameLayout.LayoutParams(width, -1, Gravity.RIGHT));
+        captionPanel.setTranslationX(width);
+        captionPanel.animate().translationX(0).setDuration(180).start();
+    }
+
+    private void closeCaptionPanel() {
+        if (captionPanel == null) return;
+        SideSelectionPanel closing = captionPanel;
+        captionPanel = null;
+        closing.animate().translationX(closing.getWidth()).setDuration(160)
+                .withEndAction(() -> playerRoot.removeView(closing)).start();
+        captionsMenuVisible = false;
+        showControls();
+        captionsState.requestFocus();
+    }
+
+    private void toggleCaptions() {
+        if (player == null) return;
+        captionsDisabled = !captionsDisabled;
+        player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, captionsDisabled).build());
+        if (!captionsDisabled) selectPreferredCaption(player.getCurrentTracks());
+        else if (captionText != null) captionText.setVisibility(View.GONE);
+        captionsState.setAlpha(captionsDisabled ? .5f : 1f);
+    }
+
+    private void selectPreferredCaption(Tracks tracks) {
+        if (captionsDisabled || player == null) return;
+        int preferred = CaptionPreferences.language(this);
+        if (preferred == 0) return;
+        String code = CaptionPreferences.LANGUAGE_CODES[preferred];
+        for (Tracks.Group group : tracks.getGroups()) {
+            if (group.getType() != C.TRACK_TYPE_TEXT) continue;
+            for (int i = 0; i < group.length; i++) {
+                if (!group.isTrackSupported(i) || group.getTrackFormat(i).language == null
+                        || !group.getTrackFormat(i).language.startsWith(code)) continue;
+                if (!group.isTrackSelected(i)) player.setTrackSelectionParameters(
+                        player.getTrackSelectionParameters().buildUpon()
+                                .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                                .setOverrideForType(new TrackSelectionOverride(
+                                        group.getMediaTrackGroup(), i)).build());
+                return;
+            }
+        }
     }
 
     private void updateScreenAwake() {
@@ -766,6 +890,13 @@ public final class PlayerActivity extends Activity {
         if (awake) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         if (playerRoot != null) playerRoot.setKeepScreenOn(awake);
+    }
+
+    private void updateWallClock() {
+        if (wallClock == null) return;
+        wallClock.setText(android.text.format.DateFormat.format(
+                android.text.format.DateFormat.is24HourFormat(this) ? "HH:mm" : "h:mm a",
+                System.currentTimeMillis()));
     }
 
     private boolean handleHorizontalDpad(KeyEvent event) {
@@ -1016,6 +1147,7 @@ public final class PlayerActivity extends Activity {
     }
 
     private void showError(String text) {
+        UnavailableVideoStore.add(this, historyItem);
         playbackFailed = true;
         updateScreenAwake();
         loading.setVisibility(View.GONE);
@@ -1032,7 +1164,7 @@ public final class PlayerActivity extends Activity {
             }
             return true;
         }
-        if (playbackMenuVisible) return super.dispatchKeyEvent(event);
+        if (captionPanel != null || playbackMenuVisible) return super.dispatchKeyEvent(event);
         if (keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
             if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
                 showControls();
@@ -1065,6 +1197,10 @@ public final class PlayerActivity extends Activity {
     }
 
     @Override public void onBackPressed() {
+        if (captionPanel != null) {
+            closeCaptionPanel();
+            return;
+        }
         if (playbackMenuVisible) {
             setPlaybackMenuVisible(false);
             return;
