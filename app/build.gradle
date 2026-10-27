@@ -29,8 +29,8 @@ android {
         applicationId 'ru.russtube.tv'
         minSdk 23
         targetSdk 35
-        versionCode 24
-        versionName '0.6.10'
+        versionCode 25
+        versionName '0.6.11'
         buildConfigField "boolean", "UPDATES_ENABLED", "true"
         resourceConfigurations += ['ru']
     }

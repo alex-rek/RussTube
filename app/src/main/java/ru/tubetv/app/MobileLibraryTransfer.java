@@ -73,8 +73,14 @@ final class MobileLibraryTransfer {
         LinkedHashMap<String, VideoItem> favorites = new LinkedHashMap<>();
         for (VideoItem item : existingChannels) channels.put(item.channelKey(), item);
         for (VideoItem item : existingFavorites) favorites.put(item.stableKey(), item);
-        for (VideoItem item : imported.channels) channels.putIfAbsent(item.channelKey(), item);
-        for (VideoItem item : imported.favorites) favorites.putIfAbsent(item.stableKey(), item);
+        for (VideoItem item : imported.channels) {
+            String key = item.channelKey();
+            if (!channels.containsKey(key)) channels.put(key, item);
+        }
+        for (VideoItem item : imported.favorites) {
+            String key = item.stableKey();
+            if (!favorites.containsKey(key)) favorites.put(key, item);
+        }
         if (channels.size() > MAX_CHANNELS || favorites.size() > MAX_FAVORITES)
             throw new Exception("Недостаточно места: максимум 100 каналов и 1000 избранных видео");
         int newChannels = channels.size() - existingChannels.size();
@@ -105,7 +111,8 @@ final class MobileLibraryTransfer {
                     || (channels ? item.channelId.isEmpty()
                     : item.playUrl == null || item.playUrl.isEmpty()))
                 throw new Exception("Повреждённая запись в файле");
-            unique.putIfAbsent(channels ? item.channelKey() : item.stableKey(), item);
+            String key = channels ? item.channelKey() : item.stableKey();
+            if (!unique.containsKey(key)) unique.put(key, item);
         }
         return new ArrayList<>(unique.values());
     }
