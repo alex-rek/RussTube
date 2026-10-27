@@ -37,6 +37,7 @@ import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.media3.common.C;
 import androidx.media3.common.Format;
+import androidx.media3.common.MediaItem;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
 import androidx.media3.common.Tracks;
@@ -100,6 +101,7 @@ public final class PlayerActivity extends Activity {
     };
     private String streamUrl;
     private String streamMimeType;
+    private List<MediaItem.SubtitleConfiguration> streamSubtitles = java.util.Collections.emptyList();
     private String videoSource;
     private String videoIdentityUrl;
     private boolean autoPlay;
@@ -133,6 +135,7 @@ public final class PlayerActivity extends Activity {
     private boolean windowFocused = true;
     private boolean playbackFailed;
     private boolean captionsDisabled = true;
+    private boolean captionChoiceManual;
     private boolean captionsMenuVisible;
     private boolean destroyed;
     private final Runnable openMenuFromLongCenter = () -> {
@@ -511,6 +514,7 @@ public final class PlayerActivity extends Activity {
                     if (destroyed || isFinishing()) return;
                     streamUrl = resolved.streamUrl;
                     streamMimeType = resolved.streamMimeType;
+                    streamSubtitles = resolved.subtitles;
                     if (activityStarted) startPlayerSafely();
                 });
             } catch (Exception error) {
@@ -583,7 +587,8 @@ public final class PlayerActivity extends Activity {
                         for (int i = 0; i < group.length; i++)
                             if (group.isTrackSupported(i)) captionsAvailable = true;
                 if (captionsState != null) captionsState.setVisibility(captionsAvailable ? View.VISIBLE : View.GONE);
-                if (captionsAvailable && !captionsDisabled) selectPreferredCaption(tracks);
+                if (captionsAvailable && !captionsDisabled && !captionChoiceManual)
+                    selectPreferredCaption(tracks);
             }
 
             @Override public void onCues(CueGroup cues) {
@@ -611,7 +616,8 @@ public final class PlayerActivity extends Activity {
                 showError("Ошибка воспроизведения: " + error.getErrorCodeName());
             }
         });
-        player.setMediaItem(PlaybackEngineFactory.mediaItem(streamUrl, streamMimeType));
+        player.setMediaItem(PlaybackEngineFactory.mediaItem(streamUrl, streamMimeType)
+                .buildUpon().setSubtitleConfigurations(streamSubtitles).build());
         player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, captionsDisabled).build());
         if (resumePosition > 0) player.seekTo(resumePosition);
@@ -786,6 +792,7 @@ public final class PlayerActivity extends Activity {
                         player.getTrackSelectionParameters().buildUpon()
                                 .clearOverridesOfType(C.TRACK_TYPE_TEXT);
                 captionsDisabled = index == 0;
+                captionChoiceManual = !captionsDisabled;
                 parameters.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, captionsDisabled);
                 if (!captionsDisabled) {
                     SubtitleChoice choice = choices.get(index - 1);
@@ -800,6 +807,7 @@ public final class PlayerActivity extends Activity {
                 openCaptionSetting("Язык субтитров", CaptionPreferences.LANGUAGES,
                         CaptionPreferences.language(this), choice -> {
                             CaptionPreferences.setLanguage(this, choice);
+                            captionChoiceManual = false;
                             selectPreferredCaption(player.getCurrentTracks());
                         });
             } else if (index == extra + 1) {
@@ -856,6 +864,7 @@ public final class PlayerActivity extends Activity {
     private void toggleCaptions() {
         if (player == null) return;
         captionsDisabled = !captionsDisabled;
+        captionChoiceManual = false;
         player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, captionsDisabled).build());
         if (!captionsDisabled) selectPreferredCaption(player.getCurrentTracks());
@@ -866,21 +875,35 @@ public final class PlayerActivity extends Activity {
     private void selectPreferredCaption(Tracks tracks) {
         if (captionsDisabled || player == null) return;
         int preferred = CaptionPreferences.language(this);
-        if (preferred == 0) return;
         String code = CaptionPreferences.LANGUAGE_CODES[preferred];
+        Tracks.Group fallbackGroup = null;
+        int fallbackTrack = -1;
         for (Tracks.Group group : tracks.getGroups()) {
             if (group.getType() != C.TRACK_TYPE_TEXT) continue;
             for (int i = 0; i < group.length; i++) {
-                if (!group.isTrackSupported(i) || group.getTrackFormat(i).language == null
-                        || !group.getTrackFormat(i).language.startsWith(code)) continue;
-                if (!group.isTrackSelected(i)) player.setTrackSelectionParameters(
-                        player.getTrackSelectionParameters().buildUpon()
-                                .clearOverridesOfType(C.TRACK_TYPE_TEXT)
-                                .setOverrideForType(new TrackSelectionOverride(
-                                        group.getMediaTrackGroup(), i)).build());
-                return;
+                if (!group.isTrackSupported(i)) continue;
+                String language = group.getTrackFormat(i).language;
+                if (fallbackGroup == null || (language != null && !language.isEmpty()
+                        && (fallbackGroup.getTrackFormat(fallbackTrack).language == null
+                        || fallbackGroup.getTrackFormat(fallbackTrack).language.isEmpty()))) {
+                    fallbackGroup = group;
+                    fallbackTrack = i;
+                }
+                if (!code.isEmpty() && language != null && language.startsWith(code)) {
+                    selectCaptionTrack(group, i);
+                    return;
+                }
             }
         }
+        if (fallbackGroup != null) selectCaptionTrack(fallbackGroup, fallbackTrack);
+    }
+
+    private void selectCaptionTrack(Tracks.Group group, int track) {
+        if (group.isTrackSelected(track)) return;
+        player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
+                .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                .setOverrideForType(new TrackSelectionOverride(
+                        group.getMediaTrackGroup(), track)).build());
     }
 
     private void updateScreenAwake() {
