@@ -9,6 +9,14 @@ import java.util.Arrays;
 import org.junit.Test;
 
 public final class ShortsCatalogTest {
+    @Test public void mobileFeedUsesVkAndRutubeOnly() {
+        assertTrue(ShortsCatalog.isFeedSource("VK VIDEO"));
+        assertTrue(ShortsCatalog.isFeedSource("RUTUBE"));
+        assertFalse(ShortsCatalog.isFeedSource("OK"));
+        assertFalse(ShortsCatalog.isFeedSource("ДЗЕН"));
+        assertFalse(ShortsCatalog.isFeedSource("PEERTUBE"));
+    }
+
     private VideoItem video(String title, String page, long duration, int width, int height) {
         return new VideoItem("VK VIDEO", title, "", "", page, page, duration)
                 .withQuality(width, height);

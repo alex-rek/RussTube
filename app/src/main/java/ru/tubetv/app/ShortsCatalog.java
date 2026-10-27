@@ -8,6 +8,10 @@ import java.util.Locale;
 final class ShortsCatalog {
     private static final long UNKNOWN_ORIENTATION_MAX_MS = 180_000L;
 
+    static boolean isFeedSource(String source) {
+        return "VK VIDEO".equals(source) || "RUTUBE".equals(source);
+    }
+
     static boolean accepts(VideoItem item) {
         if (item == null || item.isLive) return false;
         if (item.maxWidth > 0 && item.maxHeight > 0)

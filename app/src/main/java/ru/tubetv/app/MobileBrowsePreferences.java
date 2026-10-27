@@ -66,11 +66,39 @@ final class MobileBrowsePreferences {
     }
 
     static int shortsPreloadCount(Context context) {
-        return Math.max(0, Math.min(5, preferences(context).getInt("shorts_preload_count", 5)));
+        return Math.max(0, Math.min(5, preferences(context).getInt("shorts_preload_count", 2)));
     }
 
     static void setShortsPreloadCount(Context context, int count) {
         preferences(context).edit().putInt("shorts_preload_count", Math.max(0, Math.min(5, count))).apply();
+    }
+
+    /** 0: save traffic, 1: balanced, 2: fastest switching. */
+    static int shortsPreloadMode(Context context) {
+        return Math.max(0, Math.min(2, preferences(context).getInt("shorts_preload_mode", 1)));
+    }
+
+    static void setShortsPreloadMode(Context context, int mode) {
+        preferences(context).edit().putInt("shorts_preload_mode", Math.max(0, Math.min(2, mode))).apply();
+    }
+
+    static boolean shortsWifiOnly(Context context) {
+        return preferences(context).getBoolean("shorts_preload_wifi_only", false);
+    }
+
+    static void setShortsWifiOnly(Context context, boolean enabled) {
+        preferences(context).edit().putBoolean("shorts_preload_wifi_only", enabled).apply();
+    }
+
+    static int shortsCacheMb(Context context) {
+        int value = preferences(context).getInt("shorts_cache_mb", 64);
+        return value == 32 || value == 128 || value == 256 ? value : 64;
+    }
+
+    static void setShortsCacheMb(Context context, int megabytes) {
+        if (megabytes != 32 && megabytes != 64 && megabytes != 128 && megabytes != 256)
+            throw new IllegalArgumentException("Shorts cache size");
+        preferences(context).edit().putInt("shorts_cache_mb", megabytes).apply();
     }
 
     /** 0: 9:16, 1: 4:5, 2: available feed height. */

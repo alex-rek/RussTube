@@ -390,7 +390,9 @@ public final class MobileBrowseActivity extends Activity {
         feed.addView(empty, new FrameLayout.LayoutParams(-1, -1));
         list.setEmptyView(empty);
         settingsPanel = new MobileSettingsPanel(this,
-                () -> startActivity(new Intent(this, NetworkSettingsActivity.class)), () -> { });
+                () -> startActivity(new Intent(this, NetworkSettingsActivity.class)), () -> { },
+                () -> shortsPlayback.reconfigureCache(),
+                () -> shortsPlayback.clearCache());
         settingsPanel.setVisibility(View.GONE);
         feed.addView(settingsPanel, new FrameLayout.LayoutParams(-1, -1));
         root.addView(feed, new LinearLayout.LayoutParams(-1, 0, 1));
@@ -462,7 +464,8 @@ public final class MobileBrowseActivity extends Activity {
             case SHORTS:
                 heading.setText("Shorts");
                 for (VideoItem item : discoveredShorts.values())
-                    if (MobileBrowsePreferences.sourceEnabled(this, item.source)
+                    if (ShortsCatalog.isFeedSource(item.source)
+                            && MobileBrowsePreferences.sourceEnabled(this, item.source)
                             && !watchedKeys.contains(item.stableKey())
                             && !UnavailableVideoStore.contains(this, item)) candidates.add(item);
                 baseItems.addAll(candidates);
@@ -771,13 +774,15 @@ public final class MobileBrowseActivity extends Activity {
     }
 
     private void searchShorts() {
-        for (String source : FeedRepository.SOURCES) {
-            enqueue(source, () -> repository.shorts(source, "shorts"));
-            enqueue(source, () -> repository.shorts(source, "шортс"));
-            enqueue(source, () -> repository.shorts(source, "популярное"));
-            if ("VK VIDEO".equals(source))
-                enqueue(source, () -> repository.shorts(source, "клипы"));
+        // Keep other providers available elsewhere; use RuTube's actual Shorts catalog here.
+        for (int page = 1; page <= 3; page++) {
+            final int currentPage = page;
+            enqueue("RUTUBE", () -> repository.rutubeShorts(currentPage));
         }
+        enqueue("VK VIDEO", () -> repository.shorts("VK VIDEO", "shorts"));
+        enqueue("VK VIDEO", () -> repository.shorts("VK VIDEO", "шортс"));
+        enqueue("VK VIDEO", () -> repository.shorts("VK VIDEO", "популярное"));
+        enqueue("VK VIDEO", () -> repository.shorts("VK VIDEO", "клипы"));
     }
 
     private void enqueue(String source, Load operation) {
@@ -1226,7 +1231,8 @@ public final class MobileBrowseActivity extends Activity {
             } else card = (Card) recycled.getTag();
             VideoItem item = getItem(position);
             if (shortsPlayback.isSelected(card.artwork) && (page != Page.SHORTS
-                    || !item.stableKey().equals(card.artwork.getTag()))) shortsPlayback.clear();
+                    || !item.stableKey().equals(card.artwork.getTag())))
+                shortsPlayback.clearForTransition();
             card.artwork.setTag(item.stableKey());
             card.image.setScaleType(page == Page.SHORTS
                     ? ImageView.ScaleType.CENTER_CROP : ImageView.ScaleType.FIT_CENTER);

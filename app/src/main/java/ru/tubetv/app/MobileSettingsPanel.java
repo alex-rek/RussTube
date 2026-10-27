@@ -20,7 +20,8 @@ final class MobileSettingsPanel extends ScrollView {
     private final Activity activity;
     private final LinearLayout content;
 
-    MobileSettingsPanel(Activity activity, Runnable openNetwork, Runnable historyChanged) {
+    MobileSettingsPanel(Activity activity, Runnable openNetwork, Runnable historyChanged,
+                        Runnable cacheSizeChanged, Runnable clearVideoCache) {
         super(activity);
         this.activity = activity;
         setFillViewport(true);
@@ -67,8 +68,22 @@ final class MobileSettingsPanel extends ScrollView {
         loop.setOnCheckedChangeListener((button, checked) ->
                 MobileBrowsePreferences.setShortsLoop(activity, checked));
         description("Если повтор выключен, Shorts остановится после одного просмотра.");
+        description("Предзагрузка");
         row("Предзагрузка следующих: " + MobileBrowsePreferences.shortsPreloadCount(activity),
                 () -> choosePreload());
+        description("Видео заранее загружается для следующего ролика; для остальных готовятся ссылки.");
+        row("Режим предзагрузки: " + preloadModeLabel(), () -> choosePreloadMode());
+        CheckBox wifiOnly = check("Предзагрузка только через Wi-Fi",
+                MobileBrowsePreferences.shortsWifiOnly(activity));
+        wifiOnly.setOnCheckedChangeListener((button, checked) ->
+                MobileBrowsePreferences.setShortsWifiOnly(activity, checked));
+        row("Размер видеокэша: " + MobileBrowsePreferences.shortsCacheMb(activity) + " МБ",
+                () -> chooseCacheSize(cacheSizeChanged));
+        row("Очистить видеокэш", () -> new AlertDialog.Builder(activity)
+                .setTitle("Очистить видеокэш?")
+                .setMessage("Удалятся сохранённые видеосегменты; история просмотров останется.")
+                .setNegativeButton("Отмена", null)
+                .setPositiveButton("Очистить", (dialog, which) -> clearVideoCache.run()).show());
         row("Формат окна: " + frameLabel(MobileBrowsePreferences.shortsFrameRatio(activity)),
                 () -> chooseFrame());
         CheckBox fill = check("Заполнять окно видео (обрезать края)",
@@ -155,6 +170,37 @@ final class MobileSettingsPanel extends ScrollView {
                         }).setNegativeButton("Отмена", null).show();
     }
 
+    private String preloadModeLabel() {
+        return new String[]{"Экономия трафика", "Баланс", "Максимальная скорость"}[
+                MobileBrowsePreferences.shortsPreloadMode(activity)];
+    }
+
+    private void choosePreloadMode() {
+        String[] choices = {"Экономия трафика", "Баланс", "Максимальная скорость"};
+        new AlertDialog.Builder(activity).setTitle("Режим предзагрузки Shorts")
+                .setSingleChoiceItems(choices, MobileBrowsePreferences.shortsPreloadMode(activity),
+                        (dialog, which) -> {
+                            MobileBrowsePreferences.setShortsPreloadMode(activity, which);
+                            dialog.dismiss();
+                            refreshShortsRows();
+                        }).setNegativeButton("Отмена", null).show();
+    }
+
+    private void chooseCacheSize(Runnable changed) {
+        int[] sizes = {32, 64, 128, 256};
+        String[] choices = {"32 МБ", "64 МБ", "128 МБ", "256 МБ"};
+        int selected = 1;
+        for (int i = 0; i < sizes.length; i++)
+            if (sizes[i] == MobileBrowsePreferences.shortsCacheMb(activity)) selected = i;
+        new AlertDialog.Builder(activity).setTitle("Размер видеокэша")
+                .setSingleChoiceItems(choices, selected, (dialog, which) -> {
+                    MobileBrowsePreferences.setShortsCacheMb(activity, sizes[which]);
+                    changed.run();
+                    dialog.dismiss();
+                    refreshShortsRows();
+                }).setNegativeButton("Отмена", null).show();
+    }
+
     private void chooseFrame() {
         String[] choices = {"9:16", "4:5", "По высоте экрана"};
         new AlertDialog.Builder(activity).setTitle("Формат окна Shorts")
@@ -178,6 +224,10 @@ final class MobileSettingsPanel extends ScrollView {
             String label = view.getText().toString();
             if (label.startsWith("Предзагрузка следующих:"))
                 view.setText("Предзагрузка следующих: " + MobileBrowsePreferences.shortsPreloadCount(activity));
+            else if (label.startsWith("Режим предзагрузки:"))
+                view.setText("Режим предзагрузки: " + preloadModeLabel());
+            else if (label.startsWith("Размер видеокэша:"))
+                view.setText("Размер видеокэша: " + MobileBrowsePreferences.shortsCacheMb(activity) + " МБ");
             else if (label.startsWith("Формат окна:"))
                 view.setText("Формат окна: " + frameLabel(MobileBrowsePreferences.shortsFrameRatio(activity)));
         }
