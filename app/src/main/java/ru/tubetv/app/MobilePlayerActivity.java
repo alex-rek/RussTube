@@ -36,6 +36,7 @@ import androidx.core.content.ContextCompat;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.media3.common.C;
+import androidx.media3.common.MediaItem;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
 import androidx.media3.common.Tracks;
@@ -88,6 +89,7 @@ public final class MobilePlayerActivity extends Activity {
     private VideoItem video;
     private String streamUrl;
     private String streamMimeType;
+    private List<MediaItem.SubtitleConfiguration> streamSubtitles = java.util.Collections.emptyList();
     private boolean started;
     private boolean focused = true;
     private boolean failed;
@@ -97,6 +99,7 @@ public final class MobilePlayerActivity extends Activity {
     private boolean backgroundStarted;
     private boolean autoResume = true;
     private boolean portraitFullscreen;
+    private boolean landscapeFullscreen = true;
     private boolean shortsMode;
     private int aspectMode;
     private int videoWidth;
@@ -110,6 +113,7 @@ public final class MobilePlayerActivity extends Activity {
         super.onCreate(state);
         if (state != null) {
             portraitFullscreen = state.getBoolean("portrait_fullscreen", false);
+            landscapeFullscreen = state.getBoolean("landscape_fullscreen", true);
             aspectMode = state.getInt("aspect_mode", 0);
         }
         getWindow().setStatusBarColor(BACKGROUND);
@@ -384,8 +388,6 @@ public final class MobilePlayerActivity extends Activity {
     }
 
     private void applyOrientation() {
-        boolean landscape = getResources().getConfiguration().orientation
-                == Configuration.ORIENTATION_LANDSCAPE;
         boolean fullscreen = isFullscreen();
         toolbar.setVisibility(fullscreen ? View.GONE : View.VISIBLE);
         detailsScroll.setVisibility(fullscreen ? View.GONE : View.VISIBLE);
@@ -399,8 +401,9 @@ public final class MobilePlayerActivity extends Activity {
                 : 0);
         fullscreenButton.setContentDescription(fullscreen
                 ? "Выйти из полноэкранного режима" : "На весь экран");
-        fullscreenButton.setVisibility(landscape ? View.GONE : View.VISIBLE);
-        fullscreenButton.setTextColor(portraitFullscreen ? ACCENT : Color.WHITE);
+        fullscreenButton.setText(fullscreen ? "⤢" : "⛶");
+        fullscreenButton.setVisibility(View.VISIBLE);
+        fullscreenButton.setTextColor(fullscreen ? ACCENT : Color.WHITE);
         aspectButton.setVisibility(fullscreen ? View.VISIBLE : View.GONE);
         ViewCompat.requestApplyInsets(root);
         videoFrame.requestLayout();
@@ -409,12 +412,14 @@ public final class MobilePlayerActivity extends Activity {
     }
 
     private boolean isFullscreen() {
-        return portraitFullscreen || getResources().getConfiguration().orientation
-                == Configuration.ORIENTATION_LANDSCAPE;
+        return portraitFullscreen || (landscapeFullscreen
+                && getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE);
     }
 
     private void toggleFullscreen() {
-        portraitFullscreen = !portraitFullscreen;
+        if (getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE)
+            landscapeFullscreen = !landscapeFullscreen;
+        else portraitFullscreen = !portraitFullscreen;
         applyOrientation();
     }
 
@@ -462,6 +467,7 @@ public final class MobilePlayerActivity extends Activity {
 
     @Override public void onConfigurationChanged(Configuration configuration) {
         super.onConfigurationChanged(configuration);
+        landscapeFullscreen = true;
         applyOrientation();
     }
 
@@ -492,6 +498,7 @@ public final class MobilePlayerActivity extends Activity {
                     if (isFinishing() || isDestroyed()) return;
                     streamUrl = info.streamUrl;
                     streamMimeType = info.streamMimeType;
+                    streamSubtitles = info.subtitles;
                     if (started) startPlayer();
                 });
             } catch (Exception error) {
@@ -560,7 +567,8 @@ public final class MobilePlayerActivity extends Activity {
                     showError("Ошибка воспроизведения: " + error.getErrorCodeName());
                 }
             });
-            player.setMediaItem(PlaybackEngineFactory.mediaItem(streamUrl, streamMimeType));
+            player.setMediaItem(PlaybackEngineFactory.mediaItem(streamUrl, streamMimeType)
+                    .buildUpon().setSubtitleConfigurations(streamSubtitles).build());
             player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
                     .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, captionsDisabled).build());
             if (resumePosition > 0) player.seekTo(resumePosition);
@@ -602,7 +610,10 @@ public final class MobilePlayerActivity extends Activity {
             if (group.getType() != C.TRACK_TYPE_TEXT) continue;
             for (int i = 0; i < group.length; i++) {
                 if (!group.isTrackSupported(i)) continue;
-                if (fallbackGroup == null || group.isTrackSelected(i)) {
+                if (fallbackGroup == null || (group.getTrackFormat(i).language != null
+                        && !group.getTrackFormat(i).language.isEmpty()
+                        && (fallbackTrack < 0 || fallbackGroup.getTrackFormat(fallbackTrack).language == null
+                        || fallbackGroup.getTrackFormat(fallbackTrack).language.isEmpty()))) {
                     fallbackGroup = group;
                     fallbackTrack = i;
                 }
@@ -871,6 +882,7 @@ public final class MobilePlayerActivity extends Activity {
 
     @Override protected void onSaveInstanceState(Bundle state) {
         state.putBoolean("portrait_fullscreen", portraitFullscreen);
+        state.putBoolean("landscape_fullscreen", landscapeFullscreen);
         state.putInt("aspect_mode", aspectMode);
         super.onSaveInstanceState(state);
     }

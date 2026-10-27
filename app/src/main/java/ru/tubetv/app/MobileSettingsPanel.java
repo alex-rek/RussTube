@@ -21,7 +21,8 @@ final class MobileSettingsPanel extends ScrollView {
     private final LinearLayout content;
 
     MobileSettingsPanel(Activity activity, Runnable openNetwork, Runnable historyChanged,
-                        Runnable cacheSizeChanged, Runnable clearVideoCache) {
+                        Runnable cacheSizeChanged, Runnable clearVideoCache,
+                        Runnable saveLibrary, Runnable loadLibrary) {
         super(activity);
         this.activity = activity;
         setFillViewport(true);
@@ -53,6 +54,11 @@ final class MobileSettingsPanel extends ScrollView {
                 MobileBrowsePreferences.recommendSubscriptions(activity));
         subscriptions.setOnCheckedChangeListener((button, checked) ->
                 MobileBrowsePreferences.setRecommendSubscriptions(activity, checked));
+
+        section("Подписки и Избранное");
+        row("Сохранить в файл", saveLibrary);
+        row("Загрузить из файла", loadLibrary);
+        description("При загрузке новые записи добавляются к сохранённым, повторы пропускаются.");
 
         section("Shorts");
         CheckBox autoplay = check("Автовоспроизведение",

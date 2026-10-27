@@ -2,6 +2,9 @@ package ru.tubetv.app;
 
 import android.net.Uri;
 
+import androidx.media3.common.MediaItem;
+import androidx.media3.common.MimeTypes;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -12,6 +15,8 @@ import java.net.URLEncoder;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.Iterator;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 
 final class StreamResolver {
@@ -324,7 +329,9 @@ final class StreamResolver {
         JSONObject video = VkWebClient.getVideoById(id);
         JSONObject files = video.optJSONObject("files");
         if (files == null) throw new Exception("VK Video не отдал публичный поток");
-        return inspectVkFiles(files, video.optInt("width"), video.optInt("height"), audioOnly);
+        PlaybackInfo stream = inspectVkFiles(files, video.optInt("width"), video.optInt("height"), audioOnly);
+        return new PlaybackInfo(stream.streamUrl, stream.streamMimeType, stream.maxWidth,
+                stream.maxHeight, vkSubtitles(video.optJSONArray("subtitles")));
     }
 
     private PlaybackInfo inspectVkLegacy(String id, boolean audioOnly) throws Exception {
@@ -341,7 +348,28 @@ final class StreamResolver {
         JSONArray params = player == null ? null : player.optJSONArray("params");
         JSONObject data = params == null ? null : params.optJSONObject(0);
         if (data == null) throw new Exception("VK Video не отдал публичный поток");
-        return inspectVkFiles(data, 0, 0, audioOnly);
+        PlaybackInfo stream = inspectVkFiles(data, 0, 0, audioOnly);
+        return new PlaybackInfo(stream.streamUrl, stream.streamMimeType, stream.maxWidth,
+                stream.maxHeight, vkSubtitles(data.optJSONArray("subs")));
+    }
+
+    static List<MediaItem.SubtitleConfiguration> vkSubtitles(JSONArray tracks) {
+        List<MediaItem.SubtitleConfiguration> result = new ArrayList<>();
+        if (tracks == null) return result;
+        for (int i = 0; i < tracks.length(); i++) {
+            JSONObject track = tracks.optJSONObject(i);
+            if (track == null) continue;
+            String url = httpUrl(track.optString("url"));
+            if (url == null || !url.startsWith("https://")) continue;
+            String language = track.optString("lang", "");
+            String label = track.optString("manifest_name", track.optString("title", language));
+            MediaItem.SubtitleConfiguration.Builder subtitle =
+                    new MediaItem.SubtitleConfiguration.Builder(Uri.parse(url))
+                            .setMimeType(MimeTypes.TEXT_VTT).setLabel(label);
+            if (!language.isEmpty()) subtitle.setLanguage(language);
+            result.add(subtitle.build());
+        }
+        return result;
     }
 
     static PlaybackInfo inspectVkFiles(JSONObject files, int reportedWidth, int reportedHeight,

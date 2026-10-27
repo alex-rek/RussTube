@@ -3,9 +3,11 @@ package ru.tubetv.app;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
+import android.net.Uri;
 import android.content.res.Configuration;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
+import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
@@ -41,6 +43,8 @@ import androidx.core.view.WindowInsetsCompat;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -57,6 +61,8 @@ import java.util.concurrent.TimeUnit;
 /** Touch-first RussTube interface; search, stores and playback are shared with TV. */
 public final class MobileBrowseActivity extends Activity {
     private static final int VOICE_SEARCH_REQUEST = 7143;
+    private static final int EXPORT_LIBRARY_REQUEST = 7144;
+    private static final int IMPORT_LIBRARY_REQUEST = 7145;
     private enum Page { HOME, SEARCH, SHORTS, LIVE, SUBSCRIPTIONS, LIBRARY, HISTORY, FAVORITES, CHANNELS, POPULAR, SETTINGS }
     private static final int BACKGROUND = MobileAuroraTheme.BACKGROUND;
     private static final int PANEL = MobileAuroraTheme.SURFACE;
@@ -392,7 +398,7 @@ public final class MobileBrowseActivity extends Activity {
         settingsPanel = new MobileSettingsPanel(this,
                 () -> startActivity(new Intent(this, NetworkSettingsActivity.class)), () -> { },
                 () -> shortsPlayback.reconfigureCache(),
-                () -> shortsPlayback.clearCache());
+                () -> shortsPlayback.clearCache(), this::exportLibrary, this::importLibrary);
         settingsPanel.setVisibility(View.GONE);
         feed.addView(settingsPanel, new FrameLayout.LayoutParams(-1, -1));
         root.addView(feed, new LinearLayout.LayoutParams(-1, 0, 1));
@@ -657,11 +663,21 @@ public final class MobileBrowseActivity extends Activity {
                     if (shortTouchMoving) selectCenteredShort();
                     if (position >= 0 && position < items.size()) {
                         VideoItem item = items.get(position);
+                        View child = list.getChildAt(position - list.getFirstVisiblePosition());
+                        Card card = child == null ? null : (Card) child.getTag();
+                        Rect buttonBounds = new Rect();
+                        if (!shortTouchMoving && card != null
+                                && card.shortFullscreen.getGlobalVisibleRect(buttonBounds)
+                                && buttonBounds.contains((int) event.getRawX(), (int) event.getRawY())) {
+                            skipResumeReload = true;
+                            VideoActions.play(this, item, true);
+                            shortTouchMoving = false;
+                            return true;
+                        }
                         if (android.os.SystemClock.uptimeMillis() - shortTouchStartedAt >= 550
                                 && !shortTouchMoving) {
                             VideoActions.show(this, item, () -> showChannel(item));
                         } else if (!shortTouchMoving) {
-                            View child = list.getChildAt(position - list.getFirstVisiblePosition());
                             if (child != null) list.performItemClick(child, position, adapter.getItemId(position));
                         }
                     }
@@ -760,6 +776,10 @@ public final class MobileBrowseActivity extends Activity {
         Card card = (Card) nearest.getTag();
         shortsPlayback.select(items.get(position), card.artwork, card.image, card.shortCue);
         shortsPlayback.preload(items, position);
+        for (int i = 0; i < list.getChildCount(); i++) {
+            Card visible = (Card) list.getChildAt(i).getTag();
+            visible.shortFullscreen.setVisibility(visible == card ? View.VISIBLE : View.GONE);
+        }
     }
 
     private void settings() {
@@ -1093,6 +1113,13 @@ public final class MobileBrowseActivity extends Activity {
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == EXPORT_LIBRARY_REQUEST || requestCode == IMPORT_LIBRARY_REQUEST) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                if (requestCode == EXPORT_LIBRARY_REQUEST) writeLibrary(data.getData());
+                else readLibrary(data.getData());
+            }
+            return;
+        }
         if (requestCode == VOICE_SEARCH_REQUEST) {
             if (resultCode == RESULT_OK && data != null) {
                 ArrayList<String> results = data.getStringArrayListExtra(
@@ -1105,6 +1132,70 @@ public final class MobileBrowseActivity extends Activity {
             return;
         }
         updates.onActivityResult(requestCode);
+    }
+
+    private void exportLibrary() {
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE).setType("application/json")
+                .putExtra(Intent.EXTRA_TITLE, "RussTube-library.json");
+        startActivityForResult(intent, EXPORT_LIBRARY_REQUEST);
+    }
+
+    private void importLibrary() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE).setType("application/json");
+        startActivityForResult(intent, IMPORT_LIBRARY_REQUEST);
+    }
+
+    private void writeLibrary(Uri uri) {
+        io.execute(() -> {
+            try (OutputStream output = getContentResolver().openOutputStream(uri, "wt")) {
+                if (output == null) throw new Exception("Файл недоступен для записи");
+                MobileLibraryTransfer.write(this, output);
+                runOnUiThread(() -> Toast.makeText(this, "Подписки и Избранное сохранены",
+                        Toast.LENGTH_LONG).show());
+            } catch (Exception error) { libraryError(error); }
+        });
+    }
+
+    private void readLibrary(Uri uri) {
+        io.execute(() -> {
+            try (InputStream input = getContentResolver().openInputStream(uri)) {
+                if (input == null) throw new Exception("Файл недоступен для чтения");
+                MobileLibraryTransfer.ImportData backup = MobileLibraryTransfer.read(input);
+                runOnUiThread(() -> new AlertDialog.Builder(this)
+                        .setTitle("Загрузить библиотеку?")
+                        .setMessage("В файле " + backup.channels.size() + " "
+                                + plural(backup.channels.size(), "канал", "канала", "каналов")
+                                + " и " + backup.favorites.size()
+                                + " избранных видео. Существующие записи сохранятся.")
+                        .setNegativeButton("Отмена", null)
+                        .setPositiveButton("Загрузить", (dialog, which) -> io.execute(() -> {
+                            try {
+                                MobileLibraryTransfer.Result added = MobileLibraryTransfer.merge(this, backup);
+                                runOnUiThread(() -> Toast.makeText(this,
+                                        "Добавлено: " + added.channels + " "
+                                                + plural(added.channels, "канал", "канала", "каналов")
+                                                + ", " + added.favorites + " видео", Toast.LENGTH_LONG).show());
+                            } catch (Exception error) { libraryError(error); }
+                        })).show());
+            } catch (Exception error) { libraryError(error); }
+        });
+    }
+
+    private void libraryError(Exception error) {
+        runOnUiThread(() -> Toast.makeText(this, "Библиотека: " + error.getMessage(),
+                Toast.LENGTH_LONG).show());
+    }
+
+    private static String plural(int count, String one, String few, String many) {
+        int remainder = count % 100;
+        if (remainder >= 11 && remainder <= 14) return many;
+        switch (count % 10) {
+            case 1: return one;
+            case 2: case 3: case 4: return few;
+            default: return many;
+        }
     }
 
     @Override protected void onSaveInstanceState(Bundle state) {
@@ -1197,6 +1288,14 @@ public final class MobileBrowseActivity extends Activity {
                 shortCue.setBackground(round(0x99071426, 14));
                 shortCue.setVisibility(View.GONE);
                 artwork.addView(shortCue, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
+                TextView shortFullscreen = label("⛶", 27, Color.WHITE);
+                shortFullscreen.setGravity(Gravity.CENTER);
+                shortFullscreen.setBackground(round(0x99071426, 12));
+                shortFullscreen.setContentDescription("Открыть видео на весь экран");
+                FrameLayout.LayoutParams fullscreenParams = new FrameLayout.LayoutParams(
+                        dp(44), dp(44), Gravity.BOTTOM | Gravity.END);
+                fullscreenParams.setMargins(0, 0, dp(12), dp(12));
+                artwork.addView(shortFullscreen, fullscreenParams);
                 layout.addView(artwork, size(-1, -2));
 
                 LinearLayout info = new LinearLayout(MobileBrowseActivity.this);
@@ -1226,7 +1325,8 @@ public final class MobileBrowseActivity extends Activity {
                 info.addView(more, size(38, 42));
                 layout.addView(info, size(-1, -2));
                 layout.setTag(card = new Card(artwork, info, image, source, duration,
-                        progress, shortInfo, shortCue, avatar, title, channel, meta, more));
+                        progress, shortInfo, shortCue, shortFullscreen,
+                        avatar, title, channel, meta, more));
                 recycled = layout;
             } else card = (Card) recycled.getTag();
             VideoItem item = getItem(position);
@@ -1240,6 +1340,8 @@ public final class MobileBrowseActivity extends Activity {
             card.shortInfo.setVisibility(page == Page.SHORTS
                     && MobileBrowsePreferences.shortsShowInfo(MobileBrowseActivity.this)
                     ? View.VISIBLE : View.GONE);
+            card.shortFullscreen.setVisibility(page == Page.SHORTS
+                    && item.stableKey().equals(shortSelectedKey) ? View.VISIBLE : View.GONE);
             if (page == Page.SHORTS) {
                 String details = VideoPresentation.views(item);
                 card.shortInfo.setText(item.source + " · " + VideoPresentation.channel(item)
@@ -1286,17 +1388,19 @@ public final class MobileBrowseActivity extends Activity {
         final FrameLayout artwork;
         final LinearLayout info;
         final ImageView image;
-        final TextView shortInfo, shortCue;
+        final TextView shortInfo, shortCue, shortFullscreen;
         final TextView source, duration, avatar, title, channel, meta, more;
         final ProgressBar progress;
         Card(FrameLayout artwork, LinearLayout info, ImageView image, TextView source,
              TextView duration, ProgressBar progress, TextView shortInfo, TextView shortCue,
+             TextView shortFullscreen,
              TextView avatar, TextView title, TextView channel, TextView meta, TextView more) {
             this.artwork = artwork; this.info = info;
             this.image = image; this.source = source; this.duration = duration;
             this.progress = progress; this.avatar = avatar; this.title = title;
             this.channel = channel; this.meta = meta; this.more = more;
             this.shortInfo = shortInfo; this.shortCue = shortCue;
+            this.shortFullscreen = shortFullscreen;
         }
     }
 }
