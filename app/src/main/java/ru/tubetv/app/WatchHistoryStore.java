@@ -21,22 +21,10 @@ final class WatchHistoryStore {
     static synchronized void record(Context context, VideoItem item,
                                     boolean trafficMode, int targetHeight,
                                     boolean audioOnly) {
-        record(context, item, trafficMode, targetHeight, audioOnly, false);
-    }
-
-    static synchronized void record(Context context, VideoItem item,
-                                    boolean trafficMode, int targetHeight,
-                                    boolean audioOnly, boolean shorts) {
         if (item == null || item.pageUrl == null || item.pageUrl.isEmpty()) return;
         String key = WatchProgressStore.key(item.source, item.pageUrl);
         try {
             SharedPreferences preferences = prefs(context);
-            String previous = preferences.getString(ENTRY_PREFIX + key, null);
-            boolean wasShort = false;
-            if (previous != null) {
-                try { wasShort = new JSONObject(previous).optBoolean("shorts", ShortsCatalog.accepts(item)); }
-                catch (Exception ignored) { }
-            }
             JSONObject value = new JSONObject()
                     .put("s", item.source)
                     .put("t", item.title)
@@ -53,7 +41,6 @@ final class WatchHistoryStore {
                     .put("m", trafficMode)
                     .put("q", targetHeight)
                     .put("a", audioOnly)
-                    .put("shorts", shorts || wasShort || ShortsCatalog.accepts(item))
                     .put("l", System.currentTimeMillis());
 
             List<String> order = readOrder(preferences);
@@ -112,8 +99,7 @@ final class WatchHistoryStore {
                         value.optBoolean("m", false),
                         Math.max(0, value.optInt("q", 0)),
                         value.optBoolean("a", false),
-                        Math.max(0L, value.optLong("l", 0L)),
-                        value.optBoolean("shorts", ShortsCatalog.accepts(item))));
+                        Math.max(0L, value.optLong("l", 0L))));
             } catch (Exception ignored) {
             }
         }
@@ -190,16 +176,13 @@ final class WatchHistoryStore {
         final int targetHeight;
         final boolean audioOnly;
         final long lastWatchedAt;
-        final boolean shorts;
-
         Entry(VideoItem item, boolean trafficMode, int targetHeight,
-              boolean audioOnly, long lastWatchedAt, boolean shorts) {
+              boolean audioOnly, long lastWatchedAt) {
             this.item = item;
             this.trafficMode = trafficMode;
             this.targetHeight = targetHeight;
             this.audioOnly = audioOnly;
             this.lastWatchedAt = lastWatchedAt;
-            this.shorts = shorts;
         }
     }
 

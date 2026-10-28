@@ -24,7 +24,7 @@ final class VideoActions {
         boolean subscribed = SubscriptionStore.contains(activity, item);
         String name = item.channelName.isEmpty() ? "Канал " + item.channelId : item.channelName;
         boolean hasChannel = !item.channelId.isEmpty();
-        boolean savedFilm = !BuildConfig.MOBILE_VARIANT && SavedFilmsStore.contains(activity, item);
+        boolean savedFilm = SavedFilmsStore.contains(activity, item);
         Dialog dialog = new Dialog(activity);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
         float density = activity.getResources().getDisplayMetrics().density;
@@ -53,19 +53,17 @@ final class VideoActions {
             });
             labels.add("Видео канала"); actions.add(openChannel);
         }
-        if (!BuildConfig.MOBILE_VARIANT) {
-            labels.add(savedFilm ? "Удалить из Фильмов" : "Добавить в Фильмы");
-            actions.add(() -> {
-                try {
-                    SavedFilmsStore.set(activity, item, !savedFilm);
-                    Toast.makeText(activity, savedFilm ? "Удалено из Фильмов" : "Добавлено в Фильмы",
-                            Toast.LENGTH_SHORT).show();
-                    if (onFilmsChanged != null) onFilmsChanged.run();
-                } catch (Exception error) {
-                    Toast.makeText(activity, error.getMessage(), Toast.LENGTH_LONG).show();
-                }
-            });
-        }
+        labels.add(savedFilm ? "Удалить из Фильмов" : "Добавить в Фильмы");
+        actions.add(() -> {
+            try {
+                SavedFilmsStore.set(activity, item, !savedFilm);
+                Toast.makeText(activity, savedFilm ? "Удалено из Фильмов" : "Добавлено в Фильмы",
+                        Toast.LENGTH_SHORT).show();
+                if (onFilmsChanged != null) onFilmsChanged.run();
+            } catch (Exception error) {
+                Toast.makeText(activity, error.getMessage(), Toast.LENGTH_LONG).show();
+            }
+        });
         if (!FavoriteStore.contains(activity, item)) {
             labels.add("В избранное"); actions.add(() -> setFavorite(activity, item, true));
         } else {
@@ -185,10 +183,6 @@ final class VideoActions {
     }
 
     static void play(Activity activity, VideoItem item) {
-        play(activity, item, false);
-    }
-
-    static void play(Activity activity, VideoItem item, boolean shortsMode) {
         WatchProgressStore.Progress watched = WatchProgressStore.get(activity, item);
         long duration = watched.durationMs > 0 ? watched.durationMs : item.durationMs;
         long position = item.isLive || (duration > 0 && watched.positionMs >= duration * .95)
@@ -204,7 +198,6 @@ final class VideoActions {
                 .putExtra("channel_id", item.channelId).putExtra("channel_name", item.channelName)
                 .putExtra("channel_url", item.channelUrl).putExtra("live", item.isLive);
         intent.putExtra("views", item.views).putExtra("published_at", item.publishedAtMs);
-        if (shortsMode && BuildConfig.MOBILE_VARIANT) intent.putExtra("shorts_mode", true);
         activity.startActivity(intent);
     }
 }

@@ -22,13 +22,6 @@ final class SearchClient {
         return filterByQuality(result, minWidth);
     }
 
-    List<VideoItem> catalogRutubeShorts(int page) throws Exception {
-        if (page < 1 || page > 3) throw new IllegalArgumentException("Shorts page");
-        return parseRutube(getJson("https://rutube.ru/api/tags/video/6359/"
-                + "?clients=wdp&display_type=shorts&hits=True&limit=25"
-                + "&origin_type=rshorts&show_hidden_videos=False&sort=tagged_d&page=" + page));
-    }
-
     List<VideoItem> channelRutube(String id) throws Exception {
         if (!id.matches("[0-9]+")) throw new Exception("Некорректный канал RUTUBE");
         return parseRutube(getJson("https://rutube.ru/api/video/person/" + id + "/?page=1"));

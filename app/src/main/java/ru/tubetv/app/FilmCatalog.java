@@ -21,10 +21,9 @@ final class FilmCatalog {
             if (title.contains(excluded)) return false;
         }
         if (trustedFilmCollection) return true;
-        String channel = item.channelName == null ? "" : item.channelName.toLowerCase(Locale.ROOT);
         for (String filmWord : new String[]{"фильм", "кино", "мультфильм",
                 "документальн", "полнометраж", "movie", "film", "cinema", "documentary"}) {
-            if (title.contains(filmWord) || channel.contains(filmWord)) return true;
+            if (title.contains(filmWord)) return true;
         }
         return false;
     }

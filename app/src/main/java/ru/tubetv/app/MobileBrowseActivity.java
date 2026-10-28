@@ -46,8 +46,6 @@ import java.util.ArrayList;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.Collections;
-import java.util.HashSet;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -63,14 +61,16 @@ public final class MobileBrowseActivity extends Activity {
     private static final int VOICE_SEARCH_REQUEST = 7143;
     private static final int EXPORT_LIBRARY_REQUEST = 7144;
     private static final int IMPORT_LIBRARY_REQUEST = 7145;
-    private enum Page { HOME, SEARCH, SHORTS, LIVE, SUBSCRIPTIONS, LIBRARY, HISTORY, FAVORITES, CHANNELS, POPULAR, SETTINGS }
+    private enum Page { HOME, SEARCH, FILMS, LIVE, SUBSCRIPTIONS, LIBRARY, HISTORY, FAVORITES, CHANNELS, POPULAR, SETTINGS }
+    private enum FilmGroup { ALL, RUTUBE, VK, OK }
+    private enum LiveGroup { ALL, RUTUBE_TV, VK_TV, OK_TV }
     private static final int BACKGROUND = MobileAuroraTheme.BACKGROUND;
     private static final int PANEL = MobileAuroraTheme.SURFACE;
     private static final int SECONDARY = MobileAuroraTheme.MUTED;
     private static final int ACCENT = MobileAuroraTheme.TEAL;
-    private static final Page[] TABS = {Page.HOME, Page.SHORTS, Page.LIVE, Page.SUBSCRIPTIONS, Page.LIBRARY};
-    private static final String[] TAB_LABELS = {"Главная", "Shorts", "В эфире", "Подписки", "Вы"};
-    private static final String[] TAB_ICONS = {"home", "shorts", "live", "subscriptions", "history"};
+    private static final Page[] TABS = {Page.HOME, Page.FILMS, Page.LIVE, Page.SUBSCRIPTIONS, Page.LIBRARY};
+    private static final String[] TAB_LABELS = {"Главная", "Фильмы", "В эфире", "Подписки", "Вы"};
+    private static final String[] TAB_ICONS = {"home", "films", "live", "subscriptions", "history"};
 
     private final ThreadPoolExecutor io = new ThreadPoolExecutor(4, 4, 0, TimeUnit.SECONDS,
             new ArrayBlockingQueue<>(128));
@@ -79,24 +79,18 @@ public final class MobileBrowseActivity extends Activity {
     private final List<VideoItem> baseItems = new ArrayList<>();
     private final List<VideoItem> candidates = new ArrayList<>();
     private final List<VideoItem> subscriptionCandidates = new ArrayList<>();
-    private final Map<String, VideoItem> discoveredShorts = new LinkedHashMap<>();
     private final List<VideoItem> history = new ArrayList<>();
-    private final List<VideoItem> regularHistory = new ArrayList<>();
-    private final List<WatchHistoryStore.Entry> historyEntries = new ArrayList<>();
-    private final Set<String> watchedKeys = new HashSet<>();
-    private boolean shortsHistory;
+    private FilmGroup filmGroup = FilmGroup.ALL;
+    private LiveGroup liveGroup = LiveGroup.ALL;
     private final List<String> failed = new ArrayList<>();
     private final FeedRepository repository = new FeedRepository();
     private final Handler searchHandler = new Handler(Looper.getMainLooper());
-    private MobileShortsPlayback shortsPlayback;
-    private Runnable queuedShortSelection;
-    private int scrollState = AbsListView.OnScrollListener.SCROLL_STATE_IDLE;
-    private float shortTouchStartX;
-    private float shortTouchStartY;
-    private long shortTouchStartedAt;
-    private int shortTouchPosition;
-    private boolean shortTouchMoving;
-    private String shortSelectedKey;
+    private final Runnable renderResults = () -> {
+        long started = android.os.SystemClock.elapsedRealtime();
+        rebuildResults();
+        if (BuildConfig.DEBUG) android.util.Log.i("RussTubeMobilePerf", "renderResultsMs="
+                + (android.os.SystemClock.elapsedRealtime() - started) + " cards=" + items.size());
+    };
     private float pullStartY;
     private boolean pullFromTop;
     private Page page = Page.HOME;
@@ -121,6 +115,7 @@ public final class MobileBrowseActivity extends Activity {
     private TextView empty;
     private LinearLayout searchRow;
     private LinearLayout actions;
+    private HorizontalScrollView actionsScroller;
     private LinearLayout sortRow;
     private TextView sortButton;
     private HorizontalScrollView topics;
@@ -133,7 +128,6 @@ public final class MobileBrowseActivity extends Activity {
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
         updates = new UpdateCoordinator(this);
-        shortsPlayback = new MobileShortsPlayback(this, this::onShortUnavailable);
         getWindow().setStatusBarColor(BACKGROUND);
         getWindow().setNavigationBarColor(BACKGROUND);
         sortMode = VideoSort.parse(getSharedPreferences("browse", 0)
@@ -142,6 +136,10 @@ public final class MobileBrowseActivity extends Activity {
         if (state != null) {
             try { page = Page.valueOf(state.getString("page", "HOME")); }
             catch (IllegalArgumentException ignored) { page = Page.HOME; }
+            try { filmGroup = FilmGroup.valueOf(state.getString("film_group", "ALL")); }
+            catch (IllegalArgumentException ignored) { filmGroup = FilmGroup.ALL; }
+            try { liveGroup = LiveGroup.valueOf(state.getString("live_group", "ALL")); }
+            catch (IllegalArgumentException ignored) { liveGroup = LiveGroup.ALL; }
             searchQuery = state.getString("query", "");
             query.setText(searchQuery);
         }
@@ -301,7 +299,10 @@ public final class MobileBrowseActivity extends Activity {
 
         actions = new LinearLayout(this);
         actions.setPadding(dp(16), 0, dp(16), dp(4));
-        root.addView(actions, size(-1, 49));
+        actionsScroller = new HorizontalScrollView(this);
+        actionsScroller.setHorizontalScrollBarEnabled(false);
+        actionsScroller.addView(actions);
+        root.addView(actionsScroller, size(-1, 49));
         sortRow = new LinearLayout(this);
         sortRow.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
         sortRow.setPadding(dp(16), 0, dp(16), 0);
@@ -326,22 +327,12 @@ public final class MobileBrowseActivity extends Activity {
         list.setVerticalScrollBarEnabled(false);
         list.setClipToPadding(false);
         list.setPadding(dp(14), 0, dp(14), dp(18));
-        list.addOnLayoutChangeListener((view, left, top, right, bottom,
-                oldLeft, oldTop, oldRight, oldBottom) -> {
-            if (page == Page.SHORTS && bottom - top != oldBottom - oldTop)
-                list.post(this::updateShortsPadding);
-        });
         adapter = new FeedAdapter();
         list.setAdapter(adapter);
         list.setOnScrollListener(new AbsListView.OnScrollListener() {
-            @Override public void onScrollStateChanged(AbsListView view, int state) {
-                scrollState = state;
-                if (page != Page.SHORTS) return;
-                if (state == SCROLL_STATE_IDLE) queueShortSelection();
-                else { cancelShortSelection(); shortsPlayback.pauseForScroll(); }
-            }
+            @Override public void onScrollStateChanged(AbsListView view, int state) { }
             @Override public void onScroll(AbsListView view, int first, int count, int total) {
-                if (page == Page.SHORTS || count <= 0) return;
+                if (count <= 0) return;
                 int width = list.getColumnWidth();
                 if (width <= 0) width = Math.max(dp(180), getResources().getDisplayMetrics().widthPixels - dp(28));
                 for (int i = first + count; i < Math.min(items.size(), first + count + 4); i++)
@@ -350,7 +341,6 @@ public final class MobileBrowseActivity extends Activity {
             }
         });
         list.setOnTouchListener((view, event) -> {
-            if (page == Page.SHORTS) return handleShortTouch(event);
             if (page != Page.HOME || activeChannel != null) return false;
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
                 pullStartY = event.getY();
@@ -369,24 +359,15 @@ public final class MobileBrowseActivity extends Activity {
             if (position >= items.size()) return;
             VideoItem item = items.get(position);
             if (page == Page.CHANNELS && activeChannel == null) showChannel(item);
-            else if (page == Page.SHORTS) {
-                shortSelectedKey = item.stableKey();
-                Card card = (Card) view.getTag();
-                if (shortsPlayback.isSelected(card.artwork)) shortsPlayback.toggle();
-                else {
-                    shortsPlayback.select(item, card.artwork, card.image, card.shortCue);
-                    if (!MobileBrowsePreferences.shortsAutoplay(this)) shortsPlayback.toggle();
-                }
-            }
             else {
                 skipResumeReload = true;
-                VideoActions.play(this, item, false);
+                VideoActions.play(this, item);
             }
         });
         list.setOnItemLongClickListener((parent, view, position, id) -> {
             if (position >= items.size()) return false;
             VideoItem item = items.get(position);
-            VideoActions.show(this, item, () -> showChannel(item));
+            VideoActions.show(this, item, () -> showChannel(item), this::refreshFilmsIfVisible);
             return true;
         });
         feed.addView(list, new FrameLayout.LayoutParams(-1, -1));
@@ -396,9 +377,8 @@ public final class MobileBrowseActivity extends Activity {
         feed.addView(empty, new FrameLayout.LayoutParams(-1, -1));
         list.setEmptyView(empty);
         settingsPanel = new MobileSettingsPanel(this,
-                () -> startActivity(new Intent(this, NetworkSettingsActivity.class)), () -> { },
-                () -> shortsPlayback.reconfigureCache(),
-                () -> shortsPlayback.clearCache(), this::exportLibrary, this::importLibrary);
+                () -> startActivity(new Intent(this, NetworkSettingsActivity.class)), () -> show(page),
+                this::exportLibrary, this::importLibrary);
         settingsPanel.setVisibility(View.GONE);
         feed.addView(settingsPanel, new FrameLayout.LayoutParams(-1, -1));
         root.addView(feed, new LinearLayout.LayoutParams(-1, 0, 1));
@@ -422,22 +402,16 @@ public final class MobileBrowseActivity extends Activity {
     }
 
     private void show(Page target) {
-        cancelShortSelection();
-        shortSelectedKey = null;
-        if (target != Page.SHORTS) shortsPlayback.stopPreloading();
-        shortsPlayback.clear();
+        if (target == Page.FILMS && page != Page.FILMS) filmGroup = FilmGroup.ALL;
+        if (target == Page.LIVE && page != Page.LIVE) liveGroup = LiveGroup.ALL;
         cancelQueuedSearch();
         cancel();
         page = target;
         activeChannel = null;
         items.clear(); baseItems.clear(); candidates.clear(); subscriptionCandidates.clear();
-        history.clear(); regularHistory.clear();
-        historyEntries.clear(); watchedKeys.clear();
-        historyEntries.addAll(WatchHistoryStore.load(this));
-        for (WatchHistoryStore.Entry entry : historyEntries) {
+        history.clear();
+        for (WatchHistoryStore.Entry entry : WatchHistoryStore.load(this)) {
             history.add(entry.item);
-            if (!entry.shorts) regularHistory.add(entry.item);
-            watchedKeys.add(entry.item.stableKey());
         }
         actions.removeAllViews();
         syncingSearchText = true;
@@ -449,8 +423,8 @@ public final class MobileBrowseActivity extends Activity {
         switch (target) {
             case HOME:
                 heading.setText("Главная");
-                if (MobileBrowsePreferences.recommendHistory(this) && !regularHistory.isEmpty()) {
-                    List<String> queries = RecommendationEngine.queries(regularHistory);
+                if (MobileBrowsePreferences.recommendHistory(this) && !history.isEmpty()) {
+                    List<String> queries = RecommendationEngine.queries(history);
                     for (String value : queries) searchAll(value, false);
                 }
                 if (MobileBrowsePreferences.recommendSubscriptions(this)) {
@@ -467,21 +441,38 @@ public final class MobileBrowseActivity extends Activity {
                 heading.setText("Популярное");
                 searchAll("популярное", false);
                 break;
-            case SHORTS:
-                heading.setText("Shorts");
-                for (VideoItem item : discoveredShorts.values())
-                    if (ShortsCatalog.isFeedSource(item.source)
-                            && MobileBrowsePreferences.sourceEnabled(this, item.source)
-                            && !watchedKeys.contains(item.stableKey())
-                            && !UnavailableVideoStore.contains(this, item)) candidates.add(item);
-                baseItems.addAll(candidates);
-                searchShorts();
+            case FILMS:
+                heading.setText("Фильмы");
+                action(filmGroup == FilmGroup.ALL ? "✓ Все фильмы" : "Все фильмы",
+                        () -> selectFilmGroup(FilmGroup.ALL));
+                action(filmGroup == FilmGroup.RUTUBE ? "✓ Кино на RUTUBE" : "Кино на RUTUBE",
+                        () -> selectFilmGroup(FilmGroup.RUTUBE));
+                action(filmGroup == FilmGroup.VK ? "✓ Кино на VK" : "Кино на VK",
+                        () -> selectFilmGroup(FilmGroup.VK));
+                action(filmGroup == FilmGroup.OK ? "✓ Кино на OK.ru" : "Кино на OK.ru",
+                        () -> selectFilmGroup(FilmGroup.OK));
+                action("Художественные", () -> findFilms("художественный фильм"));
+                action("Документальные", () -> findFilms("документальный фильм"));
+                action("Мультфильмы", () -> findFilms("мультфильм полный"));
+                rebuildSavedFilms();
+                loadFilms();
                 break;
             case LIVE:
                 heading.setText("В эфире");
-                enqueue(PeerTubeClient.SOURCE, () -> repository.live(PeerTubeClient.SOURCE, ""));
-                searchAll("прямой эфир", true);
-                searchAll("24/7", true);
+                action(liveGroup == LiveGroup.ALL ? "✓ Все эфиры" : "Все эфиры",
+                        () -> selectLiveGroup(LiveGroup.ALL));
+                action(liveGroup == LiveGroup.RUTUBE_TV ? "✓ ТВ RUTUBE" : "ТВ RUTUBE",
+                        () -> selectLiveGroup(LiveGroup.RUTUBE_TV));
+                action(liveGroup == LiveGroup.VK_TV ? "✓ ТВ VK Видео" : "ТВ VK Видео",
+                        () -> selectLiveGroup(LiveGroup.VK_TV));
+                action(liveGroup == LiveGroup.OK_TV ? "✓ ТВ OK.ru" : "ТВ OK.ru",
+                        () -> selectLiveGroup(LiveGroup.OK_TV));
+                if (liveGroup == LiveGroup.ALL) {
+                    action("Новости", () -> findLive("новости"));
+                    action("Спорт", () -> findLive("спорт"));
+                    action("Музыка", () -> findLive("музыка"));
+                }
+                loadLive();
                 break;
             case SUBSCRIPTIONS:
                 heading.setText("Подписки");
@@ -502,11 +493,7 @@ public final class MobileBrowseActivity extends Activity {
                 break;
             case HISTORY:
                 heading.setText("История");
-                action(shortsHistory ? "Видео" : "✓ Видео", () -> showHistory(false));
-                action(shortsHistory ? "✓ Просмотренные Shorts" : "Просмотренные Shorts",
-                        () -> showHistory(true));
-                for (WatchHistoryStore.Entry entry : historyEntries)
-                    if (entry.shorts == shortsHistory) baseItems.add(entry.item);
+                baseItems.addAll(history);
                 break;
             case FAVORITES:
                 heading.setText("Избранное");
@@ -518,7 +505,7 @@ public final class MobileBrowseActivity extends Activity {
         }
         settingsPanel.setVisibility(target == Page.SETTINGS ? View.VISIBLE : View.GONE);
         list.setVisibility(target == Page.SETTINGS ? View.GONE : View.VISIBLE);
-        actions.setVisibility(actions.getChildCount() == 0 ? View.GONE : View.VISIBLE);
+        actionsScroller.setVisibility(actions.getChildCount() == 0 ? View.GONE : View.VISIBLE);
         sortRow.setVisibility(target == Page.CHANNELS ? View.GONE : View.VISIBLE);
         updateSortLabel();
         applySort();
@@ -535,8 +522,6 @@ public final class MobileBrowseActivity extends Activity {
     }
 
     private void showChannel(VideoItem channel) {
-        cancelShortSelection();
-        shortsPlayback.clear();
         cancel();
         activeChannel = channel;
         items.clear(); baseItems.clear(); candidates.clear();
@@ -544,7 +529,7 @@ public final class MobileBrowseActivity extends Activity {
         topics.setVisibility(View.GONE);
         heading.setText(VideoPresentation.channel(channel));
         actions.removeAllViews();
-        actions.setVisibility(View.VISIBLE);
+        actionsScroller.setVisibility(View.VISIBLE);
         sortRow.setVisibility(View.VISIBLE);
         action(SubscriptionStore.contains(this, channel) ? "Отписаться" : "Подписаться", () -> {
             try {
@@ -627,158 +612,79 @@ public final class MobileBrowseActivity extends Activity {
         else show(page);
     }
 
-    private void showHistory(boolean shorts) {
-        shortsHistory = shorts;
-        show(Page.HISTORY);
+    private void refreshFilmsIfVisible() {
+        if (page == Page.FILMS) show(Page.FILMS);
     }
 
-    private void cancelShortSelection() {
-        if (queuedShortSelection != null) searchHandler.removeCallbacks(queuedShortSelection);
-        queuedShortSelection = null;
-    }
-
-    private boolean handleShortTouch(MotionEvent event) {
-        switch (event.getActionMasked()) {
-            case MotionEvent.ACTION_DOWN:
-                shortTouchStartX = event.getX();
-                shortTouchStartY = event.getY();
-                shortTouchStartedAt = android.os.SystemClock.uptimeMillis();
-                shortTouchPosition = selectedShortPosition();
-                shortTouchMoving = false;
-                return true;
-            case MotionEvent.ACTION_MOVE:
-                if (!shortTouchMoving && Math.abs(event.getY() - shortTouchStartY) > dp(16)) {
-                    shortTouchMoving = true;
-                    shortsPlayback.pauseForScroll();
-                }
-                return true;
-            case MotionEvent.ACTION_UP:
-                float deltaY = event.getY() - shortTouchStartY;
-                if (Math.abs(deltaY) >= dp(48)
-                        && Math.abs(deltaY) > Math.abs(event.getX() - shortTouchStartX)) {
-                    snapToShort(shortTouchPosition + (deltaY < 0 ? 1 : -1));
-                } else {
-                    int position = list.pointToPosition((int) event.getX(), (int) event.getY());
-                    if (position < 0 || position >= items.size()) position = shortTouchPosition;
-                    if (shortTouchMoving) selectCenteredShort();
-                    if (position >= 0 && position < items.size()) {
-                        VideoItem item = items.get(position);
-                        View child = list.getChildAt(position - list.getFirstVisiblePosition());
-                        Card card = child == null ? null : (Card) child.getTag();
-                        Rect buttonBounds = new Rect();
-                        if (!shortTouchMoving && card != null
-                                && card.shortFullscreen.getGlobalVisibleRect(buttonBounds)
-                                && buttonBounds.contains((int) event.getRawX(), (int) event.getRawY())) {
-                            skipResumeReload = true;
-                            VideoActions.play(this, item, true);
-                            shortTouchMoving = false;
-                            return true;
-                        }
-                        if (android.os.SystemClock.uptimeMillis() - shortTouchStartedAt >= 550
-                                && !shortTouchMoving) {
-                            VideoActions.show(this, item, () -> showChannel(item));
-                        } else if (!shortTouchMoving) {
-                            if (child != null) list.performItemClick(child, position, adapter.getItemId(position));
-                        }
-                    }
-                }
-                shortTouchMoving = false;
-                return true;
-            case MotionEvent.ACTION_CANCEL:
-                shortTouchMoving = false;
-                return true;
-            default:
-                return true;
+    private String filmSource() {
+        switch (filmGroup) {
+            case RUTUBE: return "RUTUBE";
+            case VK: return "VK VIDEO";
+            case OK: return "OK";
+            default: return "";
         }
     }
 
-    private int centeredShortPosition() {
-        if (items.isEmpty() || list.getChildCount() == 0) return -1;
-        int first = list.getFirstVisiblePosition();
-        if (first < 0 || first >= items.size()) return -1;
-        int center = list.getHeight() / 2;
-        int closest = -1;
-        int distance = Integer.MAX_VALUE;
-        for (int i = 0; i < list.getChildCount(); i++) {
-            View child = list.getChildAt(i);
-            int delta = Math.abs((child.getTop() + child.getBottom()) / 2 - center);
-            if (delta < distance) {
-                closest = first + i;
-                distance = delta;
-            }
-        }
-        return closest >= items.size() ? -1 : closest;
+    private void selectFilmGroup(FilmGroup group) { filmGroup = group; show(Page.FILMS); }
+    private void selectLiveGroup(LiveGroup group) { liveGroup = group; show(Page.LIVE); }
+
+    private void findLive(String query) {
+        liveGroup = LiveGroup.ALL;
+        cancel(); candidates.clear(); subscriptionCandidates.clear(); baseItems.clear();
+        applySort(); render();
+        searchAll(query, true);
     }
 
-    private int selectedShortPosition() {
-        if (shortSelectedKey != null) for (int i = 0; i < items.size(); i++)
-            if (shortSelectedKey.equals(items.get(i).stableKey())) return i;
-        return centeredShortPosition();
+    private void rebuildSavedFilms() {
+        String source = filmSource();
+        for (VideoItem item : SavedFilmsStore.load(this))
+            if (source.isEmpty() || source.equals(item.source)) baseItems.add(item);
     }
 
-    private void snapToShort(int requested) {
-        if (items.isEmpty()) return;
-        int target = Math.max(0, Math.min(items.size() - 1, requested));
-        shortSelectedKey = items.get(target).stableKey();
-        list.setSelection(target);
-        list.post(this::queueShortSelection);
+    private void loadFilms() {
+        if (filmGroup == FilmGroup.ALL || filmGroup == FilmGroup.RUTUBE)
+            enqueue("RUTUBE", RutubeTvCatalog::movies, false, true);
+        if (filmGroup == FilmGroup.ALL || filmGroup == FilmGroup.VK)
+            enqueue("VK VIDEO", () -> repository.search("VK VIDEO", "фильмы и сериалы"));
+        if (filmGroup == FilmGroup.ALL || filmGroup == FilmGroup.OK)
+            enqueue("OK", () -> OkClient.newFilmsCatalog(), false, true);
     }
 
-    private void queueShortSelection() {
-        cancelShortSelection();
-        if (page != Page.SHORTS || items.isEmpty() || scrollState != AbsListView.OnScrollListener.SCROLL_STATE_IDLE)
-            return;
-        queuedShortSelection = () -> {
-            queuedShortSelection = null;
-            selectCenteredShort();
-        };
-        searchHandler.postDelayed(queuedShortSelection, 160);
+    private void findFilms(String query) {
+        cancel();
+        candidates.clear(); subscriptionCandidates.clear(); baseItems.clear();
+        rebuildSavedFilms(); applySort(); render();
+        String source = filmSource();
+        if (!source.isEmpty()) enqueue(source, () -> repository.search(source, query));
+        else for (String platform : new String[]{"RUTUBE", "VK VIDEO", "OK"})
+            enqueue(platform, () -> repository.search(platform, query));
     }
 
-    private void selectCenteredShort() {
-        if (page != Page.SHORTS || list.getChildCount() == 0 || scrollState
-                != AbsListView.OnScrollListener.SCROLL_STATE_IDLE) return;
-        int first = list.getFirstVisiblePosition();
-        if (first < 0 || first >= items.size()) return;
-        int center = list.getHeight() / 2;
-        View nearest = null;
-        int distance = Integer.MAX_VALUE;
-        int position = -1;
-        if (shortSelectedKey != null) for (int i = 0; i < items.size(); i++) {
-            if (shortSelectedKey.equals(items.get(i).stableKey())) {
-                position = i;
-                nearest = list.getChildAt(i - first);
-                if (nearest == null) {
-                    list.setSelection(i);
-                    list.postDelayed(this::queueShortSelection, 40);
-                    return;
-                }
+    private void loadLive() {
+        switch (liveGroup) {
+            case RUTUBE_TV:
+                enqueue("RUTUBE", () -> RutubeTvCatalog.load());
+                enqueue("RUTUBE", () -> repository.live("RUTUBE", "телеканал прямой эфир"));
+                enqueue("RUTUBE", () -> repository.live("RUTUBE", "тв онлайн"));
                 break;
-            }
-        }
-        if (nearest == null) for (int i = 0; i < list.getChildCount(); i++) {
-            View child = list.getChildAt(i);
-            int delta = Math.abs((child.getTop() + child.getBottom()) / 2 - center);
-            if (delta < distance) {
-                nearest = child;
-                distance = delta;
-                position = first + i;
-            }
-        }
-        if (nearest == null || position < 0 || position >= items.size()) return;
-        if (shortSelectedKey != null
-                && Math.abs((nearest.getTop() + nearest.getBottom()) / 2 - center) > dp(24)) {
-            list.setSelection(position);
-            list.postDelayed(this::queueShortSelection, 40);
-            return;
-        }
-        shortSelectedKey = items.get(position).stableKey();
-        Card card = (Card) nearest.getTag();
-        shortsPlayback.select(items.get(position), card.artwork, card.image, card.shortCue);
-        shortsPlayback.preload(items, position);
-        for (int i = 0; i < list.getChildCount(); i++) {
-            Card visible = (Card) list.getChildAt(i).getTag();
-            visible.shortFullscreen.setVisibility(visible == card ? View.VISIBLE : View.GONE);
+            case VK_TV:
+                enqueue("VK VIDEO", () -> repository.live("VK VIDEO", "телеканал прямой эфир"));
+                enqueue("VK VIDEO", () -> repository.live("VK VIDEO", "тв онлайн"));
+                break;
+            case OK_TV:
+                enqueue("OK", () -> OkClient.liveCatalog());
+                enqueue("OK", () -> repository.live("OK", "телеканал прямой эфир"));
+                enqueue("OK", () -> repository.live("OK", "тв онлайн"));
+                break;
+            default:
+                enqueue(PeerTubeClient.SOURCE,
+                        () -> repository.live(PeerTubeClient.SOURCE, ""));
+                enqueue("OK", () -> OkClient.liveCatalog("livemusic"));
+                enqueue("OK", () -> OkClient.liveCatalog("livenews"));
+                enqueue("OK", () -> OkClient.liveCatalog("live_entertainment"));
+                searchAll("прямой эфир", true);
+                searchAll("24/7", true);
+                break;
         }
     }
 
@@ -793,18 +699,6 @@ public final class MobileBrowseActivity extends Activity {
                 () -> live ? repository.live(source, value) : repository.search(source, value));
     }
 
-    private void searchShorts() {
-        // Keep other providers available elsewhere; use RuTube's actual Shorts catalog here.
-        for (int page = 1; page <= 3; page++) {
-            final int currentPage = page;
-            enqueue("RUTUBE", () -> repository.rutubeShorts(currentPage));
-        }
-        enqueue("VK VIDEO", () -> repository.shorts("VK VIDEO", "shorts"));
-        enqueue("VK VIDEO", () -> repository.shorts("VK VIDEO", "шортс"));
-        enqueue("VK VIDEO", () -> repository.shorts("VK VIDEO", "популярное"));
-        enqueue("VK VIDEO", () -> repository.shorts("VK VIDEO", "клипы"));
-    }
-
     private void enqueue(String source, Load operation) {
         enqueue(source, operation, false);
     }
@@ -814,14 +708,23 @@ public final class MobileBrowseActivity extends Activity {
     }
 
     private void enqueue(String source, Load operation, boolean subscription) {
+        enqueue(source, operation, subscription, false);
+    }
+
+    private void enqueue(String source, Load operation, boolean subscription,
+                         boolean trustedFilmCollection) {
         if (!MobileBrowsePreferences.sourceEnabled(this, source)) return;
         int current = generation;
+        boolean filmMode = page == Page.FILMS && activeChannel == null;
         pending++;
         jobs.add(io.submit(() -> {
             long started = android.os.SystemClock.elapsedRealtime();
             List<VideoItem> loaded = new ArrayList<>();
             boolean failure = false;
-            try { loaded = operation.run(); }
+            try {
+                for (VideoItem item : operation.run())
+                    if (!filmMode || FilmCatalog.includes(item, trustedFilmCollection)) loaded.add(item);
+            }
             catch (Exception error) { failure = true; }
             if (BuildConfig.DEBUG) {
                 int thumbnailCount = 0;
@@ -835,51 +738,34 @@ public final class MobileBrowseActivity extends Activity {
             final boolean failedRequest = failure;
             runOnUiThread(() -> {
                 if (isFinishing() || current != generation) return;
-                int previousShort = page == Page.SHORTS ? centeredShortPosition() : -1;
-                String previousShortKey = page == Page.SHORTS && shortSelectedKey != null
-                        ? shortSelectedKey : previousShort >= 0 && previousShort < items.size()
-                        ? items.get(previousShort).stableKey() : null;
                 pending--;
                 if (failedRequest && !failed.contains(source)) failed.add(source);
-                if (page == Page.HOME || page == Page.POPULAR || page == Page.SEARCH) {
-                    for (VideoItem item : result) if (ShortsCatalog.accepts(item))
-                        discoveredShorts.put(item.stableKey(), item);
-                    while (discoveredShorts.size() > 200)
-                        discoveredShorts.remove(discoveredShorts.keySet().iterator().next());
-                }
                 candidates.addAll(result);
                 if (subscription) subscriptionCandidates.addAll(result);
-                baseItems.clear();
-                if (page == Page.HOME && activeChannel == null) {
-                    baseItems.addAll(HomeFeed.combine(subscriptionCandidates, candidates,
-                            regularHistory, MobileBrowsePreferences.recommendHistory(this)));
-                } else {
-                    Map<String, VideoItem> unique = new LinkedHashMap<>();
-                    for (VideoItem item : candidates) unique.put(item.stableKey(), item);
-                    baseItems.addAll(unique.values());
-                }
-                if (page == Page.HOME || page == Page.SHORTS) {
-                    Iterator<VideoItem> iterator = baseItems.iterator();
-                    while (iterator.hasNext())
-                        if (watchedKeys.contains(iterator.next().stableKey())) iterator.remove();
-                }
-                if (page == Page.HOME) {
-                    Iterator<VideoItem> iterator = baseItems.iterator();
-                    while (iterator.hasNext())
-                        if (ShortsCatalog.accepts(iterator.next())) iterator.remove();
-                }
-                if (page == Page.POPULAR) Collections.sort(baseItems,
-                        (a, b) -> Long.compare(b.views, a.views));
-                applySort();
-                render();
-                if (previousShortKey != null) for (int i = 0; i < items.size(); i++) {
-                    if (previousShortKey.equals(items.get(i).stableKey())) {
-                        list.setSelection(i);
-                        break;
-                    }
-                }
+                searchHandler.removeCallbacks(renderResults);
+                searchHandler.postDelayed(renderResults, items.isEmpty() || pending == 0 ? 0 : 80);
             });
         }));
+    }
+
+    private void rebuildResults() {
+        baseItems.clear();
+        if (page == Page.HOME && activeChannel == null) {
+            baseItems.addAll(HomeFeed.combine(subscriptionCandidates, candidates,
+                    history, MobileBrowsePreferences.recommendHistory(this)));
+        } else {
+            Map<String, VideoItem> unique = new LinkedHashMap<>();
+            if (page == Page.FILMS && activeChannel == null)
+                for (VideoItem saved : SavedFilmsStore.load(this))
+                    if (filmGroup == FilmGroup.ALL || filmSource().equals(saved.source))
+                        unique.put(saved.stableKey(), saved);
+            for (VideoItem item : candidates) unique.put(item.stableKey(), item);
+            baseItems.addAll(unique.values());
+        }
+        if (page == Page.POPULAR) Collections.sort(baseItems,
+                (a, b) -> Long.compare(b.views, a.views));
+        applySort();
+        render();
     }
 
     private void chooseSort() {
@@ -925,7 +811,9 @@ public final class MobileBrowseActivity extends Activity {
         topics.setVisibility(!landscape && activeChannel == null
                 && (page == Page.HOME || page == Page.SEARCH || page == Page.POPULAR)
                 ? View.VISIBLE : View.GONE);
-        actions.setVisibility(!landscape && actions.getChildCount() > 0 ? View.VISIBLE : View.GONE);
+        actionsScroller.setVisibility(actions.getChildCount() > 0
+                && (!landscape || page == Page.FILMS || page == Page.LIVE)
+                ? View.VISIBLE : View.GONE);
         sortRow.setVisibility(!landscape && page != Page.SETTINGS
                 && (page != Page.CHANNELS || activeChannel != null)
                 ? View.VISIBLE : View.GONE);
@@ -933,27 +821,10 @@ public final class MobileBrowseActivity extends Activity {
         navigation.setVisibility(landscape ? View.GONE : View.VISIBLE);
         float widthDp = getResources().getDisplayMetrics().widthPixels
                 / getResources().getDisplayMetrics().density;
-        int columns = page == Page.SHORTS ? 1
-                : widthDp >= 1000 ? 3 : widthDp >= 600 || landscape ? 2 : 1;
+        int columns = widthDp >= 1000 ? 3 : widthDp >= 600 || landscape ? 2 : 1;
         list.setNumColumns(columns);
-        updateShortsPadding();
         list.setHorizontalSpacing(dp(14));
         adapter.notifyDataSetChanged();
-    }
-
-    private void updateShortsPadding() {
-        int padding = 0;
-        if (page == Page.SHORTS && list.getHeight() > 0) {
-            int width = Math.max(dp(180), list.getWidth() - dp(28));
-            float ratio = MobileBrowsePreferences.shortsFrameRatio(this) == 1 ? 5f / 4f : 16f / 9f;
-            int cardHeight = MobileBrowsePreferences.shortsFrameRatio(this) == 2
-                    ? list.getHeight() - dp(30)
-                    : Math.min(Math.round(width * ratio), list.getHeight() - dp(30));
-            padding = Math.max(dp(15), (list.getHeight() - cardHeight) / 2);
-        }
-        int bottom = page == Page.SHORTS ? padding : dp(18);
-        if (list.getPaddingTop() != padding || list.getPaddingBottom() != bottom)
-            list.setPadding(dp(14), padding, dp(14), bottom);
     }
 
     @Override public void onConfigurationChanged(Configuration configuration) {
@@ -967,7 +838,6 @@ public final class MobileBrowseActivity extends Activity {
         }
         applyLayout();
         if (!items.isEmpty()) list.setSelection(first);
-        queueShortSelection();
     }
 
     private void applySort() {
@@ -977,34 +847,13 @@ public final class MobileBrowseActivity extends Activity {
             if ((page == Page.HISTORY || page == Page.FAVORITES
                     || (page == Page.CHANNELS && activeChannel == null)
                     || VideoVisibility.showInDiscovery(item))
-                    && (page != Page.HOME && page != Page.SHORTS
+                    && (page != Page.HOME
                     || !unavailable.contains(item.stableKey()))) items.add(item);
         if (page != Page.CHANNELS || activeChannel != null) VideoSort.apply(items, sortMode);
     }
 
-    private void onShortUnavailable(VideoItem unavailable) {
-        if (page != Page.SHORTS || unavailable == null) return;
-        int position = Math.max(0, centeredShortPosition());
-        String key = unavailable.stableKey();
-        discoveredShorts.remove(key);
-        Iterator<VideoItem> candidateIterator = candidates.iterator();
-        while (candidateIterator.hasNext())
-            if (key.equals(candidateIterator.next().stableKey())) candidateIterator.remove();
-        Iterator<VideoItem> baseIterator = baseItems.iterator();
-        while (baseIterator.hasNext())
-            if (key.equals(baseIterator.next().stableKey())) baseIterator.remove();
-        shortsPlayback.clear();
-        applySort();
-        render();
-        if (!items.isEmpty()) {
-            list.setSelection(Math.min(position, items.size() - 1));
-            list.post(this::queueShortSelection);
-        }
-    }
-
     private void render() {
         adapter.notifyDataSetChanged();
-        if (page == Page.SHORTS) list.post(this::queueShortSelection);
         status.setText((pending > 0 ? "Загрузка…  ·  " : "") + "Видео: " + items.size()
                 + (failed.isEmpty() ? "" : "  ·  Недоступны: " + TextUtils.join(", ", failed)));
         empty.setText(pending > 0 ? "Ищем видео…"
@@ -1014,9 +863,8 @@ public final class MobileBrowseActivity extends Activity {
                 : page == Page.SEARCH && searchQuery.length() < 2 ? "Введите хотя бы два символа"
                 : page == Page.SUBSCRIPTIONS ? "Подпишитесь на канал через меню видео"
                 : page == Page.LIVE ? "Сейчас нет подтверждённых эфиров"
-                : page == Page.SHORTS ? "Вертикальные видео пока не найдены"
+                : page == Page.FILMS ? "Фильмы пока не найдены"
                 : page == Page.FAVORITES ? "Сохранённые видео появятся здесь"
-                : page == Page.HISTORY && shortsHistory ? "Просмотренных Shorts пока нет"
                 : page == Page.LIBRARY || page == Page.HISTORY ? "История просмотра пока пуста"
                 : page == Page.CHANNELS && activeChannel == null ? "Подписок пока нет"
                 : "Видео пока не найдены");
@@ -1087,6 +935,7 @@ public final class MobileBrowseActivity extends Activity {
 
     private void cancel() {
         generation++;
+        searchHandler.removeCallbacks(renderResults);
         for (Future<?> job : jobs) job.cancel(true);
         jobs.clear(); io.purge(); pending = 0; failed.clear();
     }
@@ -1094,12 +943,6 @@ public final class MobileBrowseActivity extends Activity {
     @Override protected void onResume() {
         super.onResume();
         updates.onResume();
-        shortsPlayback.onResume();
-        if (page == Page.SHORTS) {
-            applySort();
-            render();
-            queueShortSelection();
-        }
         if (firstResume) { firstResume = false; return; }
         if (skipResumeReload) { skipResumeReload = false; render(); return; }
         if (activeChannel != null) showChannel(activeChannel);
@@ -1109,7 +952,6 @@ public final class MobileBrowseActivity extends Activity {
     }
 
     @Override protected void onPause() {
-        shortsPlayback.onPause();
         updates.onPause();
         super.onPause();
     }
@@ -1203,6 +1045,7 @@ public final class MobileBrowseActivity extends Activity {
 
     @Override protected void onSaveInstanceState(Bundle state) {
         state.putString("page", page.name()); state.putString("query", searchQuery);
+        state.putString("film_group", filmGroup.name()); state.putString("live_group", liveGroup.name());
         super.onSaveInstanceState(state);
     }
 
@@ -1217,7 +1060,6 @@ public final class MobileBrowseActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
-        cancelShortSelection(); shortsPlayback.release();
         cancelQueuedSearch(); updates.onDestroy(); cancel(); io.shutdownNow(); super.onDestroy();
     }
 
@@ -1241,15 +1083,7 @@ public final class MobileBrowseActivity extends Activity {
                 FrameLayout artwork = new FrameLayout(MobileBrowseActivity.this) {
                     @Override protected void onMeasure(int widthSpec, int heightSpec) {
                         int width = View.MeasureSpec.getSize(widthSpec);
-                        int artworkHeight = Math.round(width * (page == Page.SHORTS
-                                ? MobileBrowsePreferences.shortsFrameRatio(MobileBrowseActivity.this) == 1
-                                        ? 5f / 4f : 16f / 9f : 9f / 16f));
-                        if (page == Page.SHORTS) {
-                            int available = Math.max(dp(180), list.getHeight() - dp(30));
-                            if (MobileBrowsePreferences.shortsFrameRatio(MobileBrowseActivity.this) == 2)
-                                artworkHeight = available;
-                            else artworkHeight = Math.min(artworkHeight, available);
-                        }
+                        int artworkHeight = Math.round(width * 9f / 16f);
                         super.onMeasure(widthSpec, View.MeasureSpec.makeMeasureSpec(
                                 artworkHeight, View.MeasureSpec.EXACTLY));
                     }
@@ -1278,27 +1112,6 @@ public final class MobileBrowseActivity extends Activity {
                 progress.setProgressTintList(ColorStateList.valueOf(ACCENT));
                 progress.setProgressBackgroundTintList(ColorStateList.valueOf(Color.TRANSPARENT));
                 artwork.addView(progress, new FrameLayout.LayoutParams(-1, dp(3), Gravity.BOTTOM));
-                TextView shortInfo = label("", 15, Color.WHITE);
-                shortInfo.setMaxLines(4);
-                shortInfo.setEllipsize(TextUtils.TruncateAt.END);
-                shortInfo.setPadding(dp(14), dp(28), dp(14), dp(16));
-                shortInfo.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                        new int[]{Color.TRANSPARENT, 0xb0071426}));
-                artwork.addView(shortInfo, new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM));
-                TextView shortCue = label("▶", 36, Color.WHITE);
-                shortCue.setGravity(Gravity.CENTER);
-                shortCue.setPadding(dp(14), dp(8), dp(14), dp(8));
-                shortCue.setBackground(round(0x99071426, 14));
-                shortCue.setVisibility(View.GONE);
-                artwork.addView(shortCue, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
-                TextView shortFullscreen = label("⛶", 27, Color.WHITE);
-                shortFullscreen.setGravity(Gravity.CENTER);
-                shortFullscreen.setBackground(round(0x99071426, 12));
-                shortFullscreen.setContentDescription("Открыть видео на весь экран");
-                FrameLayout.LayoutParams fullscreenParams = new FrameLayout.LayoutParams(
-                        dp(44), dp(44), Gravity.BOTTOM | Gravity.END);
-                fullscreenParams.setMargins(0, 0, dp(12), dp(12));
-                artwork.addView(shortFullscreen, fullscreenParams);
                 layout.addView(artwork, size(-1, -2));
 
                 LinearLayout info = new LinearLayout(MobileBrowseActivity.this);
@@ -1328,35 +1141,11 @@ public final class MobileBrowseActivity extends Activity {
                 info.addView(more, size(38, 42));
                 layout.addView(info, size(-1, -2));
                 layout.setTag(card = new Card(artwork, info, image, source, duration,
-                        progress, shortInfo, shortCue, shortFullscreen,
-                        avatar, title, channel, meta, more));
+                        progress, avatar, title, channel, meta, more));
                 recycled = layout;
             } else card = (Card) recycled.getTag();
             VideoItem item = getItem(position);
-            if (shortsPlayback.isSelected(card.artwork) && (page != Page.SHORTS
-                    || !item.stableKey().equals(card.artwork.getTag())))
-                shortsPlayback.clearForTransition();
             card.artwork.setTag(item.stableKey());
-            card.image.setScaleType(page == Page.SHORTS
-                    ? ImageView.ScaleType.CENTER_CROP : ImageView.ScaleType.FIT_CENTER);
-            card.info.setVisibility(page == Page.SHORTS ? View.GONE : View.VISIBLE);
-            card.shortInfo.setVisibility(page == Page.SHORTS
-                    && MobileBrowsePreferences.shortsShowInfo(MobileBrowseActivity.this)
-                    ? View.VISIBLE : View.GONE);
-            card.shortFullscreen.setVisibility(page == Page.SHORTS
-                    && item.stableKey().equals(shortSelectedKey) ? View.VISIBLE : View.GONE);
-            if (page == Page.SHORTS) {
-                String details = VideoPresentation.views(item);
-                card.shortInfo.setText(item.source + " · " + VideoPresentation.channel(item)
-                        + "\n" + item.title + (details.isEmpty() ? "" : "\n" + details));
-            } else card.shortCue.setVisibility(View.GONE);
-            FrameLayout.LayoutParams durationParams = (FrameLayout.LayoutParams)
-                    card.duration.getLayoutParams();
-            durationParams.gravity = (page == Page.SHORTS ? Gravity.TOP : Gravity.BOTTOM)
-                    | Gravity.END;
-            durationParams.topMargin = page == Page.SHORTS ? dp(10) : 0;
-            durationParams.bottomMargin = page == Page.SHORTS ? 0 : dp(10);
-            card.duration.setLayoutParams(durationParams);
             card.source.setText(item.isLive ? "● В ЭФИРЕ · " + item.source : item.source);
             card.duration.setText(item.isLive ? "В ЭФИРЕ" : VideoPresentation.duration(item.durationMs));
             card.duration.setVisibility(item.isLive || item.durationMs > 0 ? View.VISIBLE : View.GONE);
@@ -1377,7 +1166,7 @@ public final class MobileBrowseActivity extends Activity {
             card.progress.setVisibility(watched.positionMs > 0 && total > 0 ? View.VISIBLE : View.GONE);
             if (total > 0) card.progress.setProgress((int) Math.min(1000, watched.positionMs * 1000 / total));
             card.more.setOnClickListener(v -> VideoActions.show(MobileBrowseActivity.this, item,
-                    () -> showChannel(item)));
+                    () -> showChannel(item), MobileBrowseActivity.this::refreshFilmsIfVisible));
             int thumbnailWidth = list.getColumnWidth();
             if (thumbnailWidth <= 0) thumbnailWidth = Math.max(dp(180),
                     getResources().getDisplayMetrics().widthPixels - dp(28));
@@ -1391,19 +1180,14 @@ public final class MobileBrowseActivity extends Activity {
         final FrameLayout artwork;
         final LinearLayout info;
         final ImageView image;
-        final TextView shortInfo, shortCue, shortFullscreen;
         final TextView source, duration, avatar, title, channel, meta, more;
         final ProgressBar progress;
         Card(FrameLayout artwork, LinearLayout info, ImageView image, TextView source,
-             TextView duration, ProgressBar progress, TextView shortInfo, TextView shortCue,
-             TextView shortFullscreen,
-             TextView avatar, TextView title, TextView channel, TextView meta, TextView more) {
+             TextView duration, ProgressBar progress, TextView avatar, TextView title, TextView channel, TextView meta, TextView more) {
             this.artwork = artwork; this.info = info;
             this.image = image; this.source = source; this.duration = duration;
             this.progress = progress; this.avatar = avatar; this.title = title;
             this.channel = channel; this.meta = meta; this.more = more;
-            this.shortInfo = shortInfo; this.shortCue = shortCue;
-            this.shortFullscreen = shortFullscreen;
         }
     }
 }

@@ -34,7 +34,7 @@ final class HomeFeed {
     }
 
     private static boolean eligible(VideoItem item, Set<String> watched) {
-        return !item.isLive && !ShortsCatalog.accepts(item)
+        return !item.isLive
                 && !watched.contains(item.stableKey());
     }
 

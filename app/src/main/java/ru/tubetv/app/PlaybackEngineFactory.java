@@ -24,13 +24,10 @@ import androidx.media3.exoplayer.mediacodec.MediaCodecSelector;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 
 import java.io.IOException;
-import java.io.ByteArrayOutputStream;
 import java.net.CookieHandler;
 import java.net.CookieManager;
 import java.net.CookiePolicy;
 import java.net.Proxy;
-import java.net.URI;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -38,159 +35,21 @@ import java.util.Map;
 
 @OptIn(markerClass = UnstableApi.class)
 final class PlaybackEngineFactory {
-    private static final int[] SHORT_PRELOAD_BYTES = {512 * 1024, 1536 * 1024, 3 * 1024 * 1024};
-    private static final float[] SHORT_PRELOAD_SECONDS = {2f, 5f, 10f};
-    private static SimpleCache shortsCache;
+    private static SimpleCache mediaCache;
 
-    private static synchronized SimpleCache shortsCache(Context context) {
-        if (shortsCache == null) shortsCache = new SimpleCache(
-                new java.io.File(context.getCacheDir(), "shorts_media"),
-                new LeastRecentlyUsedCacheEvictor(
-                        MobileBrowsePreferences.shortsCacheMb(context) * 1024L * 1024L));
-        return shortsCache;
-    }
-
-    static synchronized void reconfigureShortsCache(Context context) {
-        if (shortsCache != null) { shortsCache.release(); shortsCache = null; }
-        shortsCache(context);
-    }
-
-    static synchronized long clearShortsCache(Context context) {
-        SimpleCache cache = shortsCache(context);
-        long bytes = cache.getCacheSpace();
-        for (String key : new ArrayList<>(cache.getKeys())) cache.removeResource(key);
-        return bytes;
-    }
-
-    static void preloadShort(Context context, VideoItem item, PlaybackInfo stream) {
-        if (stream == null || stream.streamUrl == null || stream.streamUrl.isEmpty()) return;
-        if (MimeTypes.APPLICATION_MPD.equals(stream.streamMimeType)
-                || stream.streamUrl.contains(".mpd")) return;
-        int mode = MobileBrowsePreferences.shortsPreloadMode(context);
-        int byteLimit = SHORT_PRELOAD_BYTES[mode];
-        float seconds = SHORT_PRELOAD_SECONDS[mode];
-        DataSource.Factory factory = cachedHttp(context, item.source, item.pageUrl);
-        try {
-            if (MimeTypes.APPLICATION_M3U8.equals(stream.streamMimeType)
-                    || stream.streamUrl.contains(".m3u8")) {
-                String playlistUrl = stream.streamUrl;
-                for (int depth = 0; depth < 3 && !Thread.currentThread().isInterrupted(); depth++) {
-                    String playlist = new String(readPrefix(factory, playlistUrl, 128 * 1024),
-                            StandardCharsets.UTF_8);
-                    if (playlist.contains("#EXT-X-STREAM-INF")) {
-                        String variant = firstMediaUri(playlist);
-                        if (variant == null) return;
-                        playlistUrl = URI.create(playlistUrl).resolve(variant).toString();
-                    } else {
-                        preloadSegments(factory, playlistUrl, playlist, seconds, byteLimit);
-                        return;
-                    }
-                }
-            } else preloadProgressive(factory, stream.streamUrl, item.durationMs,
-                    seconds, byteLimit);
-        } catch (Exception ignored) {
-            // A failed warmup must never prevent normal playback.
-        }
-    }
-
-    private static String firstMediaUri(String playlist) {
-        for (String line : playlist.split("\\r?\\n")) {
-            String value = line.trim();
-            if (!value.isEmpty() && !value.startsWith("#")) return value;
-        }
-        return null;
-    }
-
-    private static void preloadSegments(DataSource.Factory factory, String playlistUrl,
-                                        String playlist, float secondsLimit,
-                                        int byteLimit) throws IOException {
-        if (playlist.contains("#EXT-X-BYTERANGE")) return;
-        float seconds = 0f;
-        float nextDuration = 0f;
-        int bytes = 0;
-        for (String line : playlist.split("\\r?\\n")) {
-            if (Thread.currentThread().isInterrupted()) return;
-            if (seconds >= secondsLimit || bytes >= byteLimit) break;
-            String value = line.trim();
-            if (value.startsWith("#EXTINF:")) {
-                try { nextDuration = Float.parseFloat(value.substring(8).split(",", 2)[0]); }
-                catch (NumberFormatException ignored) { nextDuration = 0f; }
-            } else if (!value.isEmpty() && !value.startsWith("#")) {
-                String segment = URI.create(playlistUrl).resolve(value).toString();
-                bytes += cachePrefix(factory, segment, byteLimit - bytes);
-                seconds += nextDuration > 0f ? nextDuration : 4f;
-                nextDuration = 0f;
-            }
-        }
-        if (BuildConfig.DEBUG) android.util.Log.i("RussTubeShortsPreload",
-                "kind=hls seconds=" + seconds + " bytes=" + bytes);
-    }
-
-    private static void preloadProgressive(DataSource.Factory factory, String url,
-                                           long durationMs, float secondsLimit,
-                                           int byteLimit) throws IOException {
-        DataSource source = factory.createDataSource();
-        try {
-            long length = source.open(new DataSpec.Builder().setUri(url).build());
-            int budget = Math.min(byteLimit, 512 * 1024);
-            if (length > 0 && durationMs > 0) {
-                long estimated = (long) (length * secondsLimit * 1000f / durationMs);
-                budget = (int) Math.max(64 * 1024L,
-                        Math.min(byteLimit, estimated));
-            }
-            byte[] bytes = new byte[16 * 1024];
-            int loaded = 0;
-            int read;
-            while (!Thread.currentThread().isInterrupted() && loaded < budget
-                    && (read = source.read(bytes, 0, Math.min(bytes.length, budget - loaded))) != -1)
-                loaded += read;
-            if (BuildConfig.DEBUG) android.util.Log.i("RussTubeShortsPreload",
-                    "kind=progressive bytes=" + loaded + " durationMs=" + durationMs
-                            + " contentLength=" + length);
-        } finally {
-            source.close();
-        }
-    }
-
-    private static int cachePrefix(DataSource.Factory factory, String url, int limit)
-            throws IOException {
-        DataSource source = factory.createDataSource();
-        try {
-            source.open(new DataSpec.Builder().setUri(url).setLength(limit).build());
-            byte[] buffer = new byte[16 * 1024];
-            int loaded = 0;
-            int read;
-            while (!Thread.currentThread().isInterrupted() && loaded < limit
-                    && (read = source.read(buffer, 0, Math.min(buffer.length, limit - loaded))) != -1)
-                loaded += read;
-            return loaded;
-        } finally {
-            source.close();
-        }
-    }
-
-    private static byte[] readPrefix(DataSource.Factory factory, String url, int limit)
-            throws IOException {
-        DataSource source = factory.createDataSource();
-        try {
-            source.open(new DataSpec.Builder().setUri(url).setLength(limit).build());
-            byte[] bytes = new byte[16 * 1024];
-            ByteArrayOutputStream output = new ByteArrayOutputStream(Math.min(limit, 16 * 1024));
-            int read;
-            while (!Thread.currentThread().isInterrupted() && output.size() < limit
-                    && (read = source.read(bytes, 0, Math.min(bytes.length, limit - output.size()))) != -1)
-                output.write(bytes, 0, read);
-            return output.toByteArray();
-        } finally {
-            source.close();
-        }
+    private static synchronized SimpleCache mediaCache(Context context) {
+        if (mediaCache == null) mediaCache = new SimpleCache(
+                new java.io.File(context.getCacheDir(), "video_media"),
+                new LeastRecentlyUsedCacheEvictor(128L * 1024L * 1024L));
+        return mediaCache;
     }
 
     private static DataSource.Factory cachedHttp(Context context, String source, String pageUrl) {
-        return new CacheDataSource.Factory().setCache(shortsCache(context))
+        return new CacheDataSource.Factory().setCache(mediaCache(context))
                 .setUpstreamDataSourceFactory(http(context, source, pageUrl))
                 .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR);
     }
+
     static ExoPlayer create(Context context, String source, String pageUrl,
                             boolean trafficMode, int targetHeight, boolean audioOnly) {
         DeviceCapabilities capabilities = DeviceCapabilities.get();

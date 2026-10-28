@@ -438,7 +438,7 @@ public final class BrowseActivity extends Activity {
                     enqueue("VK VIDEO", () -> repository.search("VK VIDEO", "фильмы и сериалы"));
                 if ((filmGroup == FilmGroup.ALL || filmGroup == FilmGroup.RUTUBE)
                         && MobileBrowsePreferences.sourceEnabled(this, "RUTUBE"))
-                    enqueue("RUTUBE", RutubeTvCatalog::movies);
+                    enqueue("RUTUBE", RutubeTvCatalog::movies, false, true);
                 break;
             case SUBSCRIPTIONS:
                 heading.setText("Подписки");

@@ -25,4 +25,11 @@ public final class FilmCatalogTest {
         assertFalse(FilmCatalog.includes(video("Дорога к сердцу 4 серии из 4", 180 * 60_000L), true));
         assertFalse(FilmCatalog.includes(video("Com Ports Have Graphics!", 90 * 60_000L)));
     }
+
+    @Test public void genericVideoFromFilmNamedChannelIsNotEnough() {
+        VideoItem item = video("Н вер 2026 4K", 95 * 60_000L)
+                .withChannel("123", "Фильмы и сериалы 2026", "https://video.example/channel", false);
+        assertFalse(FilmCatalog.includes(item));
+        assertTrue(FilmCatalog.includes(item, true));
+    }
 }
