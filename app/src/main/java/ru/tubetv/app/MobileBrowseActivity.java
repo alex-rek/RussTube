@@ -974,8 +974,11 @@ public final class MobileBrowseActivity extends Activity {
         items.clear();
         Set<String> unavailable = UnavailableVideoStore.keys(this);
         for (VideoItem item : baseItems)
-            if ((page != Page.HOME && page != Page.SHORTS)
-                    || !unavailable.contains(item.stableKey())) items.add(item);
+            if ((page == Page.HISTORY || page == Page.FAVORITES
+                    || (page == Page.CHANNELS && activeChannel == null)
+                    || VideoVisibility.showInDiscovery(item))
+                    && (page != Page.HOME && page != Page.SHORTS
+                    || !unavailable.contains(item.stableKey()))) items.add(item);
         if (page != Page.CHANNELS || activeChannel != null) VideoSort.apply(items, sortMode);
     }
 

@@ -38,7 +38,7 @@ final class SearchClient {
         JSONArray items = root.optJSONArray("results");
         List<VideoItem> result = new ArrayList<>();
         if (items == null) return result;
-        for (int i = 0; i < Math.min(items.length(), LIMIT); i++) {
+        for (int i = 0; i < Math.min(items.length(), 100) && result.size() < LIMIT; i++) {
             JSONObject item = items.getJSONObject(i);
             String id = item.optString("id");
             String page = item.optString("video_url", "https://rutube.ru/video/" + id + "/");
@@ -46,14 +46,15 @@ final class SearchClient {
             embed = copyQueryParameter(page, embed, "p");
             int duration = item.optInt("duration");
             JSONObject author = item.optJSONObject("author");
-            result.add(new VideoItem("RUTUBE", item.optString("title", "Без названия"),
+            VideoItem video = new VideoItem("RUTUBE", item.optString("title", "Без названия"),
                     "", item.optString("thumbnail_url"),
                     embed, page, duration * 1000L).withChannel(
                     author == null ? "" : author.optString("id"),
                     author == null ? "" : author.optString("name"),
                     author == null ? "" : author.optString("url"),
                     item.optBoolean("is_livestream") && item.optBoolean("is_on_air"))
-                    .withMetrics(item.optLong("hits", -1), VideoPresentation.timestamp(item.optString("created_ts"))));
+                    .withMetrics(item.optLong("hits", -1), VideoPresentation.timestamp(item.optString("created_ts")));
+            if (VideoVisibility.showInDiscovery(video)) result.add(video);
         }
         return result;
     }

@@ -879,6 +879,9 @@ public final class BrowseActivity extends Activity {
                 ? QUALITY_WIDTHS[qualityFilter] : 0;
         Set<String> unavailable = UnavailableVideoStore.keys(this);
         for (VideoItem item : baseItems) {
+            if (page != Page.HISTORY && page != Page.FAVORITES
+                    && !(page == Page.CHANNELS && activeChannel == null)
+                    && !VideoVisibility.showInDiscovery(item)) continue;
             if (item.maxWidth >= minWidth && (page == Page.HISTORY || page == Page.FAVORITES
                     || channelsMode || !unavailable.contains(item.stableKey()))) items.add(item);
         }
