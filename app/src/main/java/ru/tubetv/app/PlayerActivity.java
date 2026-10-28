@@ -74,6 +74,7 @@ public final class PlayerActivity extends Activity {
     private TextView playState;
     private TextView settingsState;
     private TextView time;
+    private TextView tvDuration;
     private TextView repeatState;
     private TextView favoriteState;
     private TextView subscriptionState;
@@ -265,7 +266,8 @@ public final class PlayerActivity extends Activity {
 
         controls = new DraggableControlsLayout();
         controls.setOrientation(LinearLayout.VERTICAL);
-        controls.setPadding(dp(mobileMode ? 16 : 42), dp(20), dp(mobileMode ? 16 : 42), dp(20));
+        controls.setPadding(dp(mobileMode ? 16 : 42), dp(mobileMode ? 20 : 12),
+                dp(mobileMode ? 16 : 42), dp(mobileMode ? 20 : 12));
         controls.setBackground(new android.graphics.drawable.GradientDrawable(
                 android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[]{Color.TRANSPARENT, 0xee000000, 0xfa000000}));
@@ -281,52 +283,54 @@ public final class PlayerActivity extends Activity {
         TextView title = label(getIntent().getStringExtra("title"), isCompactPlayer() ? 20 : 28);
         title.setMaxLines(2); title.setEllipsize(TextUtils.TruncateAt.END);
         title.setGravity(Gravity.BOTTOM);
-        controls.addView(title, new LinearLayout.LayoutParams(-1, dp(64)));
+        controls.addView(title, new LinearLayout.LayoutParams(-1, dp(mobileMode ? 64 : 72)));
         List<String> meta = new ArrayList<>();
+        if (!mobileMode) meta.add(historyItem.source);
         meta.add(VideoPresentation.channel(historyItem));
         if (!VideoPresentation.views(historyItem).isEmpty()) meta.add(VideoPresentation.views(historyItem));
         if (!VideoPresentation.published(historyItem).isEmpty()) meta.add(VideoPresentation.published(historyItem));
         TextView metadata = label(TextUtils.join(" · ", meta), isCompactPlayer() ? 13 : 16);
         metadata.setTextColor(0xe0ffffff); metadata.setSingleLine(true);
-        controls.addView(metadata, new LinearLayout.LayoutParams(-1, dp(28)));
+        controls.addView(metadata, new LinearLayout.LayoutParams(-1, dp(mobileMode ? 28 : 24)));
         focusedHint = label("", 13);
         focusedHint.setVisibility(View.INVISIBLE);
-        controls.addView(focusedHint, new LinearLayout.LayoutParams(-1, dp(26)));
+        controls.addView(focusedHint, new LinearLayout.LayoutParams(-1, dp(mobileMode ? 26 : 18)));
 
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
         time = label("0:00 / 0:00", isCompactPlayer() ? 12 : 14);
-        time.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
-        addPlayerControl(row, "◀◀", "Назад на 10 секунд", () -> seekBy(-10_000), false);
+        time.setGravity(mobileMode ? Gravity.END | Gravity.CENTER_VERTICAL
+                : Gravity.START | Gravity.CENTER_VERTICAL);
+        if (!mobileMode) {
+            repeatState = addPlayerControl(row, "↻", "Повтор видео", () -> {
+                if (player != null) player.setRepeatMode(player.getRepeatMode() == Player.REPEAT_MODE_ONE
+                        ? Player.REPEAT_MODE_OFF : Player.REPEAT_MODE_ONE);
+                updateControls();
+            }, false);
+            addPlayerControl(row, "1×", "Скорость воспроизведения",
+                    () -> setPlaybackMenuVisible(true), false);
+            captionsState = addPlayerControl(row, "CC", "Субтитры · удержать для настроек",
+                    this::toggleCaptions, false);
+        }
+        addPlayerControl(row, mobileMode ? "◀◀" : "↶10", "Назад 10 секунд",
+                () -> seekBy(-10_000), false);
         playState = addPlayerControl(row, "▶", "Пауза / воспроизведение", this::togglePlayback, true);
-        addPlayerControl(row, "▶▶", "Вперёд на 10 секунд", () -> seekBy(10_000), false);
-        if (!mobileMode) repeatState = addPlayerControl(row, "↻", "Повтор видео", () -> {
-            if (player != null) player.setRepeatMode(player.getRepeatMode() == Player.REPEAT_MODE_ONE
-                    ? Player.REPEAT_MODE_OFF : Player.REPEAT_MODE_ONE);
-            updateControls();
-        }, false);
-        if (!mobileMode) addPlayerControl(row, "1×", "Скорость воспроизведения", () -> setPlaybackMenuVisible(true), false);
-        if (!mobileMode) captionsState = addPlayerControl(row, "CC", "Субтитры · удержать для настроек",
-                this::toggleCaptions, false);
+        addPlayerControl(row, mobileMode ? "▶▶" : "10↷", "Вперёд 10 секунд",
+                () -> seekBy(10_000), false);
         if (captionsState != null) captionsState.setOnLongClickListener(v -> {
             showCaptionsMenu();
             return true;
         });
-        if (captionsState != null) captionsState.setVisibility(View.GONE);
+        setCaptionControlVisible(false);
         if (!mobileMode && !historyItem.channelId.isEmpty()) subscriptionState = addPlayerControl(row, "⊕",
                 "Подписаться на канал", this::toggleSubscription, false);
         favoriteState = addPlayerControl(row, "♡", "Добавить в избранное", this::toggleFavorite, false);
         settingsState = addPlayerControl(row, "HQ", "Качество и настройки", () ->
                 setPlaybackMenuVisible(!playbackMenuVisible), false);
-        row.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
-        row.addView(time, new LinearLayout.LayoutParams(dp(mobileMode ? 78 : isCompactPlayer() ? 108 : 150), dp(58)));
-        if (mobileMode) controls.addView(row, new LinearLayout.LayoutParams(-1, dp(58)));
-        else {
-            HorizontalScrollView scrollingControls = new HorizontalScrollView(this);
-            scrollingControls.setFillViewport(true);
-            scrollingControls.setHorizontalScrollBarEnabled(false);
-            scrollingControls.addView(row, new HorizontalScrollView.LayoutParams(-2, dp(58)));
-            controls.addView(scrollingControls, new LinearLayout.LayoutParams(-1, dp(58)));
+        if (mobileMode) {
+            row.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
+            row.addView(time, new LinearLayout.LayoutParams(dp(78), dp(58)));
+            controls.addView(row, new LinearLayout.LayoutParams(-1, dp(58)));
         }
 
         timeline = new SeekBar(this);
@@ -342,8 +346,9 @@ public final class PlayerActivity extends Activity {
                 scheduleControlsHide();
             }
         });
-        timeline.setProgressTintList(android.content.res.ColorStateList.valueOf(0xffe53935));
-        timeline.setThumbTintList(android.content.res.ColorStateList.valueOf(0xffe53935));
+        int timelineAccent = mobileMode ? 0xffe53935 : TvAppearancePreferences.accent(this);
+        timeline.setProgressTintList(android.content.res.ColorStateList.valueOf(timelineAccent));
+        timeline.setThumbTintList(android.content.res.ColorStateList.valueOf(timelineAccent));
         timeline.setProgressBackgroundTintList(android.content.res.ColorStateList.valueOf(0xff84888d));
         timeline.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
@@ -351,7 +356,8 @@ public final class PlayerActivity extends Activity {
                 long duration = player.getDuration();
                 if (duration > 0 && duration != C.TIME_UNSET) {
                     long position = duration * progress / 1000L;
-                    time.setText(formatTime(position) + " / " + formatTime(duration));
+                    time.setText(mobileMode ? formatTime(position) + " / " + formatTime(duration)
+                            : formatTime(position));
                 }
             }
 
@@ -374,7 +380,19 @@ public final class PlayerActivity extends Activity {
         });
         controls.addView(timeline, new LinearLayout.LayoutParams(-1, dp(18)));
 
-        controlsLayoutParams = new FrameLayout.LayoutParams(-1, dp(CONTROLS_HEIGHT_DP), Gravity.BOTTOM);
+        if (!mobileMode) {
+            LinearLayout timeRow = new LinearLayout(this);
+            timeRow.setGravity(Gravity.CENTER_VERTICAL);
+            timeRow.addView(time, new LinearLayout.LayoutParams(0, dp(22), 1));
+            tvDuration = label("—", 14);
+            tvDuration.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+            timeRow.addView(tvDuration, new LinearLayout.LayoutParams(0, dp(22), 1));
+            controls.addView(timeRow, new LinearLayout.LayoutParams(-1, dp(22)));
+            controls.addView(row, new LinearLayout.LayoutParams(-1, dp(76)));
+        }
+
+        controlsLayoutParams = new FrameLayout.LayoutParams(-1,
+                dp(mobileMode ? CONTROLS_HEIGHT_DP : 288), Gravity.BOTTOM);
         applyControlsLayout();
         root.addView(controls, controlsLayoutParams);
         playbackMenu.bringToFront();
@@ -409,20 +427,61 @@ public final class PlayerActivity extends Activity {
 
     private TextView addPlayerControl(LinearLayout row, String symbol, String hint,
                                       Runnable action, boolean large) {
-        TextView button = label(symbol, large ? 32 : 22);
+        TextView button = label(symbol, large ? 32 : mobileMode ? 22 : 26);
         button.setGravity(Gravity.CENTER); button.setFocusable(true);
         button.setContentDescription(hint);
         button.setOnClickListener(v -> action.run());
         button.setOnFocusChangeListener((view, focused) -> {
             GradientDrawable background = new GradientDrawable();
-            background.setColor(focused ? 0xccdf3634 : Color.TRANSPARENT);
-            background.setCornerRadius(dp(12)); view.setBackground(background);
+            background.setColor(focused ? (mobileMode ? 0xccdf3634
+                    : TvAppearancePreferences.focus(this)) : Color.TRANSPARENT);
+            if (!mobileMode && large) {
+                background.setStroke(dp(2), TvAppearancePreferences.accent(this));
+                background.setCornerRadius(dp(40));
+            } else background.setCornerRadius(dp(mobileMode ? 12 : 2));
+            view.setBackground(background);
             focusedHint.setText(focused ? hint : "");
             focusedHint.setVisibility(focused ? View.VISIBLE : View.INVISIBLE);
         });
+        if (!mobileMode) {
+            if (large) {
+                GradientDrawable ring = new GradientDrawable();
+                ring.setColor(Color.TRANSPARENT);
+                ring.setCornerRadius(dp(40));
+                ring.setStroke(dp(2), TvAppearancePreferences.accent(this));
+                button.setBackground(ring);
+            }
+            LinearLayout cell = new LinearLayout(this);
+            cell.setOrientation(LinearLayout.VERTICAL);
+            cell.setGravity(Gravity.CENTER_HORIZONTAL);
+            cell.addView(button, new LinearLayout.LayoutParams(dp(58), dp(50)));
+            String caption = hint.startsWith("Назад") ? "Назад"
+                    : hint.startsWith("Вперёд") ? "Вперёд"
+                    : hint.startsWith("Пауза") ? "Пауза / пуск"
+                    : hint.startsWith("Повтор") ? "Повтор"
+                    : hint.startsWith("Скорость") ? "Скорость"
+                    : hint.startsWith("Субтитры") ? "Субтитры"
+                    : hint.startsWith("Подписаться") ? "Подписаться"
+                    : hint.startsWith("Добавить в избранное") ? "Избранное" : "Качество";
+            TextView captionLabel = label(caption, 12);
+            captionLabel.setTextColor(0xffd0d9e7);
+            captionLabel.setGravity(Gravity.CENTER);
+            captionLabel.setMaxLines(1);
+            captionLabel.setEllipsize(TextUtils.TruncateAt.END);
+            cell.addView(captionLabel, new LinearLayout.LayoutParams(-1, dp(24)));
+            row.addView(cell, new LinearLayout.LayoutParams(0, dp(76), 1));
+            return button;
+        }
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(large ? 58 : 48), dp(large ? 58 : 48));
         params.rightMargin = dp(mobileMode ? 4 : 18); row.addView(button, params);
         return button;
+    }
+
+    private void setCaptionControlVisible(boolean visible) {
+        if (captionsState == null) return;
+        View target = !mobileMode && captionsState.getParent() instanceof View
+                ? (View) captionsState.getParent() : captionsState;
+        target.setVisibility(visible ? View.VISIBLE : View.GONE);
     }
 
     private LinearLayout createPlaybackMenu() {
@@ -590,7 +649,7 @@ public final class PlayerActivity extends Activity {
                     if (group.getType() == C.TRACK_TYPE_TEXT)
                         for (int i = 0; i < group.length; i++)
                             if (group.isTrackSupported(i)) captionsAvailable = true;
-                if (captionsState != null) captionsState.setVisibility(captionsAvailable ? View.VISIBLE : View.GONE);
+                setCaptionControlVisible(captionsAvailable);
                 if (captionsAvailable && !captionsDisabled && !captionChoiceManual)
                     selectPreferredCaption(tracks);
             }
@@ -663,11 +722,15 @@ public final class PlayerActivity extends Activity {
             long displayedPosition = dpadScrubbing ? dpadSeekPosition : position;
             if (duration <= 0 || duration == C.TIME_UNSET) {
                 timeline.setProgress(0);
-                time.setText(formatTime(displayedPosition) + " / —");
+                time.setText(mobileMode ? formatTime(displayedPosition) + " / —"
+                        : formatTime(displayedPosition));
+                if (tvDuration != null) tvDuration.setText("В эфире");
             } else {
                 timeline.setProgress((int) Math.min(1000,
                         displayedPosition * 1000 / duration));
-                time.setText(formatTime(displayedPosition) + " / " + formatTime(duration));
+                time.setText(mobileMode ? formatTime(displayedPosition) + " / " + formatTime(duration)
+                        : formatTime(displayedPosition));
+                if (tvDuration != null) tvDuration.setText(formatTime(duration));
             }
         }
         playState.setText(player.isPlaying() ? "Ⅱ" : "▶");
@@ -869,7 +932,9 @@ public final class PlayerActivity extends Activity {
         playerRoot.addView(captionPanel, new FrameLayout.LayoutParams(width, -1, Gravity.RIGHT));
         if (TvAppearancePreferences.animations(this)) {
             captionPanel.setTranslationX(width);
-            captionPanel.animate().translationX(0).setDuration(180).start();
+            captionPanel.setAlpha(.82f);
+            captionPanel.animate().translationX(0).alpha(1f).setDuration(340)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator(1.5f)).start();
         }
     }
 

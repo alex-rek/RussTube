@@ -9,6 +9,8 @@ import android.view.Gravity;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.Button;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -71,11 +73,44 @@ final class VideoActions {
         }
         labels.add("Назад"); actions.add(() -> { });
         if (!BuildConfig.MOBILE_VARIANT) {
+            String[] menuLabels = new String[labels.size()];
+            for (int i = 0; i < labels.size(); i++) {
+                String label = labels.get(i);
+                String icon = label.equals("Смотреть") ? "▶"
+                        : label.startsWith("Подписаться") || label.startsWith("Отписаться") ? "♙"
+                        : label.equals("Видео канала") ? "▣"
+                        : label.contains("Фильмов") || label.contains("Фильмы") ? "▤"
+                        : label.contains("избранн") ? "♥" : "←";
+                menuLabels[i] = icon + "    " + label;
+            }
             SideSelectionPanel choices = new SideSelectionPanel(activity, item.title,
-                    labels.toArray(new String[0]), -1, index -> {
+                    menuLabels, -1, index -> {
                         dialog.dismiss();
                         actions.get(index).run();
                     });
+            if (item.thumbnail != null && !item.thumbnail.isEmpty()) {
+                FrameLayout preview = new FrameLayout(activity);
+                ImageView cover = new ImageView(activity);
+                cover.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                int previewHeight = Math.round(135 * density);
+                preview.addView(cover, new FrameLayout.LayoutParams(-1, previewHeight));
+                TextView source = new TextView(activity);
+                source.setText(item.source);
+                source.setTextColor(Color.WHITE);
+                source.setTextSize(12);
+                source.setBackgroundColor(0xd9001024);
+                source.setPadding(Math.round(7 * density), Math.round(3 * density),
+                        Math.round(7 * density), Math.round(3 * density));
+                FrameLayout.LayoutParams badge = new FrameLayout.LayoutParams(-2, -2,
+                        Gravity.TOP | Gravity.START);
+                badge.setMargins(Math.round(8 * density), Math.round(8 * density), 0, 0);
+                preview.addView(source, badge);
+                choices.setHeader(preview);
+                ((TubeApplication) activity.getApplication()).imageLoader().load(
+                        item.source, item.thumbnail, cover,
+                        activity.getResources().getDisplayMetrics().widthPixels * 38 / 100,
+                        previewHeight);
+            }
             dialog.setContentView(choices);
             Window window = dialog.getWindow();
             if (window != null) {
@@ -90,6 +125,12 @@ final class VideoActions {
                 window.setAttributes(params);
             }
             dialog.show();
+            if (TvAppearancePreferences.animations(activity)) {
+                choices.setTranslationX(Math.round(380 * density));
+                choices.setAlpha(.82f);
+                choices.animate().translationX(0).alpha(1f).setDuration(340)
+                        .setInterpolator(new android.view.animation.DecelerateInterpolator(1.5f)).start();
+            }
             return;
         }
         Button first = null;

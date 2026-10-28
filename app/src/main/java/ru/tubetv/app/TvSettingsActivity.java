@@ -58,8 +58,8 @@ public final class TvSettingsActivity extends Activity {
         TextView title = text("Настройки", 24, Color.WHITE);
         top.addView(title, new LinearLayout.LayoutParams(0, dp(48), 1));
         ImageView logo = new ImageView(this);
-        logo.setImageResource(R.drawable.tv_banner);
-        logo.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        logo.setImageResource(R.drawable.tv_wordmark);
+        logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
         logo.setContentDescription("RussTubeTV");
         top.addView(logo, new LinearLayout.LayoutParams(dp(220), dp(48)));
         dashboardRoot.addView(top);
@@ -265,7 +265,9 @@ public final class TvSettingsActivity extends Activity {
         screen.addView(selectionPanel, new FrameLayout.LayoutParams(width, -1, Gravity.RIGHT));
         if (TvAppearancePreferences.animations(this)) {
             selectionPanel.setTranslationX(width);
-            selectionPanel.animate().translationX(0).setDuration(180).start();
+            selectionPanel.setAlpha(.82f);
+            selectionPanel.animate().translationX(0).alpha(1f).setDuration(340)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator(1.5f)).start();
         }
     }
 

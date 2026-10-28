@@ -18,7 +18,7 @@ final class TvAppearancePreferences {
 
     static boolean symbols(Context context) {
         return context.getSharedPreferences("tv_appearance", 0)
-                .getBoolean("symbols", false);
+                .getBoolean("symbols", true);
     }
 
     static void setSymbols(Context context, boolean value) {

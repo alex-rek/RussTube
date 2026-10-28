@@ -189,36 +189,52 @@ public final class BrowseActivity extends Activity {
         content.setPadding(dp(76), dp(4), dp(20), dp(4));
         LinearLayout toolbar = new LinearLayout(this);
         toolbar.setGravity(Gravity.CENTER_VERTICAL);
-        ImageButton search = new ImageButton(this);
-        search.setImageDrawable(TvIcons.icon("search", Color.WHITE, dp(24)));
-        search.setPadding(dp(12), dp(12), dp(12), dp(12));
-        search.setBackgroundColor(TvAppearancePreferences.surface(this));
-        search.setOnClickListener(v -> show(Page.SEARCH));
-        search.setOnKeyListener((view, keyCode, event) -> {
+        LinearLayout searchLaunch = new LinearLayout(this);
+        searchLaunch.setGravity(Gravity.CENTER_VERTICAL);
+        searchLaunch.setPadding(dp(12), 0, dp(12), 0);
+        searchLaunch.setBackgroundResource(R.drawable.search_field_background);
+        searchLaunch.setFocusable(true);
+        ImageView searchIcon = new ImageView(this);
+        searchIcon.setImageDrawable(TvIcons.icon("search", TvAppearancePreferences.accent(this), dp(23)));
+        searchLaunch.addView(searchIcon, new LinearLayout.LayoutParams(dp(30), dp(30)));
+        TextView searchHint = label("Поиск видео, каналов, тем…", 14,
+                TvAppearancePreferences.secondary(this));
+        searchHint.setSingleLine(true);
+        searchHint.setEllipsize(TextUtils.TruncateAt.END);
+        searchLaunch.addView(searchHint, new LinearLayout.LayoutParams(0, -1, 1));
+        searchLaunch.setOnClickListener(v -> show(Page.SEARCH));
+        searchLaunch.setOnKeyListener((view, keyCode, event) -> {
             if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT && event.getAction() == KeyEvent.ACTION_DOWN) {
                 openNavigation(); return true;
             }
             return false;
         });
-        search.setOnFocusChangeListener((v, focused) -> search.setBackgroundColor(
-                focused ? TvAppearancePreferences.focus(this)
-                        : TvAppearancePreferences.surface(this)));
-        search.setContentDescription("Поиск видео");
-        toolbar.addView(search, row(46, 46, 0, 0));
-        TextView symbols = label("RUTUBE   VK Видео   OK   Дзен", 13,
-                TvAppearancePreferences.secondary(this));
-        symbols.setAlpha(.24f);
+        searchLaunch.setOnFocusChangeListener((v, focused) -> {
+            if (focused) searchLaunch.setBackgroundColor(TvAppearancePreferences.focus(this));
+            else searchLaunch.setBackgroundResource(R.drawable.search_field_background);
+        });
+        searchLaunch.setContentDescription("Поиск видео, каналов и тем");
+        toolbar.addView(searchLaunch, row(318, 42, 0, 0));
+        LinearLayout symbols = new LinearLayout(this);
+        symbols.setGravity(Gravity.CENTER);
+        String[] platformMarks = {"VK", "▶", "OK", "✦"};
+        for (String mark : platformMarks) {
+            TextView glyph = label(mark, 23, TvAppearancePreferences.accent(this));
+            glyph.setGravity(Gravity.CENTER);
+            glyph.setAlpha(.16f);
+            symbols.addView(glyph, new LinearLayout.LayoutParams(0, -1, 1));
+        }
         symbols.setVisibility(TvAppearancePreferences.symbols(this) ? View.VISIBLE : View.GONE);
         toolbar.addView(symbols, new LinearLayout.LayoutParams(0, -1, 1));
         clock = label("", 12, Color.rgb(205, 210, 220));
         clock.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
         toolbar.addView(clock, row(110, 44, 0, 0));
         ImageView brand = new ImageView(this);
-        brand.setImageResource(R.drawable.tv_banner);
-        brand.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        brand.setImageResource(R.drawable.tv_wordmark);
+        brand.setScaleType(ImageView.ScaleType.FIT_CENTER);
         brand.setContentDescription("RussTubeTV");
-        toolbar.addView(brand, row(260, 48, 14, 0));
-        content.addView(toolbar, row(-1, 44, 0, 20));
+        toolbar.addView(brand, new LinearLayout.LayoutParams(dp(230), dp(46)));
+        content.addView(toolbar, row(-1, 48, 0, 18));
         heading = label("", 24, Color.WHITE);
         heading.setTypeface(Typeface.DEFAULT_BOLD);
         content.addView(heading, row(-1, 34, 0, 0));
@@ -263,7 +279,7 @@ public final class BrowseActivity extends Activity {
         grid = new GridView(this);
         grid.setId(View.generateViewId());
         grid.setNumColumns(GridView.AUTO_FIT);
-        grid.setColumnWidth(cardDp(Math.round(250 * TvScalePreferences.get(this, TvScalePreferences.GRID))));
+        grid.setColumnWidth(cardDp(Math.round(190 * TvScalePreferences.get(this, TvScalePreferences.GRID))));
         grid.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
         grid.setHorizontalSpacing(cardDp(14));
         grid.setVerticalSpacing(cardDp(16));
@@ -665,7 +681,7 @@ public final class BrowseActivity extends Activity {
     private void prefetchNear(int position, int direction) {
         if (position < 0 || items.isEmpty()) return;
         int width = grid.getColumnWidth();
-        if (width <= 0) width = cardDp(Math.round(250 * TvScalePreferences.get(this, TvScalePreferences.GRID)));
+        if (width <= 0) width = cardDp(Math.round(190 * TvScalePreferences.get(this, TvScalePreferences.GRID)));
         int columns = Math.max(1, grid.getNumColumns());
         int start = direction < 0 ? Math.max(0, position - columns * 2) : position + 1;
         int end = direction < 0 ? position : Math.min(items.size(), position + columns * 2 + 1);
@@ -903,7 +919,7 @@ public final class BrowseActivity extends Activity {
         }
         if (newGridStep != gridScaleStep) {
             gridScaleStep = newGridStep;
-            grid.setColumnWidth(cardDp(Math.round(250 * TvScalePreferences.get(this, TvScalePreferences.GRID))));
+            grid.setColumnWidth(cardDp(Math.round(190 * TvScalePreferences.get(this, TvScalePreferences.GRID))));
             grid.requestLayout();
         }
         if (returningFromPlayer && page != Page.FAVORITES) {
@@ -1031,7 +1047,7 @@ public final class BrowseActivity extends Activity {
                 recycled.setScaleX(1); recycled.setScaleY(1);
             }
             int width = grid.getColumnWidth();
-            if (width <= 0) width = cardDp(Math.round(250 * TvScalePreferences.get(BrowseActivity.this, TvScalePreferences.GRID)));
+            if (width <= 0) width = cardDp(Math.round(190 * TvScalePreferences.get(BrowseActivity.this, TvScalePreferences.GRID)));
             ((TubeApplication) getApplication()).imageLoader().load(item.source, item.thumbnail, holder.image,
                     width, width * 9 / 16);
             long bindMs = android.os.SystemClock.elapsedRealtime() - bindStarted;

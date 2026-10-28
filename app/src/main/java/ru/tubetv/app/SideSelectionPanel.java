@@ -111,6 +111,10 @@ final class SideSelectionPanel extends LinearLayout {
             choices[index].setText((markedChoices ? "○  " : "") + label);
     }
 
+    void setHeader(View header) {
+        addView(header, 0, new LayoutParams(-1, -2));
+    }
+
     private int dp(int value) {
         return Math.round(value * getResources().getDisplayMetrics().density
                 * TvScalePreferences.get(getContext(), TvScalePreferences.INTERFACE));
