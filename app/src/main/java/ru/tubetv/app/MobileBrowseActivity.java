@@ -1095,11 +1095,10 @@ public final class MobileBrowseActivity extends Activity {
                 ImageView image = new ImageView(MobileBrowseActivity.this);
                 image.setScaleType(ImageView.ScaleType.FIT_CENTER);
                 artwork.addView(image, new FrameLayout.LayoutParams(-1, -1));
-                TextView source = label("", 11, MobileAuroraTheme.TEXT);
-                source.setTypeface(Typeface.DEFAULT_BOLD);
-                source.setPadding(dp(8), 0, dp(8), 0);
-                source.setBackground(round(0xee071426, 7));
-                FrameLayout.LayoutParams sourceParams = new FrameLayout.LayoutParams(-2, dp(24), Gravity.TOP | Gravity.START);
+                ImageView source = new ImageView(MobileBrowseActivity.this);
+                source.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                FrameLayout.LayoutParams sourceParams = new FrameLayout.LayoutParams(
+                        dp(30), dp(30), Gravity.TOP | Gravity.START);
                 sourceParams.setMargins(dp(10), dp(10), 0, 0); artwork.addView(source, sourceParams);
                 TextView duration = label("", 11, MobileAuroraTheme.TEXT);
                 duration.setTypeface(Typeface.DEFAULT_BOLD);
@@ -1146,7 +1145,8 @@ public final class MobileBrowseActivity extends Activity {
             } else card = (Card) recycled.getTag();
             VideoItem item = getItem(position);
             card.artwork.setTag(item.stableKey());
-            card.source.setText(item.isLive ? "● В ЭФИРЕ · " + item.source : item.source);
+            card.source.setImageResource(SourceIcon.drawable(item.source));
+            card.source.setContentDescription(item.source);
             card.duration.setText(item.isLive ? "В ЭФИРЕ" : VideoPresentation.duration(item.durationMs));
             card.duration.setVisibility(item.isLive || item.durationMs > 0 ? View.VISIBLE : View.GONE);
             card.title.setText(page == Page.CHANNELS && activeChannel == null
@@ -1180,9 +1180,10 @@ public final class MobileBrowseActivity extends Activity {
         final FrameLayout artwork;
         final LinearLayout info;
         final ImageView image;
-        final TextView source, duration, avatar, title, channel, meta, more;
+        final TextView duration, avatar, title, channel, meta, more;
+        final ImageView source;
         final ProgressBar progress;
-        Card(FrameLayout artwork, LinearLayout info, ImageView image, TextView source,
+        Card(FrameLayout artwork, LinearLayout info, ImageView image, ImageView source,
              TextView duration, ProgressBar progress, TextView avatar, TextView title, TextView channel, TextView meta, TextView more) {
             this.artwork = artwork; this.info = info;
             this.image = image; this.source = source; this.duration = duration;

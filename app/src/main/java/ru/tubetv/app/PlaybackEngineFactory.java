@@ -52,6 +52,12 @@ final class PlaybackEngineFactory {
 
     static ExoPlayer create(Context context, String source, String pageUrl,
                             boolean trafficMode, int targetHeight, boolean audioOnly) {
+        return create(context, source, pageUrl, trafficMode, targetHeight, audioOnly, false);
+    }
+
+    static ExoPlayer create(Context context, String source, String pageUrl,
+                            boolean trafficMode, int targetHeight, boolean audioOnly,
+                            boolean live) {
         DeviceCapabilities capabilities = DeviceCapabilities.get();
         MediaCodecSelector selector = (mimeType, secure, tunneling) -> {
             List<MediaCodecInfo> available = MediaCodecSelector.DEFAULT.getDecoderInfos(mimeType, secure, tunneling);
@@ -73,7 +79,7 @@ final class PlaybackEngineFactory {
                 .setRenderersFactory(new DefaultRenderersFactory(context)
                         .setMediaCodecSelector(selector).setEnableDecoderFallback(true))
                 .setMediaSourceFactory(new DefaultMediaSourceFactory(
-                        BuildConfig.MOBILE_VARIANT ? cachedHttp(context, source, pageUrl)
+                        BuildConfig.MOBILE_VARIANT && !live ? cachedHttp(context, source, pageUrl)
                                 : http(context, source, pageUrl)))
                 .build();
         TrackSelectionParameters.Builder tracks = player.getTrackSelectionParameters().buildUpon();

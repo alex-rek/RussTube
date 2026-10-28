@@ -3,6 +3,7 @@ package ru.tubetv.app;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
+import android.net.Uri;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
@@ -20,10 +21,16 @@ import android.widget.Toast;
 
 import java.net.HttpURLConnection;
 import java.net.Proxy;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 /** TV settings with persistent categories and a focused parameter column. */
 public final class TvSettingsActivity extends Activity {
+    private static final int EXPORT_LIBRARY_REQUEST = 7144;
+    private static final int IMPORT_LIBRARY_REQUEST = 7145;
     private static final String[] CATEGORIES = {
             "Общие", "Интерфейс", "Плеер", "Поиск", "Сеть", "О программе"
     };
@@ -45,6 +52,7 @@ public final class TvSettingsActivity extends Activity {
     private String proxyType;
     private String draftHost, draftPort, draftUser, draftPassword;
     private UpdateCoordinator updates;
+    private final ExecutorService libraryIo = Executors.newSingleThreadExecutor();
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
@@ -207,6 +215,78 @@ public final class TvSettingsActivity extends Activity {
                 () -> openChoices("Очистить историю просмотров",
                         new String[]{"За 1 час", "За 6 часов", "За 1 день", "Всю историю"},
                         -1, 2, choice -> screen.post(() -> confirmHistoryDeletion(choice))));
+        section("Подписки и Избранное");
+        row("Сохранить в файл", "JSON  ›", this::exportLibrary);
+        row("Загрузить из файла", "JSON  ›", this::importLibrary);
+        note("Файл совместим с RussTube Mobile. При загрузке новые записи добавляются к сохранённым.");
+    }
+
+    private void exportLibrary() {
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE).setType("application/json")
+                .putExtra(Intent.EXTRA_TITLE, "RussTube-library.json");
+        if (intent.resolveActivity(getPackageManager()) == null) {
+            libraryError("На устройстве нет приложения для выбора файлов");
+            return;
+        }
+        try { startActivityForResult(intent, EXPORT_LIBRARY_REQUEST); }
+        catch (RuntimeException error) { libraryError("Файловый менеджер недоступен"); }
+    }
+
+    private void importLibrary() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE).setType("application/json");
+        if (intent.resolveActivity(getPackageManager()) == null) {
+            libraryError("На устройстве нет приложения для выбора файлов");
+            return;
+        }
+        try { startActivityForResult(intent, IMPORT_LIBRARY_REQUEST); }
+        catch (RuntimeException error) { libraryError("Файловый менеджер недоступен"); }
+    }
+
+    private void writeLibrary(Uri uri) {
+        libraryIo.execute(() -> {
+            try (OutputStream output = getContentResolver().openOutputStream(uri, "wt")) {
+                if (output == null) throw new Exception("Файл недоступен для записи");
+                MobileLibraryTransfer.write(this, output);
+                runOnUiThread(() -> Toast.makeText(this, "Подписки и Избранное сохранены",
+                        Toast.LENGTH_LONG).show());
+            } catch (Exception error) { libraryError(error.getMessage()); }
+        });
+    }
+
+    private void readLibrary(Uri uri) {
+        libraryIo.execute(() -> {
+            try (InputStream input = getContentResolver().openInputStream(uri)) {
+                if (input == null) throw new Exception("Файл недоступен для чтения");
+                MobileLibraryTransfer.ImportData backup = MobileLibraryTransfer.read(input);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    AlertDialog dialog = new AlertDialog.Builder(this)
+                            .setTitle("Загрузить библиотеку?")
+                            .setMessage("Подписки: " + backup.channels.size() + ", избранное: "
+                                    + backup.favorites.size() + ". Существующие записи сохранятся.")
+                            .setNegativeButton("Отмена", null)
+                            .setPositiveButton("Загрузить", (ignored, which) ->
+                                    libraryIo.execute(() -> mergeLibrary(backup))).create();
+                    dialog.show();
+                    dialog.getButton(AlertDialog.BUTTON_NEGATIVE).requestFocus();
+                });
+            } catch (Exception error) { libraryError(error.getMessage()); }
+        });
+    }
+
+    private void mergeLibrary(MobileLibraryTransfer.ImportData backup) {
+        try {
+            MobileLibraryTransfer.Result added = MobileLibraryTransfer.merge(this, backup);
+            runOnUiThread(() -> Toast.makeText(this, "Добавлено: " + added.channels
+                    + " каналов, " + added.favorites + " видео", Toast.LENGTH_LONG).show());
+        } catch (Exception error) { libraryError(error.getMessage()); }
+    }
+
+    private void libraryError(String message) {
+        runOnUiThread(() -> Toast.makeText(this, "Библиотека: " + message,
+                Toast.LENGTH_LONG).show());
     }
 
     private void confirmHistoryDeletion(int choice) {
@@ -593,12 +673,19 @@ public final class TvSettingsActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
-        updates.onDestroy();
+        updates.onDestroy(); libraryIo.shutdown();
         super.onDestroy();
     }
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == EXPORT_LIBRARY_REQUEST || requestCode == IMPORT_LIBRARY_REQUEST) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                if (requestCode == EXPORT_LIBRARY_REQUEST) writeLibrary(data.getData());
+                else readLibrary(data.getData());
+            }
+            return;
+        }
         updates.onActivityResult(requestCode);
     }
 

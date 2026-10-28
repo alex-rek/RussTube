@@ -159,7 +159,8 @@ public final class AudioPlaybackService extends Service {
 
     @OptIn(markerClass = UnstableApi.class)
     private void startPlayer(String streamUrl, String streamMimeType, long position, float speed) {
-        player = PlaybackEngineFactory.create(this, source, pageUrl, trafficMode, targetHeight, true);
+        player = PlaybackEngineFactory.create(this, source, pageUrl, trafficMode, targetHeight,
+                true, playbackIntent != null && playbackIntent.getBooleanExtra("live", false));
         player.setWakeMode(C.WAKE_MODE_NETWORK);
         player.addListener(new Player.Listener() {
             @Override public void onPlayerError(PlaybackException error) { stopSelf(); }

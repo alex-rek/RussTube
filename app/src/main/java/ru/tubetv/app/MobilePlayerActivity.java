@@ -91,6 +91,7 @@ public final class MobilePlayerActivity extends Activity {
     private boolean started;
     private boolean focused = true;
     private boolean failed;
+    private int liveRetries;
     private boolean captionsDisabled = true;
     private boolean scrubbing;
     private boolean recorded;
@@ -458,7 +459,7 @@ public final class MobilePlayerActivity extends Activity {
         if (!started || player != null || streamUrl == null) return;
         try {
             player = PlaybackEngineFactory.create(this, video.source, video.pageUrl,
-                    false, 0, false);
+                    false, 0, false, video.isLive);
             Surface output = surface.getVideoSurface();
             if (output != null) player.setVideoSurface(output);
             player.addListener(new Player.Listener() {
@@ -469,7 +470,9 @@ public final class MobilePlayerActivity extends Activity {
                         errorText.setVisibility(View.GONE);
                         showControls();
                     } else if (state == Player.STATE_ENDED) {
-                        if (isFullscreen()) {
+                        if (video.isLive && liveRetries < 2) {
+                            scheduleLiveRetry();
+                        } else if (isFullscreen()) {
                             saveProgress();
                             finish();
                         } else showControls();
@@ -509,7 +512,11 @@ public final class MobilePlayerActivity extends Activity {
                             ? View.VISIBLE : View.GONE);
                 }
                 @Override public void onPlayerError(PlaybackException error) {
-                    showError("Ошибка воспроизведения: " + error.getErrorCodeName());
+                    if (BuildConfig.DEBUG) android.util.Log.w("RussTubeLivePlayback",
+                            "source=" + video.source + " code=" + error.getErrorCodeName(), error);
+                    if (video.isLive && error.errorCode >= 2000 && error.errorCode < 3000
+                            && liveRetries < 2) scheduleLiveRetry();
+                    else showError("Ошибка воспроизведения: " + error.getErrorCodeName());
                 }
             });
             player.setMediaItem(PlaybackEngineFactory.mediaItem(streamUrl, streamMimeType)
@@ -528,11 +535,30 @@ public final class MobilePlayerActivity extends Activity {
     }
 
     private void showError(String text) {
-        UnavailableVideoStore.add(this, video);
+        if (!video.isLive) UnavailableVideoStore.add(this, video);
         failed = true; updateScreenAwake();
         loading.setVisibility(View.GONE);
         errorText.setVisibility(View.VISIBLE);
         errorText.setText(text + "\nОткройте видео на платформе кнопкой ↗");
+    }
+
+    private void scheduleLiveRetry() {
+        if (!started || isFinishing() || liveRetries >= 2) return;
+        liveRetries++;
+        failed = false;
+        loading.setVisibility(View.VISIBLE);
+        errorText.setVisibility(View.GONE);
+        ui.postDelayed(() -> {
+            if (!started || isFinishing() || isDestroyed()) return;
+            if (player != null) {
+                player.clearVideoSurface();
+                player.release();
+                player = null;
+            }
+            streamUrl = null;
+            resumePosition = 0;
+            resolveStream();
+        }, 1500L * liveRetries);
     }
 
     private void toggleCaptions() {

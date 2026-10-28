@@ -1126,10 +1126,10 @@ public final class BrowseActivity extends Activity {
                 ImageView image = new ImageView(BrowseActivity.this);
                 image.setScaleType(ImageView.ScaleType.CENTER_CROP);
                 artwork.addView(image, new FrameLayout.LayoutParams(-1, -1));
-                TextView platform = cardLabel("", 11, Color.WHITE);
-                platform.setPadding(cardDp(7), 0, cardDp(7), 0);
-                platform.setBackgroundColor(Color.rgb(28, 31, 38));
-                FrameLayout.LayoutParams platformParams = new FrameLayout.LayoutParams(-2, cardDp(24), Gravity.TOP | Gravity.START);
+                ImageView platform = new ImageView(BrowseActivity.this);
+                platform.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                FrameLayout.LayoutParams platformParams = new FrameLayout.LayoutParams(
+                        cardDp(28), cardDp(28), Gravity.TOP | Gravity.START);
                 platformParams.setMargins(cardDp(8), cardDp(8), 0, 0); artwork.addView(platform, platformParams);
                 TextView duration = cardLabel("", 11, Color.WHITE);
                 duration.setPadding(cardDp(6), 0, cardDp(6), 0); duration.setBackgroundColor(Color.rgb(16, 18, 22));
@@ -1171,7 +1171,8 @@ public final class BrowseActivity extends Activity {
                         : item.source + " · " + VideoPresentation.channel(item));
                 holder.views.setText(channelsMode ? "" : VideoPresentation.views(item));
                 holder.date.setText(channelsMode ? "" : VideoPresentation.published(item));
-                holder.platform.setText(item.isLive && !channelsMode ? "● В ЭФИРЕ" : item.source);
+                holder.platform.setImageResource(SourceIcon.drawable(item.source));
+                holder.platform.setContentDescription(item.source);
                 holder.duration.setText(item.isLive ? "В ЭФИРЕ" : VideoPresentation.duration(item.durationMs));
                 holder.duration.setVisibility(item.isLive || item.durationMs > 0 ? View.VISIBLE : View.GONE);
                 WatchProgressStore.Progress watched = WatchProgressStore.get(BrowseActivity.this, item);
@@ -1202,14 +1203,15 @@ public final class BrowseActivity extends Activity {
     }
     private static final class Card {
         final ImageView image;
-        final TextView title, channel, views, date, platform, duration;
+        final TextView title, channel, views, date, duration;
+        final ImageView platform;
         final ProgressBar progress;
         final GradientDrawable normalBackground, focusedBackground, normalBorder, focusedBorder;
         VideoItem boundItem;
         boolean channelsMode;
         int revision;
         Card(ImageView image, TextView title, TextView channel, TextView views, TextView date,
-             TextView platform, TextView duration, ProgressBar progress,
+             ImageView platform, TextView duration, ProgressBar progress,
              GradientDrawable normalBackground, GradientDrawable focusedBackground,
              GradientDrawable normalBorder, GradientDrawable focusedBorder) {
             this.image = image; this.title = title; this.channel = channel; this.views = views;

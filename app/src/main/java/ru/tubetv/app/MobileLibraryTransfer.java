@@ -13,7 +13,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 
-/** Mobile library export/import. Resolved and expiring stream URLs are never saved. */
+/** Versioned Mobile/TV library format. Resolved and expiring stream URLs are never saved. */
 final class MobileLibraryTransfer {
     private static final int MAX_FILE_BYTES = 4 * 1024 * 1024;
     private static final int MAX_CHANNELS = 100;
