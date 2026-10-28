@@ -39,6 +39,109 @@ final class OkClient {
         return filtered;
     }
 
+    static List<VideoItem> liveCatalog() throws Exception {
+        return liveCatalog("livetv");
+    }
+
+    static List<VideoItem> liveCatalog(String category) throws Exception {
+        if (!"livetv".equals(category) && !"livemusic".equals(category)
+                && !"livenews".equals(category) && !"live_entertainment".equals(category))
+            throw new IllegalArgumentException("Категория эфиров OK");
+        String html = get("https://ok.ru/video/live/" + category,
+                REFERER, MAX_SEARCH_BYTES);
+        List<VideoItem> videos = parseLiveCatalog(html);
+        if (BuildConfig.DEBUG) android.util.Log.i("RussTubeTvLive",
+                "OK " + category + " bytes=" + html.length() + " cards=" + videos.size()
+                        + " seen=" + (html.indexOf("data-seen-params") >= 0)
+                        + " titles=" + (html.indexOf("video-card_n") >= 0));
+        return videos;
+    }
+
+    static List<VideoItem> newFilmsCatalog() throws Exception {
+        String html = get("https://ok.ru/video/novinki-kino", REFERER, MAX_SEARCH_BYTES);
+        List<VideoItem> films = parseFilmCatalog(html);
+        if (BuildConfig.DEBUG) android.util.Log.i("RussTubeTvLive", "OK new films=" + films.size());
+        return films;
+    }
+
+    static List<VideoItem> parseFilmCatalog(String html) {
+        List<VideoItem> result = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        java.util.regex.Matcher previews = java.util.regex.Pattern.compile(
+                "<img[^>]*class=\"vid-card_img\"[^>]*>").matcher(html);
+        java.util.regex.Pattern titlePattern = java.util.regex.Pattern.compile(
+                "<a[^>]*class=\"video-card_n[^\"]*\"[^>]*title=\"([^\"]+)\"[^>]*>");
+        java.util.regex.Pattern idPattern = java.util.regex.Pattern.compile("/video/([0-9]+)");
+        java.util.regex.Pattern durationPattern = java.util.regex.Pattern.compile(
+                "<div class=\"vid-card_duration\">([0-9]+):([0-9]{2}):([0-9]{2})</div>");
+        while (previews.find() && result.size() < 36) {
+            int end = Math.min(html.length(), previews.end() + 5000);
+            String card = html.substring(previews.end(), end);
+            java.util.regex.Matcher titleMatch = titlePattern.matcher(card);
+            java.util.regex.Matcher idMatch = idPattern.matcher(card);
+            java.util.regex.Matcher durationMatch = durationPattern.matcher(card);
+            if (!titleMatch.find() || !idMatch.find() || !durationMatch.find()) continue;
+            String id = idMatch.group(1);
+            if (!seen.add(id)) continue;
+            long durationMs = (Long.parseLong(durationMatch.group(1)) * 3600
+                    + Long.parseLong(durationMatch.group(2)) * 60
+                    + Long.parseLong(durationMatch.group(3))) * 1000;
+            String poster = decodeHtml(attribute(previews.group(), "src"));
+            if (!poster.startsWith("https://")) poster = "";
+            result.add(new VideoItem("OK", decodeHtml(titleMatch.group(1)), "", poster,
+                    "https://ok.ru/videoembed/" + id, "https://ok.ru/video/" + id,
+                    durationMs));
+        }
+        return result;
+    }
+
+    static List<VideoItem> parseLiveCatalog(String html) {
+        return parseCatalogCards(html, true);
+    }
+
+    static List<VideoItem> parseCatalogCards(String html, boolean live) {
+        List<VideoItem> result = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        java.util.regex.Matcher cards = java.util.regex.Pattern.compile(
+                "<div[^>]*data-seen-params=\"([^\"]+)\"[^>]*>").matcher(html);
+        List<Integer> starts = new ArrayList<>();
+        List<String> ids = new ArrayList<>();
+        while (cards.find()) {
+            try {
+                JSONObject data = new JSONObject(decodeHtml(cards.group(1))).optJSONObject("data");
+                String id = data == null ? "" : data.optString("entityId");
+                if (isVideoId(id) && seen.add(id)) { starts.add(cards.end()); ids.add(id); }
+            } catch (Exception ignored) { /* Ignore unrelated page components. */ }
+        }
+        for (int i = 0; i < starts.size() && result.size() < 36; i++) {
+            String chunk = html.substring(starts.get(i), i + 1 < starts.size()
+                    ? starts.get(i + 1) : html.length());
+            java.util.regex.Matcher titleMatch = java.util.regex.Pattern.compile(
+                    "<a[^>]*class=\"video-card_n[ \"][^>]*>([\\s\\S]*?)</a>").matcher(chunk);
+            if (!titleMatch.find()) continue;
+            String title = decodeHtml(stripTags(titleMatch.group(1))).trim();
+            if (title.isEmpty()) continue;
+            String poster = "";
+            String options = attribute(chunk, "data-options");
+            if (options != null) try { poster = new JSONObject(decodeHtml(options)).optString("poster"); }
+            catch (Exception ignored) { /* Thumbnail is optional. */ }
+            if (!poster.startsWith("https://")) poster = "";
+            String id = ids.get(i);
+            long durationMs = 0;
+            if (!live) {
+                java.util.regex.Matcher duration = java.util.regex.Pattern.compile(
+                        "(?<![0-9])([0-9]{1,2}):([0-9]{2}):([0-9]{2})(?![0-9])").matcher(chunk);
+                if (duration.find()) durationMs = (Long.parseLong(duration.group(1)) * 3600
+                        + Long.parseLong(duration.group(2)) * 60
+                        + Long.parseLong(duration.group(3))) * 1000;
+            }
+            result.add(new VideoItem("OK", title, "", poster,
+                    "https://ok.ru/videoembed/" + id, "https://ok.ru/video/" + id,
+                    durationMs).withChannel("", "", "", live));
+        }
+        return result;
+    }
+
     static List<VideoItem> parseSearchResults(String html) throws Exception {
         int component = html.indexOf("<video-search-result");
         int tagEnd = component < 0 ? -1 : html.indexOf('>', component);

@@ -27,6 +27,7 @@ import android.widget.ImageView;
 import android.widget.ImageButton;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
+import android.widget.HorizontalScrollView;
 import android.text.TextUtils;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -48,6 +49,7 @@ import java.util.Locale;
 /** Native, D-pad-first browsing shell with a persistent navigation rail. */
 public final class BrowseActivity extends Activity {
     private enum Page { HOME, SEARCH, RECOMMENDATIONS, LIVE, SUBSCRIPTIONS, CHANNELS, HISTORY, POPULAR, FILMS, FAVORITES }
+    private enum LiveGroup { ALL, RUTUBE_TV, VK_TV, OK_TV }
     private static final Page[] NAV_PAGES = {Page.HOME, Page.POPULAR, Page.RECOMMENDATIONS, Page.FILMS, Page.LIVE,
             Page.SUBSCRIPTIONS, Page.CHANNELS, Page.HISTORY, Page.FAVORITES};
     private static final String[] NAV_NAMES = {"Главная", "Популярное", "Рекомендации", "Фильмы", "В эфире",
@@ -57,6 +59,7 @@ public final class BrowseActivity extends Activity {
     private static final String[] QUALITY_LABELS = {"Любое", "720p+", "1080p+", "1440p+", "4K"};
     private static final int[] QUALITY_WIDTHS = {0, 1280, 1920, 2560, 3840};
     private Page page = Page.HOME;
+    private LiveGroup liveGroup = LiveGroup.ALL;
     private final ThreadPoolExecutor io = new ThreadPoolExecutor(4, 4, 0, TimeUnit.SECONDS,
             new ArrayBlockingQueue<>(128));
     private final List<Future<?>> jobs = new ArrayList<>();
@@ -106,6 +109,7 @@ public final class BrowseActivity extends Activity {
     private int lastPrefetchPosition;
     private long lastBackAt;
     private TextView clock;
+    private TextView calendar;
     private final Handler timer = new Handler(Looper.getMainLooper());
     private String pendingResultsEmptyText;
     private final Runnable renderResults = () -> {
@@ -121,7 +125,9 @@ public final class BrowseActivity extends Activity {
     };
     private final Runnable tick = new Runnable() {
         @Override public void run() {
-            clock.setText(new SimpleDateFormat("HH:mm\nEEE, d MMM", new Locale("ru")).format(new Date()));
+            Date now = new Date();
+            clock.setText(new SimpleDateFormat("HH:mm", new Locale("ru")).format(now));
+            calendar.setText(new SimpleDateFormat("EEE, d MMM", new Locale("ru")).format(now));
             timer.postDelayed(this, 30000);
         }
     };
@@ -144,6 +150,8 @@ public final class BrowseActivity extends Activity {
             try { page = Page.valueOf(state.getString("page", "HOME")); }
             catch (IllegalArgumentException ignored) { page = Page.HOME; }
             query.setText(state.getString("query", ""));
+            try { liveGroup = LiveGroup.valueOf(state.getString("live_group", "ALL")); }
+            catch (IllegalArgumentException ignored) { liveGroup = LiveGroup.ALL; }
             focusKey = state.getString("focus_key");
             focusPosition = state.getInt("focus_position", 0);
         }
@@ -160,7 +168,7 @@ public final class BrowseActivity extends Activity {
 
     private View createContent() {
         LinearLayout root = new LinearLayout(this);
-        root.setBackgroundColor(TvAppearancePreferences.background(this));
+        root.setBackgroundResource(TvAppearancePreferences.backgroundImage(this));
         rail = new LinearLayout(this);
         rail.setOrientation(LinearLayout.VERTICAL);
         rail.setPadding(0, dp(64), 0, dp(8));
@@ -189,19 +197,14 @@ public final class BrowseActivity extends Activity {
         content.setPadding(dp(76), dp(4), dp(20), dp(4));
         LinearLayout toolbar = new LinearLayout(this);
         toolbar.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout searchLaunch = new LinearLayout(this);
-        searchLaunch.setGravity(Gravity.CENTER_VERTICAL);
-        searchLaunch.setPadding(dp(12), 0, dp(12), 0);
-        searchLaunch.setBackgroundResource(R.drawable.search_field_background);
+        ImageView searchLaunch = new ImageView(this);
+        searchLaunch.setPadding(dp(10), dp(10), dp(10), dp(10));
+        searchLaunch.setImageDrawable(TvIcons.icon("search", Color.WHITE, dp(26)));
+        GradientDrawable searchCircle = new GradientDrawable();
+        searchCircle.setShape(GradientDrawable.OVAL);
+        searchCircle.setColor(TvAppearancePreferences.accent(this));
+        searchLaunch.setBackground(searchCircle);
         searchLaunch.setFocusable(true);
-        ImageView searchIcon = new ImageView(this);
-        searchIcon.setImageDrawable(TvIcons.icon("search", TvAppearancePreferences.accent(this), dp(23)));
-        searchLaunch.addView(searchIcon, new LinearLayout.LayoutParams(dp(30), dp(30)));
-        TextView searchHint = label("Поиск видео, каналов, тем…", 14,
-                TvAppearancePreferences.secondary(this));
-        searchHint.setSingleLine(true);
-        searchHint.setEllipsize(TextUtils.TruncateAt.END);
-        searchLaunch.addView(searchHint, new LinearLayout.LayoutParams(0, -1, 1));
         searchLaunch.setOnClickListener(v -> show(Page.SEARCH));
         searchLaunch.setOnKeyListener((view, keyCode, event) -> {
             if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT && event.getAction() == KeyEvent.ACTION_DOWN) {
@@ -210,30 +213,30 @@ public final class BrowseActivity extends Activity {
             return false;
         });
         searchLaunch.setOnFocusChangeListener((v, focused) -> {
-            if (focused) searchLaunch.setBackgroundColor(TvAppearancePreferences.focus(this));
-            else searchLaunch.setBackgroundResource(R.drawable.search_field_background);
+            GradientDrawable circle = new GradientDrawable();
+            circle.setShape(GradientDrawable.OVAL);
+            circle.setColor(focused ? TvAppearancePreferences.focus(this) : TvAppearancePreferences.accent(this));
+            circle.setStroke(dp(2), focused ? TvAppearancePreferences.accent(this) : Color.TRANSPARENT);
+            searchLaunch.setBackground(circle);
         });
         searchLaunch.setContentDescription("Поиск видео, каналов и тем");
-        toolbar.addView(searchLaunch, row(318, 42, 0, 0));
-        LinearLayout symbols = new LinearLayout(this);
-        symbols.setGravity(Gravity.CENTER);
-        String[] platformMarks = {"VK", "▶", "OK", "✦"};
-        for (String mark : platformMarks) {
-            TextView glyph = label(mark, 23, TvAppearancePreferences.accent(this));
-            glyph.setGravity(Gravity.CENTER);
-            glyph.setAlpha(.16f);
-            symbols.addView(glyph, new LinearLayout.LayoutParams(0, -1, 1));
-        }
-        symbols.setVisibility(TvAppearancePreferences.symbols(this) ? View.VISIBLE : View.GONE);
-        toolbar.addView(symbols, new LinearLayout.LayoutParams(0, -1, 1));
-        clock = label("", 12, Color.rgb(205, 210, 220));
+        toolbar.addView(searchLaunch, row(44, 44, 0, 0));
+        toolbar.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
+        LinearLayout timeAndDate = new LinearLayout(this);
+        timeAndDate.setOrientation(LinearLayout.VERTICAL);
+        timeAndDate.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
+        clock = label("", 21, TvAppearancePreferences.text(this));
         clock.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
-        toolbar.addView(clock, row(110, 44, 0, 0));
+        calendar = label("", 11, TvAppearancePreferences.secondary(this));
+        calendar.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        timeAndDate.addView(clock, new LinearLayout.LayoutParams(-1, dp(27)));
+        timeAndDate.addView(calendar, new LinearLayout.LayoutParams(-1, dp(17)));
+        toolbar.addView(timeAndDate, row(100, 44, 0, 0));
         ImageView brand = new ImageView(this);
         brand.setImageResource(R.drawable.tv_wordmark);
         brand.setScaleType(ImageView.ScaleType.FIT_CENTER);
         brand.setContentDescription("RussTubeTV");
-        toolbar.addView(brand, new LinearLayout.LayoutParams(dp(230), dp(46)));
+        toolbar.addView(brand, new LinearLayout.LayoutParams(dp(166), dp(44)));
         content.addView(toolbar, row(-1, 48, 0, 18));
         heading = label("", 24, Color.WHITE);
         heading.setTypeface(Typeface.DEFAULT_BOLD);
@@ -272,7 +275,11 @@ public final class BrowseActivity extends Activity {
         searchRow.addView(findButton, row(100, 42, 8, 0));
         content.addView(searchRow, row(-1, 48, 0, 6));
         actions = new LinearLayout(this);
-        content.addView(actions, row(-1, 40, 0, 10));
+        HorizontalScrollView actionScroller = new HorizontalScrollView(this);
+        actionScroller.setHorizontalScrollBarEnabled(false);
+        actionScroller.setFillViewport(false);
+        actionScroller.addView(actions, new HorizontalScrollView.LayoutParams(-2, -1));
+        content.addView(actionScroller, row(-1, 40, 0, 10));
         status = label("", 11, Color.rgb(161, 175, 195));
         content.addView(status, row(-1, 24, 0, 4));
         FrameLayout results = new FrameLayout(this);
@@ -285,6 +292,7 @@ public final class BrowseActivity extends Activity {
         grid.setVerticalSpacing(cardDp(16));
         grid.setPadding(cardDp(5), cardDp(5), cardDp(5), cardDp(10));
         grid.setClipToPadding(false);
+        grid.setClipChildren(false);
         grid.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         grid.setSelector(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
         grid.setDrawSelectorOnTop(true);
@@ -350,6 +358,7 @@ public final class BrowseActivity extends Activity {
 
     private void show(Page target) {
         if (target == page && !focusPending) rememberFocus();
+        if (target == Page.LIVE && page != Page.LIVE) liveGroup = LiveGroup.ALL;
         cancel();
         page = target;
         activeChannel = null;
@@ -404,6 +413,12 @@ public final class BrowseActivity extends Activity {
                 addAction("Документальные", () -> findFilms("документальный фильм"));
                 addAction("Мультфильмы", () -> findFilms("мультфильм полный"));
                 rebuildBaseItems();
+                if (MobileBrowsePreferences.sourceEnabled(this, "OK"))
+                    enqueue("OK", OkClient::newFilmsCatalog);
+                if (MobileBrowsePreferences.sourceEnabled(this, "VK VIDEO"))
+                    enqueue("VK VIDEO", () -> repository.search("VK VIDEO", "фильмы и сериалы"));
+                if (MobileBrowsePreferences.sourceEnabled(this, "RUTUBE"))
+                    enqueue("RUTUBE", RutubeTvCatalog::movies);
                 searchAll("полный фильм", false);
                 break;
             case SUBSCRIPTIONS:
@@ -425,16 +440,43 @@ public final class BrowseActivity extends Activity {
                 showChannels(); return;
             case LIVE:
                 heading.setText("В эфире");
-                description.setText("Активные трансляции выбранных платформ");
+                description.setText(liveGroup == LiveGroup.ALL
+                        ? "Прямые трансляции VK Видео, PeerTube и других площадок"
+                        : "Телеканалы · " + (liveGroup == LiveGroup.RUTUBE_TV ? "RUTUBE"
+                        : liveGroup == LiveGroup.VK_TV ? "VK Видео" : "OK.ru"));
+                liveGroupAction("Все эфиры", LiveGroup.ALL);
+                liveGroupAction("ТВ RUTUBE", LiveGroup.RUTUBE_TV);
+                liveGroupAction("ТВ VK Видео", LiveGroup.VK_TV);
+                liveGroupAction("ТВ OK.ru", LiveGroup.OK_TV);
+                if (liveGroup != LiveGroup.ALL) {
+                    String source = liveGroup == LiveGroup.RUTUBE_TV ? "RUTUBE"
+                            : liveGroup == LiveGroup.VK_TV ? "VK VIDEO" : "OK";
+                    if (!MobileBrowsePreferences.sourceEnabled(this, source)) {
+                        display("Площадка отключена в Настройки → Поиск."); return;
+                    }
+                    if (liveGroup == LiveGroup.RUTUBE_TV)
+                        enqueue(source, RutubeTvCatalog::load);
+                    if (liveGroup == LiveGroup.OK_TV)
+                        enqueue(source, OkClient::liveCatalog);
+                    enqueue(source, () -> repository.live(source, "телеканал прямой эфир"));
+                    enqueue(source, () -> repository.live(source, "тв онлайн"));
+                    break;
+                }
                 addAction("Новости", () -> searchLive("новости"));
                 addAction("Спорт", () -> searchLive("спорт"));
                 addAction("Музыка", () -> searchLive("музыка"));
-                if (MobileBrowsePreferences.enabledSources(this, true).length == 0) {
+                if (MobileBrowsePreferences.enabledSources(this, true).length == 0
+                        && !MobileBrowsePreferences.sourceEnabled(this, "OK")) {
                     display("Выбранные платформы не поддерживают эфиры. Откройте Настройки → Поиск.");
                     return;
                 }
                 if (MobileBrowsePreferences.sourceEnabled(this, PeerTubeClient.SOURCE))
                     enqueue(PeerTubeClient.SOURCE, () -> repository.live(PeerTubeClient.SOURCE, ""));
+                if (MobileBrowsePreferences.sourceEnabled(this, "OK")) {
+                    enqueue("OK", () -> OkClient.liveCatalog("livemusic"));
+                    enqueue("OK", () -> OkClient.liveCatalog("livenews"));
+                    enqueue("OK", () -> OkClient.liveCatalog("live_entertainment"));
+                }
                 searchAll("прямой эфир", true);
                 searchAll("24/7", true);
                 break;
@@ -461,7 +503,20 @@ public final class BrowseActivity extends Activity {
     }
 
     private void discover(String value) { query.setText(value); show(Page.SEARCH); }
-    private void searchLive(String value) { query.setText(value); show(Page.LIVE); submitSearch(); }
+    private void searchLive(String value) { liveGroup = LiveGroup.ALL; query.setText(value); show(Page.LIVE); submitSearch(); }
+    private void selectLiveGroup(LiveGroup group) {
+        liveGroup = group;
+        focusKey = null; focusPosition = 0; focusPending = true;
+        show(Page.LIVE);
+    }
+
+    private void liveGroupAction(String title, LiveGroup group) {
+        Button button = addAction(title, () -> selectLiveGroup(group));
+        if (group == liveGroup) {
+            button.setBackground(chipBackground(true));
+            button.setTextColor(TvAppearancePreferences.accent(this));
+        }
+    }
 
     private void findFilms(String value) {
         cancel(); candidates.clear(); items.clear(); baseItems.clear();
@@ -514,6 +569,12 @@ public final class BrowseActivity extends Activity {
             if (view.getTag() instanceof Card) {
                 Card card = (Card) view.getTag();
                 view.setBackground(focused ? card.focusedBackground : card.normalBackground);
+                view.setForeground(focused ? card.focusedBorder : card.normalBorder);
+                view.setElevation(focused ? cardDp(12) : 0);
+                if (android.os.Build.VERSION.SDK_INT >= 28) {
+                    view.setOutlineAmbientShadowColor(TvAppearancePreferences.accent(this));
+                    view.setOutlineSpotShadowColor(TvAppearancePreferences.accent(this));
+                }
                 card.title.setTextColor(TvAppearancePreferences.text(this));
                 int secondary = TvAppearancePreferences.secondary(this);
                 card.channel.setTextColor(secondary);
@@ -785,12 +846,30 @@ public final class BrowseActivity extends Activity {
         Button b = new Button(this);
         b.setText(text); b.setTextSize(13 * TvScalePreferences.get(this, TvScalePreferences.INTERFACE)); b.setAllCaps(false); b.setTextColor(Color.WHITE);
         b.setPadding(dp(12), 0, dp(12), 0); b.setMinimumWidth(0); b.setMinimumHeight(0);
-        b.setBackgroundColor(TvAppearancePreferences.surface(this));
-        b.setOnFocusChangeListener((v, focused) -> b.setBackgroundColor(
-                focused ? TvAppearancePreferences.focus(this)
-                        : TvAppearancePreferences.surface(this)));
+        b.setTextColor(TvAppearancePreferences.text(this));
+        b.setBackground(chipBackground(false));
+        b.setOnFocusChangeListener((v, focused) -> b.setBackground(chipBackground(focused)));
         b.setOnClickListener(v -> action.run());
         return b;
+    }
+
+    private GradientDrawable chipBackground(boolean focused) {
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(focused ? TvAppearancePreferences.focus(this)
+                : TvAppearancePreferences.surface(this));
+        background.setCornerRadius(dp(9));
+        background.setStroke(dp(1), focused ? TvAppearancePreferences.accent(this)
+                : (TvAppearancePreferences.accent(this) & 0x44ffffff));
+        return background;
+    }
+
+    private GradientDrawable cardBorder(boolean focused) {
+        GradientDrawable border = new GradientDrawable();
+        border.setColor(Color.TRANSPARENT);
+        border.setCornerRadius(cardDp(8));
+        border.setStroke(cardDp(focused ? 3 : 1), focused
+                ? TvAppearancePreferences.accent(this) : Color.TRANSPARENT);
+        return border;
     }
 
     private Button navigationButton(String text, String icon, Runnable action) {
@@ -804,6 +883,9 @@ public final class BrowseActivity extends Activity {
         button.setOnFocusChangeListener((view, focused) -> {
             GradientDrawable background = new GradientDrawable();
             background.setColor(focused ? TvAppearancePreferences.focus(this) : Color.TRANSPARENT);
+            background.setStroke(dp(2), focused ? TvAppearancePreferences.accent(this)
+                    : Color.TRANSPARENT);
+            background.setCornerRadius(dp(8));
             view.setBackground(background);
         });
         return button;
@@ -896,6 +978,7 @@ public final class BrowseActivity extends Activity {
     @Override public void onBackPressed() { goBack(); }
     @Override protected void onSaveInstanceState(Bundle state) {
         state.putString("page", page.name()); state.putString("query", query.getText().toString());
+        state.putString("live_group", liveGroup.name());
         state.putString("focus_key", focusKey);
         state.putInt("focus_position", focusPosition);
         super.onSaveInstanceState(state);
@@ -993,10 +1076,9 @@ public final class BrowseActivity extends Activity {
                 duration.setPadding(cardDp(6), 0, cardDp(6), 0); duration.setBackgroundColor(Color.rgb(16, 18, 22));
                 FrameLayout.LayoutParams durationParams = new FrameLayout.LayoutParams(-2, cardDp(22), Gravity.BOTTOM | Gravity.END);
                 durationParams.setMargins(0, 0, cardDp(8), cardDp(8)); artwork.addView(duration, durationParams);
-                TextView more = cardLabel("⋮", 23, Color.WHITE); more.setGravity(Gravity.CENTER);
-                more.setBackgroundColor(Color.rgb(28, 31, 38));
-                FrameLayout.LayoutParams moreParams = new FrameLayout.LayoutParams(cardDp(24), cardDp(28), Gravity.TOP | Gravity.END);
-                moreParams.setMargins(0, cardDp(8), cardDp(8), 0); artwork.addView(more, moreParams);
+                GradientDrawable normalBorder = cardBorder(false);
+                GradientDrawable focusedBorder = cardBorder(true);
+                card.setForeground(normalBorder);
                 ProgressBar progress = new ProgressBar(BrowseActivity.this, null, android.R.attr.progressBarStyleHorizontal);
                 progress.setMax(1000); progress.setProgressTintList(android.content.res.ColorStateList.valueOf(Color.rgb(229, 57, 53)));
                 progress.setProgressBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.TRANSPARENT));
@@ -1016,7 +1098,7 @@ public final class BrowseActivity extends Activity {
                 details.addView(date, new LinearLayout.LayoutParams(-1, cardDp(19)));
                 card.addView(details, new LinearLayout.LayoutParams(-1, -2));
                 holder = new Card(image, title, channel, views, date, platform, duration,
-                        progress, background, focusedBackground);
+                        progress, background, focusedBackground, normalBorder, focusedBorder);
                 card.setTag(holder); recycled = card;
             } else holder = (Card) recycled.getTag();
             VideoItem item = getItem(position);
@@ -1044,6 +1126,8 @@ public final class BrowseActivity extends Activity {
                 holder.title.setSingleLine(false); holder.title.setSelected(false);
                 holder.title.setEllipsize(TextUtils.TruncateAt.END);
                 recycled.setBackground(holder.normalBackground);
+                recycled.setForeground(holder.normalBorder);
+                recycled.setElevation(0);
                 recycled.setScaleX(1); recycled.setScaleY(1);
             }
             int width = grid.getColumnWidth();
@@ -1061,16 +1145,18 @@ public final class BrowseActivity extends Activity {
         final ImageView image;
         final TextView title, channel, views, date, platform, duration;
         final ProgressBar progress;
-        final GradientDrawable normalBackground, focusedBackground;
+        final GradientDrawable normalBackground, focusedBackground, normalBorder, focusedBorder;
         VideoItem boundItem;
         boolean channelsMode;
         int revision;
         Card(ImageView image, TextView title, TextView channel, TextView views, TextView date,
              TextView platform, TextView duration, ProgressBar progress,
-             GradientDrawable normalBackground, GradientDrawable focusedBackground) {
+             GradientDrawable normalBackground, GradientDrawable focusedBackground,
+             GradientDrawable normalBorder, GradientDrawable focusedBorder) {
             this.image = image; this.title = title; this.channel = channel; this.views = views;
             this.date = date; this.platform = platform; this.duration = duration; this.progress = progress;
             this.normalBackground = normalBackground; this.focusedBackground = focusedBackground;
+            this.normalBorder = normalBorder; this.focusedBorder = focusedBorder;
         }
     }
 }

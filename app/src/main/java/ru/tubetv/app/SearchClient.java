@@ -106,7 +106,7 @@ final class SearchClient {
         });
     }
 
-    private static JSONObject getJson(String address) throws Exception {
+    static JSONObject getJson(String address) throws Exception {
         BoundedHttpReader.checkInterrupted();
         HttpURLConnection connection = NetworkProxy.openConnection("RUTUBE", address);
         connection.setConnectTimeout(TIMEOUT_MS);

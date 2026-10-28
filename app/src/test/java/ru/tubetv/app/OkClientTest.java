@@ -139,6 +139,52 @@ public final class OkClientTest {
                 OkClient.decodeHtml("&quot;Солярис&quot; &amp; OK &#8212; &#x410;"));
     }
 
+    @Test
+    public void parsesLiveCatalogCardsAsLiveVideos() throws Exception {
+        String identity = htmlAttribute(new JSONObject().put("data",
+                new JSONObject().put("entityId", "2592237357790")).toString());
+        String html = "<div data-seen-params=\"" + identity + "\">"
+                + "<a class=\"video-card_n \" href=\"/video/2592237357790\">"
+                + "Прямой эфир Москва 24</a>"
+                + "<div data-options=\"" + htmlAttribute(new JSONObject()
+                .put("poster", "https://i.mycdn.me/live.jpg").toString()) + "\"></div>";
+        List<VideoItem> videos = OkClient.parseLiveCatalog(html);
+        assertEquals(1, videos.size());
+        assertTrue(videos.get(0).isLive);
+        assertEquals("Прямой эфир Москва 24", videos.get(0).title);
+        assertEquals("https://i.mycdn.me/live.jpg", videos.get(0).thumbnail);
+    }
+
+    @Test
+    public void parsesFilmCatalogDurationWithoutMarkingLive() throws Exception {
+        String identity = htmlAttribute(new JSONObject().put("data",
+                new JSONObject().put("entityId", "2592237357790")).toString());
+        String html = "<div data-seen-params=\"" + identity + "\">"
+                + "<a class=\"video-card_n \" href=\"/video/2592237357790\">Фильм</a>"
+                + "<span>1:42:01</span>";
+        List<VideoItem> videos = OkClient.parseCatalogCards(html, false);
+        assertEquals(1, videos.size());
+        assertFalse(videos.get(0).isLive);
+        assertEquals(6_121_000L, videos.get(0).durationMs);
+    }
+
+    @Test
+    public void parsesNewFilmsPageWithPreviewBeforeTitle() {
+        String html = "<img src=\"https://iv.okcdn.ru/preview?a=1&amp;b=2\" "
+                + "class=\"vid-card_img\"></img>"
+                + "<div class=\"vid-card_duration\">2:04:32</div>"
+                + "<a href=\"/video/16191164715373?from=catalog\" class=\"vid-card_overlay-link\"></a>"
+                + "<a class=\"video-card_n ellip\" href=\"#\" title=\"Электрический поцелуй\">"
+                + "Электрический поцелуй</a>";
+        List<VideoItem> videos = OkClient.parseFilmCatalog(html);
+        assertEquals(1, videos.size());
+        assertEquals("Электрический поцелуй", videos.get(0).title);
+        assertEquals("https://iv.okcdn.ru/preview?a=1&b=2", videos.get(0).thumbnail);
+        assertEquals("https://ok.ru/video/16191164715373", videos.get(0).pageUrl);
+        assertEquals(7_472_000L, videos.get(0).durationMs);
+        assertFalse(videos.get(0).isLive);
+    }
+
     private static String htmlAttribute(String value) {
         return value.replace("&", "&amp;")
                 .replace("\"", "&quot;")

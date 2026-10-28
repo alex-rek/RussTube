@@ -444,6 +444,14 @@ public final class PlayerActivity extends Activity {
             focusedHint.setVisibility(focused ? View.VISIBLE : View.INVISIBLE);
         });
         if (!mobileMode) {
+            String iconName = symbol.equals("↻") ? "player_repeat"
+                    : symbol.equals("↶10") ? "player_seek_back"
+                    : symbol.equals("10↷") ? "player_seek_forward"
+                    : symbol.equals("▶") ? "player_play"
+                    : symbol.equals("⊕") ? "player_subscribe"
+                    : symbol.equals("♡") ? "favorite"
+                    : symbol.equals("HQ") ? "player_quality" : null;
+            if (iconName != null) setTvPlayerIcon(button, iconName);
             if (large) {
                 GradientDrawable ring = new GradientDrawable();
                 ring.setColor(Color.TRANSPARENT);
@@ -475,6 +483,16 @@ public final class PlayerActivity extends Activity {
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(large ? 58 : 48), dp(large ? 58 : 48));
         params.rightMargin = dp(mobileMode ? 4 : 18); row.addView(button, params);
         return button;
+    }
+
+    private void setTvPlayerIcon(TextView button, String name) {
+        button.setText("");
+        button.setCompoundDrawablesWithIntrinsicBounds(
+                TvIcons.icon(name, Color.WHITE, dp(largeIcon(name) ? 32 : 29)), null, null, null);
+    }
+
+    private boolean largeIcon(String name) {
+        return "player_play".equals(name) || "player_pause".equals(name);
     }
 
     private void setCaptionControlVisible(boolean visible) {
@@ -733,10 +751,21 @@ public final class PlayerActivity extends Activity {
                 if (tvDuration != null) tvDuration.setText(formatTime(duration));
             }
         }
-        playState.setText(player.isPlaying() ? "Ⅱ" : "▶");
-        if (repeatState != null) repeatState.setText(player.getRepeatMode() == Player.REPEAT_MODE_ONE ? "↻¹" : "↻");
-        if (favoriteState != null) favoriteState.setText(FavoriteStore.contains(this, historyItem) ? "♥" : "♡");
-        if (subscriptionState != null) subscriptionState.setText(SubscriptionStore.contains(this, historyItem) ? "⊖" : "⊕");
+        if (mobileMode) playState.setText(player.isPlaying() ? "Ⅱ" : "▶");
+        else setTvPlayerIcon(playState, player.isPlaying() ? "player_pause" : "player_play");
+        if (repeatState != null) {
+            if (mobileMode) repeatState.setText(player.getRepeatMode() == Player.REPEAT_MODE_ONE ? "↻¹" : "↻");
+            else setTvPlayerIcon(repeatState, "player_repeat");
+        }
+        if (favoriteState != null) {
+            if (mobileMode) favoriteState.setText(FavoriteStore.contains(this, historyItem) ? "♥" : "♡");
+            else setTvPlayerIcon(favoriteState, "favorite");
+        }
+        if (subscriptionState != null) {
+            if (mobileMode) subscriptionState.setText(SubscriptionStore.contains(this, historyItem) ? "⊖" : "⊕");
+            else setTvPlayerIcon(subscriptionState, SubscriptionStore.contains(this, historyItem)
+                    ? "player_unsubscribe" : "player_subscribe");
+        }
         long now = System.currentTimeMillis();
         if (activityStarted && !audioMovedToBackground && now - lastSavedAt > 5000) {
             StateStore.savePlayerPosition(this, videoSource, videoIdentityUrl, position);

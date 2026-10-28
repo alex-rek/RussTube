@@ -40,6 +40,11 @@ final class TvAppearancePreferences {
         return theme(context) == 2 ? 0xffeaf2fa : theme(context) == 1 ? 0xff06152d : 0xff071426;
     }
 
+    static int backgroundImage(Context context) {
+        return theme(context) == 2 ? R.drawable.tv_theme_light
+                : theme(context) == 1 ? R.drawable.tv_theme_tricolor : R.drawable.tv_theme_cinema;
+    }
+
     static int surface(Context context) {
         return theme(context) == 2 ? 0xffd6e5f2 : theme(context) == 1 ? 0xff142d51 : 0xff10243b;
     }

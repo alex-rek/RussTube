@@ -52,7 +52,7 @@ public final class TvSettingsActivity extends Activity {
                 | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
         dashboardRoot = new LinearLayout(this);
         dashboardRoot.setOrientation(LinearLayout.VERTICAL);
-        dashboardRoot.setBackgroundColor(TvAppearancePreferences.background(this));
+        dashboardRoot.setBackgroundResource(TvAppearancePreferences.backgroundImage(this));
         dashboardRoot.setPadding(dp(24), dp(12), dp(24), dp(12));
         LinearLayout top = new LinearLayout(this);
         TextView title = text("Настройки", 24, Color.WHITE);
@@ -61,7 +61,7 @@ public final class TvSettingsActivity extends Activity {
         logo.setImageResource(R.drawable.tv_wordmark);
         logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
         logo.setContentDescription("RussTubeTV");
-        top.addView(logo, new LinearLayout.LayoutParams(dp(220), dp(48)));
+        top.addView(logo, new LinearLayout.LayoutParams(dp(166), dp(44)));
         dashboardRoot.addView(top);
         LinearLayout columns = new LinearLayout(this);
         categoryRail = new LinearLayout(this);
@@ -115,7 +115,13 @@ public final class TvSettingsActivity extends Activity {
         for (int i = 0; i < categoryRows.length; i++) {
             TextView row = categoryRows[i];
             boolean focused = row.hasFocus();
-            row.setBackgroundColor(rowBackground(focused));
+            GradientDrawable background = new GradientDrawable();
+            background.setColor(focused ? TvAppearancePreferences.focus(this)
+                    : TvAppearancePreferences.surface(this));
+            background.setCornerRadius(dp(8));
+            background.setStroke(dp(2), focused ? TvAppearancePreferences.accent(this)
+                    : Color.TRANSPARENT);
+            row.setBackground(background);
             row.setTextColor(i == category ? TvAppearancePreferences.accent(this)
                     : TvAppearancePreferences.text(this));
         }
