@@ -67,6 +67,7 @@ public final class BrowseActivity extends Activity {
     private final List<VideoItem> history = new ArrayList<>();
     private final Set<String> qualityRequested = new HashSet<>();
     private final List<Button> navigation = new ArrayList<>();
+    private Button settingsNavigation;
     private final FeedRepository repository = new FeedRepository();
     private int generation;
     private int pending;
@@ -95,6 +96,8 @@ public final class BrowseActivity extends Activity {
     private boolean menuExpanded;
     private int interfaceScaleStep;
     private int gridScaleStep;
+    private int appearanceTheme;
+    private boolean appearanceSymbols;
     private String focusKey;
     private int focusPosition;
     private boolean focusPending = true;
@@ -132,6 +135,8 @@ public final class BrowseActivity extends Activity {
                 getSharedPreferences("browse", 0).getInt("tv_quality_filter", 0)));
         interfaceScaleStep = TvScalePreferences.getStep(this, TvScalePreferences.INTERFACE);
         gridScaleStep = TvScalePreferences.getStep(this, TvScalePreferences.GRID);
+        appearanceTheme = TvAppearancePreferences.theme(this);
+        appearanceSymbols = TvAppearancePreferences.symbols(this);
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN
                 | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
         setContentView(createContent());
@@ -155,11 +160,11 @@ public final class BrowseActivity extends Activity {
 
     private View createContent() {
         LinearLayout root = new LinearLayout(this);
-        root.setBackgroundColor(Color.rgb(11, 15, 20));
+        root.setBackgroundColor(TvAppearancePreferences.background(this));
         rail = new LinearLayout(this);
         rail.setOrientation(LinearLayout.VERTICAL);
         rail.setPadding(0, dp(64), 0, dp(8));
-        rail.setBackgroundColor(Color.rgb(37, 42, 50));
+        rail.setBackgroundColor(TvAppearancePreferences.surface(this));
         for (int i = 0; i < NAV_NAMES.length; i++) {
             final Page target = NAV_PAGES[i];
             Button button = navigationButton(NAV_NAMES[i], NAV_ICONS[i], () -> {
@@ -171,9 +176,9 @@ public final class BrowseActivity extends Activity {
             rail.addView(button, new LinearLayout.LayoutParams(-1, dp(44)));
             navigation.add(button);
         }
-        Button settingsButton = navigationButton("Настройки", "settings", this::settings);
-        settingsButton.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-        rail.addView(settingsButton, new LinearLayout.LayoutParams(-1, dp(44)));
+        settingsNavigation = navigationButton("Настройки", "settings", this::settings);
+        settingsNavigation.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        rail.addView(settingsNavigation, new LinearLayout.LayoutParams(-1, dp(44)));
         menuContainer = new ScrollView(this);
         menuContainer.setFillViewport(true); menuContainer.setVerticalScrollBarEnabled(false);
         menuContainer.addView(rail, new ScrollView.LayoutParams(-1, -2));
@@ -187,8 +192,7 @@ public final class BrowseActivity extends Activity {
         ImageButton search = new ImageButton(this);
         search.setImageDrawable(TvIcons.icon("search", Color.WHITE, dp(24)));
         search.setPadding(dp(12), dp(12), dp(12), dp(12));
-        GradientDrawable circle = new GradientDrawable(); circle.setShape(GradientDrawable.OVAL);
-        circle.setColor(Color.rgb(229, 57, 53)); search.setBackground(circle);
+        search.setBackgroundColor(TvAppearancePreferences.surface(this));
         search.setOnClickListener(v -> show(Page.SEARCH));
         search.setOnKeyListener((view, keyCode, event) -> {
             if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT && event.getAction() == KeyEvent.ACTION_DOWN) {
@@ -196,17 +200,24 @@ public final class BrowseActivity extends Activity {
             }
             return false;
         });
-        search.setOnFocusChangeListener((v, focused) -> { circle.setStroke(dp(focused ? 2 : 0), Color.WHITE); });
+        search.setOnFocusChangeListener((v, focused) -> search.setBackgroundColor(
+                focused ? TvAppearancePreferences.focus(this)
+                        : TvAppearancePreferences.surface(this)));
         search.setContentDescription("Поиск видео");
         toolbar.addView(search, row(46, 46, 0, 0));
-        toolbar.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
+        TextView symbols = label("RUTUBE   VK Видео   OK   Дзен", 13,
+                TvAppearancePreferences.secondary(this));
+        symbols.setAlpha(.24f);
+        symbols.setVisibility(TvAppearancePreferences.symbols(this) ? View.VISIBLE : View.GONE);
+        toolbar.addView(symbols, new LinearLayout.LayoutParams(0, -1, 1));
         clock = label("", 12, Color.rgb(205, 210, 220));
         clock.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
         toolbar.addView(clock, row(110, 44, 0, 0));
-        ImageView mark = new ImageView(this); mark.setImageResource(R.drawable.ic_launcher);
-        toolbar.addView(mark, row(36, 36, 14, 0));
-        TextView brand = label("RussTubeTV", 24, Color.WHITE); brand.setTypeface(Typeface.DEFAULT_BOLD);
-        toolbar.addView(brand, row(150, 44, 0, 0));
+        ImageView brand = new ImageView(this);
+        brand.setImageResource(R.drawable.tv_banner);
+        brand.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        brand.setContentDescription("RussTubeTV");
+        toolbar.addView(brand, row(260, 48, 14, 0));
         content.addView(toolbar, row(-1, 44, 0, 20));
         heading = label("", 24, Color.WHITE);
         heading.setTypeface(Typeface.DEFAULT_BOLD);
@@ -339,7 +350,7 @@ public final class BrowseActivity extends Activity {
             case HOME:
             case RECOMMENDATIONS:
                 heading.setText(page == Page.HOME ? "Главная" : "Рекомендации");
-                description.setText("Видео по вашим интересам · RUTUBE, VK Видео, OK, Дзен, PeerTube");
+                description.setText("Новые видео подписок и рекомендации по вашим интересам");
                 addAction("Наука", () -> discover("наука"));
                 addAction("Путешествия", () -> discover("путешествия"));
                 addAction("Технологии", () -> discover("технологии"));
@@ -366,7 +377,7 @@ public final class BrowseActivity extends Activity {
                 break;
             case SEARCH:
                 heading.setText("Поиск");
-                description.setText("Единый поиск на пяти платформах");
+                description.setText("Поиск на выбранных в настройках платформах");
                 qualityButton = addAction(qualityButtonLabel(), this::cycleQualityFilter);
                 if (query.getText().toString().trim().length() >= 2) searchAll(query.getText().toString().trim(), false);
                 break;
@@ -384,7 +395,10 @@ public final class BrowseActivity extends Activity {
                 description.setText("Ваши каналы · сохранены на этом устройстве");
                 addAction("Каналы", this::showChannels);
                 List<VideoItem> channels = SubscriptionStore.load(this);
-                for (VideoItem channel : channels) enqueue(channel.source, () -> repository.channel(channel));
+                for (VideoItem channel : channels) {
+                    if (MobileBrowsePreferences.sourceEnabled(this, channel.source))
+                        enqueue(channel.source, () -> repository.channel(channel));
+                }
                 if (channels.isEmpty()) {
                     display("Подпишитесь на канал: удерживайте OK на карточке видео\nи выберите «Подписаться»."); return;
                 }
@@ -395,11 +409,16 @@ public final class BrowseActivity extends Activity {
                 showChannels(); return;
             case LIVE:
                 heading.setText("В эфире");
-                description.setText("Эфиры RUTUBE, VK Видео и PeerTube · активные трансляции");
+                description.setText("Активные трансляции выбранных платформ");
                 addAction("Новости", () -> searchLive("новости"));
                 addAction("Спорт", () -> searchLive("спорт"));
                 addAction("Музыка", () -> searchLive("музыка"));
-                enqueue(PeerTubeClient.SOURCE, () -> repository.live(PeerTubeClient.SOURCE, ""));
+                if (MobileBrowsePreferences.enabledSources(this, true).length == 0) {
+                    display("Выбранные платформы не поддерживают эфиры. Откройте Настройки → Поиск.");
+                    return;
+                }
+                if (MobileBrowsePreferences.sourceEnabled(this, PeerTubeClient.SOURCE))
+                    enqueue(PeerTubeClient.SOURCE, () -> repository.live(PeerTubeClient.SOURCE, ""));
                 searchAll("прямой эфир", true);
                 searchAll("24/7", true);
                 break;
@@ -479,15 +498,15 @@ public final class BrowseActivity extends Activity {
             if (view.getTag() instanceof Card) {
                 Card card = (Card) view.getTag();
                 view.setBackground(focused ? card.focusedBackground : card.normalBackground);
-                card.title.setTextColor(focused ? Color.BLACK : Color.WHITE);
-                int secondary = focused ? Color.DKGRAY : Color.rgb(174, 187, 204);
+                card.title.setTextColor(TvAppearancePreferences.text(this));
+                int secondary = TvAppearancePreferences.secondary(this);
                 card.channel.setTextColor(secondary);
                 card.views.setTextColor(secondary);
                 card.date.setTextColor(secondary);
                 card.title.setSingleLine(focused);
                 card.title.setEllipsize(focused ? TextUtils.TruncateAt.MARQUEE : TextUtils.TruncateAt.END);
                 card.title.setSelected(focused);
-                view.setScaleX(focused ? 1.05f : 1f); view.setScaleY(focused ? 1.05f : 1f);
+                view.setScaleX(1f); view.setScaleY(1f);
             }
         }
     }
@@ -513,8 +532,7 @@ public final class BrowseActivity extends Activity {
     }
 
     private void searchAll(String value, boolean live) {
-        String[] sources = live ? new String[]{"RUTUBE", "VK VIDEO", PeerTubeClient.SOURCE}
-                : FeedRepository.SOURCES;
+        String[] sources = MobileBrowsePreferences.enabledSources(this, live);
         for (String source : sources) enqueue(source,
                 () -> live ? repository.live(source, value) : repository.search(source, value));
     }
@@ -524,7 +542,8 @@ public final class BrowseActivity extends Activity {
     }
 
     private void enqueueSubscription(VideoItem channel) {
-        enqueue(channel.source, () -> repository.channel(channel), true);
+        if (MobileBrowsePreferences.sourceEnabled(this, channel.source))
+            enqueue(channel.source, () -> repository.channel(channel), true);
     }
 
     private void enqueue(String source, Load operation, boolean subscription) {
@@ -700,23 +719,26 @@ public final class BrowseActivity extends Activity {
         VideoSort.Mode[] modes = VideoSort.Mode.values();
         String[] labels = new String[modes.length];
         for (int i = 0; i < modes.length; i++) labels[i] = modes[i].label;
-        TextView title = label("Порядок видео", 22, Color.WHITE);
-        title.setPadding(dp(24), dp(16), dp(24), dp(8));
-        AlertDialog dialog = new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setCustomTitle(title)
-                .setSingleChoiceItems(new TvChoiceAdapter(this, labels), sortMode.ordinal(), (window, choice) -> {
+        android.app.Dialog dialog = new android.app.Dialog(this);
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        dialog.setContentView(new SideSelectionPanel(this, "Порядок видео", labels,
+                sortMode.ordinal(), choice -> {
                     sortMode = modes[choice];
                     getSharedPreferences("browse", 0).edit()
                             .putString("video_sort", sortMode.name()).apply();
                     if (sortButton != null) sortButton.setText(sortMode.label + "  ▾");
                     applySort();
-                    grid.setSelection(0);
                     display("Видео не найдены.");
-                    window.dismiss();
-                }).setNegativeButton("Отмена", null).create();
+                    dialog.dismiss();
+                    if (sortButton != null) sortButton.requestFocus();
+                }));
         dialog.show();
-        dialog.getWindow().setLayout(Math.min(dp(520),
-                getResources().getDisplayMetrics().widthPixels - dp(48)), -2);
+        dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+        dialog.getWindow().setDimAmount(.48f);
+        dialog.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+        dialog.getWindow().setGravity(Gravity.RIGHT);
+        dialog.getWindow().setLayout(Math.min(dp(500),
+                getResources().getDisplayMetrics().widthPixels * 45 / 100), -1);
     }
 
     private void applySort() {
@@ -747,7 +769,10 @@ public final class BrowseActivity extends Activity {
         Button b = new Button(this);
         b.setText(text); b.setTextSize(13 * TvScalePreferences.get(this, TvScalePreferences.INTERFACE)); b.setAllCaps(false); b.setTextColor(Color.WHITE);
         b.setPadding(dp(12), 0, dp(12), 0); b.setMinimumWidth(0); b.setMinimumHeight(0);
-        b.setBackgroundResource(R.drawable.navigation_item);
+        b.setBackgroundColor(TvAppearancePreferences.surface(this));
+        b.setOnFocusChangeListener((v, focused) -> b.setBackgroundColor(
+                focused ? TvAppearancePreferences.focus(this)
+                        : TvAppearancePreferences.surface(this)));
         b.setOnClickListener(v -> action.run());
         return b;
     }
@@ -762,7 +787,7 @@ public final class BrowseActivity extends Activity {
         button.setBackgroundColor(Color.TRANSPARENT);
         button.setOnFocusChangeListener((view, focused) -> {
             GradientDrawable background = new GradientDrawable();
-            background.setColor(focused ? Color.rgb(57, 63, 73) : Color.TRANSPARENT);
+            background.setColor(focused ? TvAppearancePreferences.focus(this) : Color.TRANSPARENT);
             view.setBackground(background);
         });
         return button;
@@ -774,9 +799,11 @@ public final class BrowseActivity extends Activity {
             boolean selected = NAV_PAGES[i] == page;
             button.setTextSize((selected ? 20 : 16) * TvScalePreferences.get(this, TvScalePreferences.INTERFACE));
             button.setTypeface(selected ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
-            button.setTextColor(selected ? Color.WHITE : Color.rgb(185, 191, 200));
+            button.setTextColor(selected ? TvAppearancePreferences.text(this)
+                    : TvAppearancePreferences.secondary(this));
             button.setCompoundDrawables(TvIcons.icon(NAV_ICONS[i],
-                    selected ? Color.rgb(229, 57, 53) : Color.rgb(175, 181, 191), dp(24)),
+                    selected ? TvAppearancePreferences.accent(this)
+                            : TvAppearancePreferences.secondary(this), dp(24)),
                     null, null, null);
         }
     }
@@ -790,7 +817,8 @@ public final class BrowseActivity extends Activity {
 
     private TextView label(String value, int size, int color) {
         TextView t = new TextView(this); t.setText(value);
-        t.setTextSize(size * TvScalePreferences.get(this, TvScalePreferences.INTERFACE)); t.setTextColor(color);
+        t.setTextSize(size * TvScalePreferences.get(this, TvScalePreferences.INTERFACE));
+        t.setTextColor(color == Color.WHITE ? TvAppearancePreferences.text(this) : color);
         t.setGravity(Gravity.CENTER_VERTICAL); return t;
     }
     private TextView cardLabel(String value, int size, int color) {
@@ -828,8 +856,14 @@ public final class BrowseActivity extends Activity {
     private void setMenuExpanded(boolean expanded) {
         menuExpanded = expanded;
         if (!expanded) lastBackAt = 0L;
-        menuContainer.setVisibility(expanded ? View.VISIBLE : View.GONE);
-        content.setPadding(dp(expanded ? 20 : 76), dp(4), dp(20), dp(4));
+        menuContainer.setVisibility(View.VISIBLE);
+        LinearLayout.LayoutParams menuSize = (LinearLayout.LayoutParams) menuContainer.getLayoutParams();
+        menuSize.width = dp(expanded ? 230 : 64);
+        menuContainer.setLayoutParams(menuSize);
+        for (int i = 0; i < navigation.size(); i++)
+            navigation.get(i).setText(expanded ? NAV_NAMES[i] : "");
+        settingsNavigation.setText(expanded ? "Настройки" : "");
+        content.setPadding(dp(20), dp(4), dp(20), dp(4));
     }
     @Override public boolean dispatchKeyEvent(KeyEvent event) {
         if (!menuExpanded && event.getKeyCode() == KeyEvent.KEYCODE_DPAD_LEFT
@@ -857,6 +891,12 @@ public final class BrowseActivity extends Activity {
         int newInterfaceStep = TvScalePreferences.getStep(this, TvScalePreferences.INTERFACE);
         int newGridStep = TvScalePreferences.getStep(this, TvScalePreferences.GRID);
         if (newInterfaceStep != interfaceScaleStep) {
+            rememberFocus();
+            recreate();
+            return;
+        }
+        if (appearanceTheme != TvAppearancePreferences.theme(this)
+                || appearanceSymbols != TvAppearancePreferences.symbols(this)) {
             rememberFocus();
             recreate();
             return;
@@ -911,9 +951,13 @@ public final class BrowseActivity extends Activity {
                 card.setOrientation(LinearLayout.VERTICAL);
                 card.setClipToOutline(true);
                 GradientDrawable background = new GradientDrawable();
-                background.setColor(Color.rgb(23, 26, 33)); background.setCornerRadius(cardDp(12)); card.setBackground(background);
+                background.setColor(TvAppearancePreferences.surface(BrowseActivity.this));
+                background.setCornerRadius(cardDp(8)); card.setBackground(background);
                 GradientDrawable focusedBackground = new GradientDrawable();
-                focusedBackground.setColor(Color.WHITE); focusedBackground.setCornerRadius(cardDp(12));
+                focusedBackground.setColor(TvAppearancePreferences.focus(BrowseActivity.this));
+                focusedBackground.setStroke(cardDp(2),
+                        TvAppearancePreferences.accent(BrowseActivity.this));
+                focusedBackground.setCornerRadius(cardDp(8));
                 FrameLayout artwork = new FrameLayout(BrowseActivity.this) {
                     @Override protected void onMeasure(int widthSpec, int heightSpec) {
                         int width = View.MeasureSpec.getSize(widthSpec);
@@ -944,7 +988,8 @@ public final class BrowseActivity extends Activity {
                 card.addView(artwork, new LinearLayout.LayoutParams(-1, -2));
                 LinearLayout details = new LinearLayout(BrowseActivity.this);
                 details.setOrientation(LinearLayout.VERTICAL); details.setPadding(cardDp(12), cardDp(10), cardDp(12), cardDp(10));
-                TextView title = cardLabel("", 14, Color.WHITE); title.setMaxLines(2);
+                TextView title = cardLabel("", 14, TvAppearancePreferences.text(BrowseActivity.this));
+                title.setMaxLines(2);
                 title.setEllipsize(TextUtils.TruncateAt.END);
                 details.addView(title, new LinearLayout.LayoutParams(-1, cardDp(40)));
                 TextView channel = cardLabel("", 12, Color.rgb(174, 187, 204)); channel.setSingleLine(true);
@@ -976,10 +1021,10 @@ public final class BrowseActivity extends Activity {
                 long total = watched.durationMs > 0 ? watched.durationMs : item.durationMs;
                 holder.progress.setVisibility(watched.positionMs > 0 && total > 0 ? View.VISIBLE : View.GONE);
                 if (total > 0) holder.progress.setProgress((int) Math.min(1000, watched.positionMs * 1000 / total));
-                holder.title.setTextColor(Color.WHITE);
-                holder.channel.setTextColor(Color.rgb(174, 187, 204));
-                holder.views.setTextColor(Color.rgb(174, 187, 204));
-                holder.date.setTextColor(Color.rgb(174, 187, 204));
+                holder.title.setTextColor(TvAppearancePreferences.text(BrowseActivity.this));
+                holder.channel.setTextColor(TvAppearancePreferences.secondary(BrowseActivity.this));
+                holder.views.setTextColor(TvAppearancePreferences.secondary(BrowseActivity.this));
+                holder.date.setTextColor(TvAppearancePreferences.secondary(BrowseActivity.this));
                 holder.title.setSingleLine(false); holder.title.setSelected(false);
                 holder.title.setEllipsize(TextUtils.TruncateAt.END);
                 recycled.setBackground(holder.normalBackground);

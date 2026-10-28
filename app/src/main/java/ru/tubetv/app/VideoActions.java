@@ -64,7 +64,34 @@ final class VideoActions {
                 }
             });
         }
+        if (!FavoriteStore.contains(activity, item)) {
+            labels.add("В избранное"); actions.add(() -> setFavorite(activity, item, true));
+        } else {
+            labels.add("Убрать из избранного"); actions.add(() -> setFavorite(activity, item, false));
+        }
         labels.add("Назад"); actions.add(() -> { });
+        if (!BuildConfig.MOBILE_VARIANT) {
+            SideSelectionPanel choices = new SideSelectionPanel(activity, item.title,
+                    labels.toArray(new String[0]), -1, index -> {
+                        dialog.dismiss();
+                        actions.get(index).run();
+                    });
+            dialog.setContentView(choices);
+            Window window = dialog.getWindow();
+            if (window != null) {
+                window.setBackgroundDrawableResource(android.R.color.transparent);
+                window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+                WindowManager.LayoutParams params = window.getAttributes();
+                params.dimAmount = .48f;
+                params.gravity = Gravity.END;
+                params.width = Math.max(Math.round(380 * density),
+                        activity.getResources().getDisplayMetrics().widthPixels * 38 / 100);
+                params.height = -1;
+                window.setAttributes(params);
+            }
+            dialog.show();
+            return;
+        }
         Button first = null;
         for (int i = 0; i < labels.size(); i++) {
             final int which = i;
@@ -107,6 +134,13 @@ final class VideoActions {
                 BuildConfig.MOBILE_VARIANT ? MobileBrowseActivity.class : BrowseActivity.class)
                 .putExtra("channel", VideoJson.encode(item).toString())); }
         catch (Exception error) { Toast.makeText(activity, "Не удалось открыть канал", Toast.LENGTH_SHORT).show(); }
+    }
+
+    private static void setFavorite(Activity activity, VideoItem item, boolean enabled) {
+        try { FavoriteStore.set(activity, item, enabled); }
+        catch (Exception error) {
+            Toast.makeText(activity, error.getMessage(), Toast.LENGTH_LONG).show();
+        }
     }
 
     static void play(Activity activity, VideoItem item) {

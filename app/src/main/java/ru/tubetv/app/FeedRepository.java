@@ -4,7 +4,12 @@ import java.util.ArrayList;
 import java.util.List;
 
 final class FeedRepository {
-    static final String[] SOURCES = {"RUTUBE", "VK VIDEO", PeerTubeClient.SOURCE, "OK", "ДЗЕН"};
+    static final String[] SOURCES = {"RUTUBE", "VK VIDEO", "OK", "ДЗЕН", PeerTubeClient.SOURCE};
+
+    static boolean supportsLive(String source) {
+        return "RUTUBE".equals(source) || "VK VIDEO".equals(source)
+                || PeerTubeClient.SOURCE.equals(source);
+    }
 
     List<VideoItem> live(String source, String query) throws Exception {
         return PeerTubeClient.SOURCE.equals(source) ? PeerTubeFeedClient.live(query)

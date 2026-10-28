@@ -81,6 +81,9 @@ public final class PlayerActivity extends Activity {
     private TextView captionText;
     private TextView wallClock;
     private SideSelectionPanel captionPanel;
+    private final java.util.ArrayDeque<SideSelectionPanel> captionParents = new java.util.ArrayDeque<>();
+    private final java.util.ArrayDeque<View> captionShades = new java.util.ArrayDeque<>();
+    private final java.util.ArrayDeque<View> captionOrigins = new java.util.ArrayDeque<>();
     private TextView focusedHint;
     private FrameLayout playerRoot;
     private LinearLayout controls;
@@ -136,6 +139,7 @@ public final class PlayerActivity extends Activity {
     private boolean playbackFailed;
     private boolean captionsDisabled = true;
     private boolean captionChoiceManual;
+    private boolean playbackPanelRoot;
     private boolean captionsMenuVisible;
     private boolean destroyed;
     private final Runnable openMenuFromLongCenter = () -> {
@@ -764,8 +768,10 @@ public final class PlayerActivity extends Activity {
                 String name = "ru".equals(code) ? "Русский" : "en".equals(code) ? "English"
                         : language.isEmpty() || "und".equals(language) ? "Субтитры"
                         : Locale.forLanguageTag(language).getDisplayLanguage(new Locale("ru"));
-                String label = format.label == null || format.label.isEmpty() ? name
-                        : name + " · " + format.label;
+                String supplied = format.label == null ? "" : format.label.trim();
+                String label = supplied.isEmpty() ? name
+                        : supplied.toLowerCase(Locale.ROOT).startsWith(name.toLowerCase(Locale.ROOT))
+                                ? supplied : name + " · " + supplied;
                 int order = "ru".equals(code) ? 0 : "en".equals(code) ? 1 : 2;
                 choices.add(new SubtitleChoice(group, track, label, order));
             }
@@ -809,19 +815,22 @@ public final class PlayerActivity extends Activity {
                             CaptionPreferences.setLanguage(this, choice);
                             captionChoiceManual = false;
                             selectPreferredCaption(player.getCurrentTracks());
-                        });
+                        }, () -> captionPanel.setChoiceLabel(extra, "Язык: "
+                                + CaptionPreferences.LANGUAGES[CaptionPreferences.language(this)]));
             } else if (index == extra + 1) {
                 openCaptionSetting("Размер субтитров", CaptionPreferences.SIZES,
                         CaptionPreferences.size(this), choice -> {
                             CaptionPreferences.setSize(this, choice);
                             captionText.setTextSize(CaptionPreferences.SIZE_SP[choice]);
-                        });
+                        }, () -> captionPanel.setChoiceLabel(extra + 1, "Размер: "
+                                + CaptionPreferences.SIZES[CaptionPreferences.size(this)]));
             } else if (index == extra + 2) {
                 openCaptionSetting("Цвет субтитров", CaptionPreferences.COLORS,
                         CaptionPreferences.color(this), choice -> {
                             CaptionPreferences.setColor(this, choice);
                             captionText.setTextColor(CaptionPreferences.COLOR_VALUES[choice]);
-                        });
+                        }, () -> captionPanel.setChoiceLabel(extra + 2, "Цвет: "
+                                + CaptionPreferences.COLORS[CaptionPreferences.color(this)]));
             } else if (!historyItem.channelUrl.isEmpty()) {
                 closeCaptionPanel();
                 VideoActions.openChannel(this, historyItem);
@@ -832,33 +841,56 @@ public final class PlayerActivity extends Activity {
     private interface CaptionAction { void apply(int index); }
 
     private void openCaptionSetting(String title, String[] labels, int selected,
-                                    CaptionAction action) {
+                                    CaptionAction action, Runnable refreshParent) {
         openCaptionPanel(title, labels, selected, index -> {
             action.apply(index);
             closeCaptionPanel();
-            showCaptionsMenu();
+            if (captionPanel != null) refreshParent.run();
         });
     }
 
     private void openCaptionPanel(String title, String[] labels, int selected,
                                   CaptionAction action) {
-        if (captionPanel != null) playerRoot.removeView(captionPanel);
+        captionsMenuVisible = true;
+        ui.removeCallbacks(hideControls);
+        if (captionPanel != null) {
+            View origin = getCurrentFocus();
+            captionOrigins.push(origin == null ? captionPanel : origin);
+            captionParents.push(captionPanel);
+            captionPanel.setDescendantFocusability(android.view.ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+            View shade = new View(this);
+            shade.setBackgroundColor(0x99000000);
+            playerRoot.addView(shade, new FrameLayout.LayoutParams(-1, -1));
+            captionShades.push(shade);
+        }
         captionPanel = new SideSelectionPanel(this, title, labels, selected, action::apply);
         int width = Math.min(dp(480), Math.round(getResources().getDisplayMetrics().widthPixels * .42f));
+        if (!captionParents.isEmpty()) width = Math.round(width * .90f);
         playerRoot.addView(captionPanel, new FrameLayout.LayoutParams(width, -1, Gravity.RIGHT));
-        captionPanel.setTranslationX(width);
-        captionPanel.animate().translationX(0).setDuration(180).start();
+        if (TvAppearancePreferences.animations(this)) {
+            captionPanel.setTranslationX(width);
+            captionPanel.animate().translationX(0).setDuration(180).start();
+        }
     }
 
     private void closeCaptionPanel() {
         if (captionPanel == null) return;
         SideSelectionPanel closing = captionPanel;
-        captionPanel = null;
-        closing.animate().translationX(closing.getWidth()).setDuration(160)
-                .withEndAction(() -> playerRoot.removeView(closing)).start();
-        captionsMenuVisible = false;
-        showControls();
-        captionsState.requestFocus();
+        playerRoot.removeView(closing);
+        if (!captionParents.isEmpty()) {
+            playerRoot.removeView(captionShades.pop());
+            captionPanel = captionParents.pop();
+            captionPanel.setDescendantFocusability(android.view.ViewGroup.FOCUS_AFTER_DESCENDANTS);
+            View origin = captionOrigins.pop();
+            if (origin.isAttachedToWindow()) origin.requestFocus();
+        } else {
+            captionPanel = null;
+            captionsMenuVisible = false;
+            showControls();
+            View target = playbackPanelRoot ? settingsState : captionsState;
+            playbackPanelRoot = false;
+            if (target != null) target.requestFocus();
+        }
     }
 
     private void toggleCaptions() {
@@ -986,7 +1018,90 @@ public final class PlayerActivity extends Activity {
         updatePlaybackSettingsUi();
     }
 
+    private void showTvPlaybackMenu() {
+        if (captionPanel != null) return;
+        playbackPanelRoot = true;
+        List<String> labels = new ArrayList<>();
+        List<Runnable> actions = new ArrayList<>();
+        if (!audioOnly) {
+            final int row = labels.size();
+            labels.add("Качество: " + qualityLabel() + "  ›");
+            actions.add(() -> {
+                int[] heights = {0, 360, 720, 1080};
+                String[] options = {"Авто", "до 360p", "до 720p", "до 1080p"};
+                int selected = 0;
+                for (int i = 0; i < heights.length; i++) if (qualityHeight == heights[i]) selected = i;
+                openCaptionSetting("Качество видео", options, selected,
+                        choice -> setQualityHeight(heights[choice]),
+                        () -> captionPanel.setChoiceLabel(row, "Качество: " + qualityLabel() + "  ›"));
+            });
+        }
+        final int speedRow = labels.size();
+        labels.add("Скорость: " + speedLabel(playbackSpeed) + "  ›");
+        actions.add(() -> {
+            String[] options = new String[PLAYBACK_SPEEDS.length];
+            int selected = 0;
+            for (int i = 0; i < options.length; i++) {
+                options[i] = speedLabel(PLAYBACK_SPEEDS[i]);
+                if (Math.abs(playbackSpeed - PLAYBACK_SPEEDS[i]) < .01f) selected = i;
+            }
+            openCaptionSetting("Скорость", options, selected,
+                    choice -> setPlaybackSpeed(PLAYBACK_SPEEDS[choice]),
+                    () -> captionPanel.setChoiceLabel(speedRow,
+                            "Скорость: " + speedLabel(playbackSpeed) + "  ›"));
+        });
+        if (!audioOnly) {
+            final int mirrorRow = labels.size();
+            labels.add("Отображение: " + (mirrored ? "Зеркальное" : "Обычное") + "  ›");
+            actions.add(() -> openCaptionSetting("Отображение",
+                    new String[]{"Обычное", "Зеркальное"}, mirrored ? 1 : 0,
+                    choice -> setMirrored(choice == 1),
+                    () -> captionPanel.setChoiceLabel(mirrorRow, "Отображение: "
+                            + (mirrored ? "Зеркальное" : "Обычное") + "  ›")));
+        }
+        final int repeatRow = labels.size();
+        labels.add("Повтор: " + (player != null && player.getRepeatMode() == Player.REPEAT_MODE_ONE
+                ? "Включён" : "Выключен") + "  ›");
+        actions.add(() -> openCaptionSetting("Повтор",
+                new String[]{"Выключен", "Включён"},
+                player != null && player.getRepeatMode() == Player.REPEAT_MODE_ONE ? 1 : 0,
+                choice -> {
+                    if (player != null) player.setRepeatMode(choice == 1
+                            ? Player.REPEAT_MODE_ONE : Player.REPEAT_MODE_OFF);
+                    updateControls();
+                }, () -> captionPanel.setChoiceLabel(repeatRow, "Повтор: "
+                        + (player != null && player.getRepeatMode() == Player.REPEAT_MODE_ONE
+                        ? "Включён" : "Выключен") + "  ›")));
+        labels.add("Субтитры  ›"); actions.add(this::showCaptionsMenu);
+        labels.add("Информация о видео  ›"); actions.add(this::showTvVideoInfo);
+        openCaptionPanel("Параметры видео", labels.toArray(new String[0]), -1,
+                index -> actions.get(index).run());
+    }
+
+    private String qualityLabel() {
+        return qualityHeight == 0 ? "Авто" : "до " + qualityHeight + "p";
+    }
+
+    private void showTvVideoInfo() {
+        String channel = VideoPresentation.channel(historyItem);
+        List<String> labels = new ArrayList<>();
+        labels.add("Источник: " + historyItem.source);
+        labels.add("Название: " + historyItem.title);
+        labels.add("Канал: " + channel + (historyItem.channelId.isEmpty() ? "" : "  ›"));
+        String views = VideoPresentation.views(historyItem);
+        if (!views.isEmpty()) labels.add(views);
+        openCaptionPanel("О видео", labels.toArray(new String[0]), -1, index -> {
+            if (index == 2 && !historyItem.channelId.isEmpty())
+                VideoActions.openChannel(this, historyItem);
+        });
+    }
+
     private void setPlaybackMenuVisible(boolean visible) {
+        if (!mobileMode) {
+            if (visible) showTvPlaybackMenu();
+            else if (captionPanel != null) closeCaptionPanel();
+            return;
+        }
         if (playbackMenu == null || settingsState == null) return;
         playbackMenuVisible = visible;
         playbackMenu.setVisibility(visible ? View.VISIBLE : View.GONE);

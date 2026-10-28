@@ -154,7 +154,7 @@ public final class MainActivity extends Activity {
         bar.setGravity(Gravity.CENTER_VERTICAL);
 
         ImageView logo = new ImageView(this);
-        logo.setImageResource(R.drawable.ic_launcher);
+        logo.setImageResource(R.mipmap.ic_launcher);
         logo.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
         bar.addView(logo, new LinearLayout.LayoutParams(dp(compact ? 48 : 70), dp(compact ? 44 : 60)));
 
@@ -200,7 +200,7 @@ public final class MainActivity extends Activity {
         LinearLayout historyHeader = new LinearLayout(this);
         historyHeader.setGravity(Gravity.CENTER_VERTICAL);
         ImageView historyLogo = new ImageView(this);
-        historyLogo.setImageResource(R.drawable.ic_launcher);
+        historyLogo.setImageResource(R.mipmap.ic_launcher);
         historyLogo.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
         historyHeader.addView(historyLogo,
                 new LinearLayout.LayoutParams(dp(compact ? 48 : 70), dp(compact ? 44 : 60)));

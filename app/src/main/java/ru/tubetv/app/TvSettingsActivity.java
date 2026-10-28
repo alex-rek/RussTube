@@ -10,10 +10,9 @@ import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.BaseAdapter;
 import android.widget.EditText;
 import android.widget.FrameLayout;
-import android.widget.GridView;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -22,7 +21,7 @@ import android.widget.Toast;
 import java.net.HttpURLConnection;
 import java.net.Proxy;
 
-/** Category dashboard following the TV settings navigation used by PeerTubeTV. */
+/** TV settings with persistent categories and a focused parameter column. */
 public final class TvSettingsActivity extends Activity {
     private static final String[] CATEGORIES = {
             "Общие", "Интерфейс", "Плеер", "Поиск", "Сеть", "О программе"
@@ -35,9 +34,9 @@ public final class TvSettingsActivity extends Activity {
     private View shade;
     private LinearLayout drawer;
     private LinearLayout drawerContent;
-    private GridView grid;
+    private LinearLayout categoryRail;
+    private final TextView[] categoryRows = new TextView[CATEGORIES.length];
     private int category = -1;
-    private int drawerWidth;
     private SideSelectionPanel selectionPanel;
     private View selectionOrigin;
     private EditText proxyHost, proxyPort, proxyUser, proxyPassword;
@@ -52,124 +51,81 @@ public final class TvSettingsActivity extends Activity {
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN
                 | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
         dashboardRoot = new LinearLayout(this);
-        LinearLayout root = dashboardRoot;
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(0xff0b0f14);
-        root.setPadding(dp(48), dp(28), dp(48), dp(24));
-        TextView title = new TextView(this);
-        title.setText("Настройки"); title.setTextSize(30 * TvScalePreferences.get(this, TvScalePreferences.INTERFACE)); title.setTextColor(Color.WHITE);
-        root.addView(title);
-        TextView hint = new TextView(this);
-        hint.setText("Выберите раздел · Назад — вернуться в каталог");
-        hint.setTextSize(14 * TvScalePreferences.get(this, TvScalePreferences.INTERFACE)); hint.setTextColor(0xffaeb9cc);
-        LinearLayout.LayoutParams hintParams = new LinearLayout.LayoutParams(-1, dp(40));
-        hintParams.bottomMargin = dp(16);
-        root.addView(hint, hintParams);
-        grid = new GridView(this);
-        grid.setNumColumns(3);
-        grid.setHorizontalSpacing(dp(16));
-        grid.setVerticalSpacing(dp(16));
-        grid.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
-        grid.setSelector(android.R.color.transparent);
-        grid.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
-        grid.setFocusable(true);
-        grid.setOnFocusChangeListener((view, focused) ->
-                updateCategorySelection(focused ? grid.getSelectedItemPosition() : -1));
-        grid.setAdapter(new BaseAdapter() {
-            @Override public int getCount() { return CATEGORIES.length; }
-            @Override public Object getItem(int position) { return CATEGORIES[position]; }
-            @Override public long getItemId(int position) { return position; }
-            @Override public View getView(int position, View reused, ViewGroup parent) {
-                LinearLayout tile = new LinearLayout(TvSettingsActivity.this);
-                tile.setOrientation(LinearLayout.VERTICAL);
-                tile.setGravity(Gravity.CENTER);
-                // GridView owns D-pad selection; focusable children swallow its key events.
-                tile.setFocusable(false);
-                tile.setBackground(tileBackground(false));
-                TextView symbol = new TextView(TvSettingsActivity.this);
-                symbol.setText(SYMBOLS[position]); symbol.setTextSize(34 * TvScalePreferences.get(TvSettingsActivity.this, TvScalePreferences.INTERFACE));
-                symbol.setTextColor(0xffe53935); symbol.setGravity(Gravity.CENTER);
-                tile.addView(symbol, new LinearLayout.LayoutParams(-1, dp(54)));
-                TextView label = new TextView(TvSettingsActivity.this);
-                label.setText(CATEGORIES[position]); label.setTextSize(19 * TvScalePreferences.get(TvSettingsActivity.this, TvScalePreferences.INTERFACE));
-                label.setTextColor(Color.WHITE); label.setGravity(Gravity.CENTER);
-                tile.addView(label, new LinearLayout.LayoutParams(-1, dp(48)));
-                tile.setOnClickListener(v -> openCategory(position));
-                return tile;
-            }
-        });
-        grid.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
-            @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view,
-                                                 int position, long id) {
-                updateCategorySelection(position);
-            }
-            @Override public void onNothingSelected(android.widget.AdapterView<?> parent) {
-                updateCategorySelection(-1);
-            }
-        });
-        grid.setOnItemClickListener((parent, view, position, id) -> openCategory(position));
-        root.addView(grid, new LinearLayout.LayoutParams(-1, 0, 1));
+        dashboardRoot.setOrientation(LinearLayout.VERTICAL);
+        dashboardRoot.setBackgroundColor(TvAppearancePreferences.background(this));
+        dashboardRoot.setPadding(dp(24), dp(12), dp(24), dp(12));
+        LinearLayout top = new LinearLayout(this);
+        TextView title = text("Настройки", 24, Color.WHITE);
+        top.addView(title, new LinearLayout.LayoutParams(0, dp(48), 1));
+        ImageView logo = new ImageView(this);
+        logo.setImageResource(R.drawable.tv_banner);
+        logo.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        logo.setContentDescription("RussTubeTV");
+        top.addView(logo, new LinearLayout.LayoutParams(dp(220), dp(48)));
+        dashboardRoot.addView(top);
+        LinearLayout columns = new LinearLayout(this);
+        categoryRail = new LinearLayout(this);
+        categoryRail.setOrientation(LinearLayout.VERTICAL);
+        categoryRail.setBackgroundColor(TvAppearancePreferences.surface(this));
+        for (int i = 0; i < CATEGORIES.length; i++) {
+            final int index = i;
+            TextView row = text(SYMBOLS[i] + "   " + CATEGORIES[i], 16, Color.WHITE);
+            row.setPadding(dp(12), dp(6), dp(8), dp(6));
+            row.setMinHeight(dp(48));
+            row.setFocusable(true);
+            row.setOnFocusChangeListener((v, focused) -> updateCategorySelection());
+            row.setOnClickListener(v -> openCategory(index));
+            categoryRows[i] = row;
+            categoryRail.addView(row, new LinearLayout.LayoutParams(-1, -2));
+        }
+        ScrollView categoryScroll = new ScrollView(this);
+        categoryScroll.setFillViewport(true);
+        categoryScroll.addView(categoryRail);
+        columns.addView(categoryScroll, new LinearLayout.LayoutParams(Math.min(dp(220),
+                Math.round(getResources().getDisplayMetrics().widthPixels * .23f)), -1));
+        drawer = new LinearLayout(this);
+        drawer.setOrientation(LinearLayout.VERTICAL);
+        drawer.setBackgroundColor(TvAppearancePreferences.surface(this));
+        LinearLayout.LayoutParams drawerParams = new LinearLayout.LayoutParams(0, -1, 1);
+        drawerParams.leftMargin = dp(14);
+        columns.addView(drawer, drawerParams);
+        dashboardRoot.addView(columns, new LinearLayout.LayoutParams(-1, 0, 1));
         screen = new FrameLayout(this);
-        screen.addView(root, new FrameLayout.LayoutParams(-1, -1));
+        screen.addView(dashboardRoot, new FrameLayout.LayoutParams(-1, -1));
         shade = new View(this);
         shade.setBackgroundColor(0x99000000);
         shade.setVisibility(View.GONE);
-        shade.setOnClickListener(v -> closePanel());
+        shade.setOnClickListener(v -> closeSelection());
         shade.setFocusable(false);
         screen.addView(shade, new FrameLayout.LayoutParams(-1, -1));
-        drawerWidth = Math.min(dp(520), Math.round(getResources().getDisplayMetrics().widthPixels * .48f));
-        drawer = new LinearLayout(this);
-        drawer.setOrientation(LinearLayout.VERTICAL);
-        drawer.setBackgroundColor(PANEL);
-        drawer.setElevation(dp(16));
-        drawer.setVisibility(View.GONE);
-        screen.addView(drawer, new FrameLayout.LayoutParams(drawerWidth, -1, Gravity.RIGHT));
         setContentView(screen);
-        grid.setSelection(0);
-        grid.requestFocus();
-        grid.post(() -> {
-            if (category < 0) {
-                grid.setSelection(0);
-                grid.requestFocus();
-                updateCategorySelection(0);
-            }
-        });
+        openCategory(state == null ? 0 : Math.max(0, Math.min(CATEGORIES.length - 1,
+                state.getInt("category", 0))));
+        categoryRows[category].requestFocus();
         if (state != null) {
-            int restored = state.getInt("category", -1);
-            if (restored >= 0 && restored < CATEGORIES.length)
-                screen.post(() -> openCategory(restored));
+            // A pending selection is deliberately discarded; saved values remain intact.
         }
     }
 
-    private GradientDrawable tileBackground(boolean focused) {
-        GradientDrawable result = new GradientDrawable();
-        result.setColor(focused ? Color.WHITE : 0xff171a21);
-        result.setCornerRadius(dp(14));
-        return result;
+    private int rowBackground(boolean focused) {
+        return focused ? TvAppearancePreferences.focus(this) : TvAppearancePreferences.surface(this);
     }
 
-    private void updateCategorySelection(int selected) {
-        for (int i = 0; i < grid.getChildCount(); i++) {
-            LinearLayout tile = (LinearLayout) grid.getChildAt(i);
-            boolean active = grid.hasFocus() && grid.getFirstVisiblePosition() + i == selected;
-            tile.setBackground(tileBackground(active));
-            ((TextView) tile.getChildAt(1)).setTextColor(active ? Color.BLACK : Color.WHITE);
+    private void updateCategorySelection() {
+        for (int i = 0; i < categoryRows.length; i++) {
+            TextView row = categoryRows[i];
+            boolean focused = row.hasFocus();
+            row.setBackgroundColor(rowBackground(focused));
+            row.setTextColor(i == category ? TvAppearancePreferences.accent(this)
+                    : TvAppearancePreferences.text(this));
         }
     }
 
     private void openCategory(int selected) {
         category = selected;
         if (selected == 4) loadProxyDraft();
-        shade.setVisibility(View.VISIBLE);
-        drawer.setVisibility(View.VISIBLE);
-        dashboardRoot.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
-        grid.setFocusable(false);
         renderPanel(0);
-        drawer.post(() -> {
-            if (category == selected) focusRow(0);
-        });
-        drawer.setTranslationX(drawerWidth);
-        drawer.animate().translationX(0).setDuration(180).start();
+        updateCategorySelection();
     }
 
     private void renderPanel(int focusIndex) {
@@ -182,8 +138,8 @@ public final class TvSettingsActivity extends Activity {
         TextView close = text("‹", 36, Color.WHITE);
         close.setGravity(Gravity.CENTER);
         close.setFocusable(true);
-        close.setBackground(tileBackground(false));
-        close.setOnClickListener(v -> closePanel());
+        close.setBackgroundColor(rowBackground(false));
+        close.setOnClickListener(v -> categoryRows[category].requestFocus());
         header.addView(close, new LinearLayout.LayoutParams(dp(52), dp(52)));
         drawer.addView(header);
         View divider = new View(this);
@@ -240,6 +196,23 @@ public final class TvSettingsActivity extends Activity {
     }
 
     private void interfaceSettings() {
+        section("Оформление");
+        int theme = TvAppearancePreferences.theme(this);
+        row("Тема", TvAppearancePreferences.THEMES[theme] + "  ›", () ->
+                openChoices("Тема", TvAppearancePreferences.THEMES, theme, 0, choice -> {
+                    TvAppearancePreferences.setTheme(this, choice);
+                    screen.post(this::recreate);
+                }));
+        boolean symbols = TvAppearancePreferences.symbols(this);
+        row("Фоновая символика", symbols ? "Включено" : "Выключено", () -> {
+            TvAppearancePreferences.setSymbols(this, !symbols);
+            renderPanel(1);
+        });
+        boolean animations = TvAppearancePreferences.animations(this);
+        row("Анимации", animations ? "Включены" : "Выключены", () -> {
+            TvAppearancePreferences.setAnimations(this, !animations);
+            renderPanel(2);
+        });
         section("Размеры");
         row("Масштаб интерфейса", TvScalePreferences.label(
                 TvScalePreferences.getStep(this, TvScalePreferences.INTERFACE)),
@@ -254,12 +227,13 @@ public final class TvSettingsActivity extends Activity {
         String[] sortLabels = new String[modes.length];
         for (int i = 0; i < modes.length; i++) sortLabels[i] = modes[i].label;
         row("Порядок видео", current.label, () -> openChoices("Порядок видео", sortLabels,
-                current.ordinal(), 2, choice -> getSharedPreferences("browse", 0).edit()
+                current.ordinal(), 5, choice -> getSharedPreferences("browse", 0).edit()
                         .putString("video_sort", modes[choice].name()).apply()));
         note("Выбор применяется к ленте после возврата в каталог.");
     }
 
     private void openScale(String title, String key) {
+        if (selectionPanel != null) return;
         selectionOrigin = getCurrentFocus();
         String[] labels = new String[TvScalePreferences.LAST_STEP + 1];
         for (int i = 0; i < labels.length; i++) labels[i] = TvScalePreferences.label(i);
@@ -267,23 +241,32 @@ public final class TvSettingsActivity extends Activity {
                 TvScalePreferences.getStep(this, key), selected -> {
                     TvScalePreferences.setStep(this, key, selected);
                     closeSelection();
-                    renderPanel(TvScalePreferences.GRID.equals(key) ? 1 : 0);
+                    renderPanel(TvScalePreferences.GRID.equals(key) ? 4 : 3);
                 });
-        int width = Math.min(dp(390), Math.round(getResources().getDisplayMetrics().widthPixels * .42f));
-        screen.addView(selectionPanel, new FrameLayout.LayoutParams(width, -1, Gravity.RIGHT));
-        selectionPanel.setTranslationX(width);
-        selectionPanel.animate().translationX(0).setDuration(180).start();
+        showSelection();
     }
 
     private void closeSelection() {
         if (selectionPanel == null) return;
         SideSelectionPanel panel = selectionPanel;
         selectionPanel = null;
-        panel.animate().translationX(panel.getWidth()).setDuration(160)
-                .withEndAction(() -> screen.removeView(panel)).start();
+        screen.removeView(panel);
+        shade.setVisibility(View.GONE);
+        dashboardRoot.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
         if (selectionOrigin != null && selectionOrigin.isAttachedToWindow())
             selectionOrigin.requestFocus();
         selectionOrigin = null;
+    }
+
+    private void showSelection() {
+        shade.setVisibility(View.VISIBLE);
+        dashboardRoot.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        int width = Math.min(dp(500), Math.round(getResources().getDisplayMetrics().widthPixels * .47f));
+        screen.addView(selectionPanel, new FrameLayout.LayoutParams(width, -1, Gravity.RIGHT));
+        if (TvAppearancePreferences.animations(this)) {
+            selectionPanel.setTranslationX(width);
+            selectionPanel.animate().translationX(0).setDuration(180).start();
+        }
     }
 
     private void playerSettings() {
@@ -326,35 +309,54 @@ public final class TvSettingsActivity extends Activity {
 
     private void openChoices(String title, String[] labels, int selected, int focusRow,
                              ChoiceAction action) {
+        if (selectionPanel != null) return;
         selectionOrigin = getCurrentFocus();
         selectionPanel = new SideSelectionPanel(this, title, labels, selected, choice -> {
             action.apply(choice);
             closeSelection();
             renderPanel(focusRow);
         });
-        int width = Math.min(dp(390), Math.round(getResources().getDisplayMetrics().widthPixels * .42f));
-        screen.addView(selectionPanel, new FrameLayout.LayoutParams(width, -1, Gravity.RIGHT));
-        selectionPanel.setTranslationX(width);
-        selectionPanel.animate().translationX(0).setDuration(180).start();
+        showSelection();
     }
 
     private void searchSettings() {
+        section("Платформы для поиска и эфиров");
+        int selected = MobileBrowsePreferences.enabledSources(this, false).length;
+        row("Платформы", selected + " выбрано  ›", this::openPlatforms);
         boolean enabled = getSharedPreferences("browse", 0)
                 .getBoolean("recommendations", true);
         section("Рекомендации");
         row("По истории просмотров", enabled ? "Включено" : "Выключено", () -> {
             getSharedPreferences("browse", 0).edit()
                     .putBoolean("recommendations", !enabled).apply();
-            renderPanel(0);
+            renderPanel(1);
         });
         boolean subscriptions = getSharedPreferences("browse", 0)
                 .getBoolean("recommend_subscriptions", true);
         row("По подпискам", subscriptions ? "Включено" : "Выключено", () -> {
             getSharedPreferences("browse", 0).edit()
                     .putBoolean("recommend_subscriptions", !subscriptions).apply();
-            renderPanel(1);
+            renderPanel(2);
         });
         note("История остаётся на устройстве. Поиск тем выполняется на видеоплатформах.");
+    }
+
+    private void openPlatforms() {
+        if (selectionPanel != null) return;
+        String[] names = {"RUTUBE", "VK Видео", "OK", "Дзен", "PeerTube"};
+        boolean[] saved = new boolean[FeedRepository.SOURCES.length];
+        for (int i = 0; i < saved.length; i++)
+            saved[i] = MobileBrowsePreferences.sourceEnabled(this, FeedRepository.SOURCES[i]);
+        selectionOrigin = getCurrentFocus();
+        selectionPanel = new SideSelectionPanel(this, "Платформы", names, saved, selected -> {
+            if (!MobileBrowsePreferences.setSources(this, selected)) {
+                Toast.makeText(this, "Выберите хотя бы одну платформу", Toast.LENGTH_LONG).show();
+                return;
+            }
+            closeSelection();
+            renderPanel(0);
+        }, this::closeSelection);
+        showSelection();
     }
 
     private void networkSettings() {
@@ -490,20 +492,21 @@ public final class TvSettingsActivity extends Activity {
         line.setPadding(dp(14), dp(8), dp(14), dp(8));
         line.setFocusable(true);
         line.setFocusableInTouchMode(true);
-        line.setBackground(tileBackground(false));
+        line.setBackgroundColor(rowBackground(false));
         TextView name = text(title, 17, Color.WHITE);
         line.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView state = text(value, 15, 0xffe53935);
+        TextView state = text(value, 15, TvAppearancePreferences.accent(this));
         state.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
         line.addView(state);
         line.setOnFocusChangeListener((v, focused) -> {
-            line.setBackground(tileBackground(focused));
-            name.setTextColor(focused ? Color.BLACK : Color.WHITE);
-            state.setTextColor(focused ? Color.BLACK : 0xffe53935);
+            line.setBackgroundColor(rowBackground(focused));
+            name.setTextColor(TvAppearancePreferences.text(this));
+            state.setTextColor(TvAppearancePreferences.accent(this));
         });
         line.setOnClickListener(v -> action.run());
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(58));
-        params.bottomMargin = dp(8);
+        line.setMinimumHeight(dp(58));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
+        params.bottomMargin = dp(3);
         drawerContent.addView(line, params);
     }
 
@@ -525,31 +528,20 @@ public final class TvSettingsActivity extends Activity {
         TextView result = new TextView(this);
         result.setText(value);
         result.setTextSize(size * TvScalePreferences.get(this, TvScalePreferences.INTERFACE));
-        result.setTextColor(color);
+        result.setTextColor(color == Color.WHITE ? TvAppearancePreferences.text(this)
+                : color == SECONDARY ? TvAppearancePreferences.secondary(this) : color);
         result.setGravity(Gravity.CENTER_VERTICAL);
         return result;
     }
 
     private void closePanel() {
-        if (category < 0) return;
-        int selected = category;
-        drawer.animate().translationX(drawerWidth).setDuration(160).withEndAction(() -> {
-            if (category < 0) {
-                drawer.setVisibility(View.GONE);
-                shade.setVisibility(View.GONE);
-            }
-        }).start();
-        category = -1;
-        dashboardRoot.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
-        grid.setFocusable(true);
-        grid.setSelection(selected);
-        grid.requestFocus();
-        grid.post(() -> updateCategorySelection(grid.getSelectedItemPosition()));
+        if (category >= 0) categoryRows[category].requestFocus();
     }
 
     @Override public void onBackPressed() {
         if (selectionPanel != null) closeSelection();
-        else if (category >= 0) closePanel();
+        else if (getCurrentFocus() != null && !categoryRail.isFocused()
+                && !categoryRail.hasFocus()) closePanel();
         else super.onBackPressed();
     }
 
