@@ -20,6 +20,7 @@ import android.widget.Toast;
 
 import java.net.HttpURLConnection;
 import java.net.Proxy;
+import java.util.concurrent.TimeUnit;
 
 /** TV settings with persistent categories and a focused parameter column. */
 public final class TvSettingsActivity extends Activity {
@@ -59,9 +60,11 @@ public final class TvSettingsActivity extends Activity {
         top.addView(title, new LinearLayout.LayoutParams(0, dp(48), 1));
         ImageView logo = new ImageView(this);
         logo.setImageResource(R.drawable.tv_wordmark);
-        logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        logo.setScaleType(ImageView.ScaleType.CENTER_CROP);
         logo.setContentDescription("RussTubeTV");
-        top.addView(logo, new LinearLayout.LayoutParams(dp(166), dp(44)));
+        LinearLayout.LayoutParams logoParams = new LinearLayout.LayoutParams(dp(190), dp(44));
+        logoParams.rightMargin = dp(8);
+        top.addView(logo, logoParams);
         dashboardRoot.addView(top);
         LinearLayout columns = new LinearLayout(this);
         categoryRail = new LinearLayout(this);
@@ -199,6 +202,32 @@ public final class TvSettingsActivity extends Activity {
                             UnavailableVideoStore.clear(this);
                             renderPanel(1);
                         }).show());
+        section("История просмотров");
+        row("Очистить историю просмотров", WatchHistoryStore.load(this).size() + " записей  ›",
+                () -> openChoices("Очистить историю просмотров",
+                        new String[]{"За 1 час", "За 6 часов", "За 1 день", "Всю историю"},
+                        -1, 2, choice -> screen.post(() -> confirmHistoryDeletion(choice))));
+    }
+
+    private void confirmHistoryDeletion(int choice) {
+        final String[] periods = {"последний час", "последние 6 часов", "последний день", "всё время"};
+        final long[] hours = {1, 6, 24, 0};
+        if (choice < 0 || choice >= hours.length) return;
+        AlertDialog confirmation = new AlertDialog.Builder(this)
+                .setTitle("Очистить историю просмотров?")
+                .setMessage("Удалить записи просмотра за " + periods[choice]
+                        + "? Позиции просмотра этих видео также будут удалены.")
+                .setNegativeButton("Отмена", (dialog, which) -> focusRow(2))
+                .setPositiveButton("Удалить", (dialog, which) -> {
+                    long cutoff = hours[choice] == 0 ? 0
+                            : System.currentTimeMillis() - TimeUnit.HOURS.toMillis(hours[choice]);
+                    int removed = WatchHistoryStore.deleteSince(this, cutoff);
+                    Toast.makeText(this, "Удалено записей: " + removed, Toast.LENGTH_SHORT).show();
+                    renderPanel(2);
+                }).create();
+        confirmation.setOnShowListener(dialog -> confirmation.getButton(AlertDialog.BUTTON_NEGATIVE)
+                .requestFocus());
+        confirmation.show();
     }
 
     private void interfaceSettings() {

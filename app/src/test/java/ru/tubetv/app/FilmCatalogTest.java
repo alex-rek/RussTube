@@ -11,8 +11,8 @@ public final class FilmCatalogTest {
                 "https://video.example/watch", duration);
     }
 
-    @Test public void keepsFullLengthVideosFromAnySource() {
-        assertTrue(FilmCatalog.includes(video("Кин-дза-дза", 130 * 60_000L)));
+    @Test public void keepsIdentifiableFilmsAndCuratedFilmTitles() {
+        assertTrue(FilmCatalog.includes(video("Кин-дза-дза", 130 * 60_000L), true));
         assertTrue(FilmCatalog.includes(video("Документальный фильм о море", 40 * 60_000L)));
     }
 
@@ -20,5 +20,9 @@ public final class FilmCatalogTest {
         assertFalse(FilmCatalog.includes(video("Фильм", 15 * 60_000L)));
         assertFalse(FilmCatalog.includes(video("Трейлер фильма", 50 * 60_000L)));
         assertFalse(FilmCatalog.includes(video("Movie review", 90 * 60_000L)));
+        assertFalse(FilmCatalog.includes(video("Полный контакт — новости", 120 * 60_000L), true));
+        assertFalse(FilmCatalog.includes(video("MobLand — 2 сезон 6 серия", 60 * 60_000L), true));
+        assertFalse(FilmCatalog.includes(video("Дорога к сердцу 4 серии из 4", 180 * 60_000L), true));
+        assertFalse(FilmCatalog.includes(video("Com Ports Have Graphics!", 90 * 60_000L)));
     }
 }

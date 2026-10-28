@@ -50,6 +50,7 @@ import java.util.Locale;
 public final class BrowseActivity extends Activity {
     private enum Page { HOME, SEARCH, RECOMMENDATIONS, LIVE, SUBSCRIPTIONS, CHANNELS, HISTORY, POPULAR, FILMS, FAVORITES }
     private enum LiveGroup { ALL, RUTUBE_TV, VK_TV, OK_TV }
+    private enum FilmGroup { ALL, RUTUBE, VK, OK }
     private static final Page[] NAV_PAGES = {Page.HOME, Page.POPULAR, Page.RECOMMENDATIONS, Page.FILMS, Page.LIVE,
             Page.SUBSCRIPTIONS, Page.CHANNELS, Page.HISTORY, Page.FAVORITES};
     private static final String[] NAV_NAMES = {"Главная", "Популярное", "Рекомендации", "Фильмы", "В эфире",
@@ -60,6 +61,7 @@ public final class BrowseActivity extends Activity {
     private static final int[] QUALITY_WIDTHS = {0, 1280, 1920, 2560, 3840};
     private Page page = Page.HOME;
     private LiveGroup liveGroup = LiveGroup.ALL;
+    private FilmGroup filmGroup = FilmGroup.ALL;
     private final ThreadPoolExecutor io = new ThreadPoolExecutor(4, 4, 0, TimeUnit.SECONDS,
             new ArrayBlockingQueue<>(128));
     private final List<Future<?>> jobs = new ArrayList<>();
@@ -152,6 +154,8 @@ public final class BrowseActivity extends Activity {
             query.setText(state.getString("query", ""));
             try { liveGroup = LiveGroup.valueOf(state.getString("live_group", "ALL")); }
             catch (IllegalArgumentException ignored) { liveGroup = LiveGroup.ALL; }
+            try { filmGroup = FilmGroup.valueOf(state.getString("film_group", "ALL")); }
+            catch (IllegalArgumentException ignored) { filmGroup = FilmGroup.ALL; }
             focusKey = state.getString("focus_key");
             focusPosition = state.getInt("focus_position", 0);
         }
@@ -234,9 +238,11 @@ public final class BrowseActivity extends Activity {
         toolbar.addView(timeAndDate, row(100, 44, 0, 0));
         ImageView brand = new ImageView(this);
         brand.setImageResource(R.drawable.tv_wordmark);
-        brand.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        brand.setScaleType(ImageView.ScaleType.CENTER_CROP);
         brand.setContentDescription("RussTubeTV");
-        toolbar.addView(brand, new LinearLayout.LayoutParams(dp(166), dp(44)));
+        LinearLayout.LayoutParams brandParams = new LinearLayout.LayoutParams(dp(190), dp(44));
+        brandParams.rightMargin = dp(8);
+        toolbar.addView(brand, brandParams);
         content.addView(toolbar, row(-1, 48, 0, 18));
         heading = label("", 24, Color.WHITE);
         heading.setTypeface(Typeface.DEFAULT_BOLD);
@@ -359,6 +365,7 @@ public final class BrowseActivity extends Activity {
     private void show(Page target) {
         if (target == page && !focusPending) rememberFocus();
         if (target == Page.LIVE && page != Page.LIVE) liveGroup = LiveGroup.ALL;
+        if (target == Page.FILMS && page != Page.FILMS) filmGroup = FilmGroup.ALL;
         cancel();
         page = target;
         activeChannel = null;
@@ -408,18 +415,30 @@ public final class BrowseActivity extends Activity {
                 break;
             case FILMS:
                 heading.setText("Фильмы");
-                description.setText("Полнометражные видео и добавленные вами фильмы");
+                description.setText(filmGroup == FilmGroup.ALL
+                        ? "Полнометражные видео и добавленные вами фильмы"
+                        : "Полнометражные видео · " + filmSource());
+                filmGroupAction("Все фильмы", FilmGroup.ALL);
+                filmGroupAction("Кино на RUTUBE", FilmGroup.RUTUBE);
+                filmGroupAction("Кино на VK", FilmGroup.VK);
+                filmGroupAction("Кино на OK.ru", FilmGroup.OK);
                 addAction("Художественные", () -> findFilms("художественный фильм"));
                 addAction("Документальные", () -> findFilms("документальный фильм"));
                 addAction("Мультфильмы", () -> findFilms("мультфильм полный"));
                 rebuildBaseItems();
-                if (MobileBrowsePreferences.sourceEnabled(this, "OK"))
-                    enqueue("OK", OkClient::newFilmsCatalog);
-                if (MobileBrowsePreferences.sourceEnabled(this, "VK VIDEO"))
+                if (filmGroup != FilmGroup.ALL
+                        && !MobileBrowsePreferences.sourceEnabled(this, filmSource())) {
+                    display("Площадка отключена в Настройки → Поиск."); return;
+                }
+                if ((filmGroup == FilmGroup.ALL || filmGroup == FilmGroup.OK)
+                        && MobileBrowsePreferences.sourceEnabled(this, "OK"))
+                    enqueue("OK", OkClient::newFilmsCatalog, false, true);
+                if ((filmGroup == FilmGroup.ALL || filmGroup == FilmGroup.VK)
+                        && MobileBrowsePreferences.sourceEnabled(this, "VK VIDEO"))
                     enqueue("VK VIDEO", () -> repository.search("VK VIDEO", "фильмы и сериалы"));
-                if (MobileBrowsePreferences.sourceEnabled(this, "RUTUBE"))
+                if ((filmGroup == FilmGroup.ALL || filmGroup == FilmGroup.RUTUBE)
+                        && MobileBrowsePreferences.sourceEnabled(this, "RUTUBE"))
                     enqueue("RUTUBE", RutubeTvCatalog::movies);
-                searchAll("полный фильм", false);
                 break;
             case SUBSCRIPTIONS:
                 heading.setText("Подписки");
@@ -518,11 +537,41 @@ public final class BrowseActivity extends Activity {
         }
     }
 
+    private String filmSource() {
+        switch (filmGroup) {
+            case RUTUBE: return "RUTUBE";
+            case VK: return "VK VIDEO";
+            case OK: return "OK";
+            default: return null;
+        }
+    }
+
+    private void selectFilmGroup(FilmGroup group) {
+        filmGroup = group;
+        focusKey = null; focusPosition = 0; focusPending = true;
+        show(Page.FILMS);
+    }
+
+    private void filmGroupAction(String title, FilmGroup group) {
+        Button button = addAction(title, () -> selectFilmGroup(group));
+        if (group == filmGroup) {
+            button.setBackground(chipBackground(true));
+            button.setTextColor(TvAppearancePreferences.accent(this));
+        }
+    }
+
     private void findFilms(String value) {
         cancel(); candidates.clear(); items.clear(); baseItems.clear();
         rebuildBaseItems();
         applySort();
-        searchAll(value, false);
+        if (filmGroup == FilmGroup.ALL) {
+            for (String source : new String[]{"RUTUBE", "VK VIDEO", "OK"})
+                if (MobileBrowsePreferences.sourceEnabled(this, source))
+                    enqueue(source, () -> repository.search(source, value));
+        } else if (MobileBrowsePreferences.sourceEnabled(this, filmSource())) {
+            String source = filmSource();
+            enqueue(source, () -> repository.search(source, value));
+        }
         display("Полнометражные видео пока не найдены.");
     }
 
@@ -624,6 +673,11 @@ public final class BrowseActivity extends Activity {
     }
 
     private void enqueue(String source, Load operation, boolean subscription) {
+        enqueue(source, operation, subscription, false);
+    }
+
+    private void enqueue(String source, Load operation, boolean subscription,
+                         boolean trustedFilmCollection) {
         int current = generation;
         boolean filmMode = page == Page.FILMS && activeChannel == null;
         pending++;
@@ -633,7 +687,7 @@ public final class BrowseActivity extends Activity {
             String error = null;
             try {
                 for (VideoItem item : operation.run()) {
-                    if (!filmMode || FilmCatalog.includes(item)) loaded.add(item);
+                    if (!filmMode || FilmCatalog.includes(item, trustedFilmCollection)) loaded.add(item);
                 }
             }
             catch (Exception failure) { error = source; }
@@ -670,7 +724,8 @@ public final class BrowseActivity extends Activity {
             Map<String, VideoItem> unique = new LinkedHashMap<>();
             if (page == Page.FILMS && activeChannel == null)
                 for (VideoItem item : SavedFilmsStore.load(this))
-                    unique.put(item.stableKey(), item);
+                    if (filmGroup == FilmGroup.ALL || filmSource().equals(item.source))
+                        unique.put(item.stableKey(), item);
             for (VideoItem item : candidates) unique.put(item.stableKey(), item);
             baseItems.addAll(unique.values());
             if (page == Page.POPULAR) Collections.sort(baseItems,
@@ -979,6 +1034,7 @@ public final class BrowseActivity extends Activity {
     @Override protected void onSaveInstanceState(Bundle state) {
         state.putString("page", page.name()); state.putString("query", query.getText().toString());
         state.putString("live_group", liveGroup.name());
+        state.putString("film_group", filmGroup.name());
         state.putString("focus_key", focusKey);
         state.putInt("focus_position", focusPosition);
         super.onSaveInstanceState(state);

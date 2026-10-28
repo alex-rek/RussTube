@@ -55,6 +55,7 @@ import java.util.concurrent.Executors;
 
 public final class PlayerActivity extends Activity {
     private static final long PLAYING_CONTROLS_TIMEOUT_MS = 3000L;
+    private static final long TV_CONTROLS_TIMEOUT_MS = 8000L;
     private static final int CONTROLS_HEIGHT_DP = 234;
     private static final float[] PLAYBACK_SPEEDS = {0.75f, 1f, 1.25f, 1.5f, 2f};
     private final ExecutorService resolver = Executors.newSingleThreadExecutor();
@@ -98,11 +99,16 @@ public final class PlayerActivity extends Activity {
     private TextView mirroredOption;
     private FrameLayout.LayoutParams controlsLayoutParams;
     private final Runnable hideControls = () -> {
+        if (!mobileMode && controls.hasFocus()) return;
+        dismissControls();
+    };
+
+    private void dismissControls() {
         controls.animate().cancel();
         controls.setTranslationY(0f);
-        controls.clearFocus();
         controls.setVisibility(View.GONE);
-    };
+        controls.clearFocus();
+    }
     private String streamUrl;
     private String streamMimeType;
     private List<MediaItem.SubtitleConfiguration> streamSubtitles = java.util.Collections.emptyList();
@@ -138,6 +144,7 @@ public final class PlayerActivity extends Activity {
     private boolean activityStarted;
     private boolean windowFocused = true;
     private boolean playbackFailed;
+    private boolean rutubeAlternativeAttempted;
     private boolean captionsDisabled = true;
     private boolean captionChoiceManual;
     private boolean playbackPanelRoot;
@@ -266,11 +273,12 @@ public final class PlayerActivity extends Activity {
 
         controls = new DraggableControlsLayout();
         controls.setOrientation(LinearLayout.VERTICAL);
-        controls.setPadding(dp(mobileMode ? 16 : 42), dp(mobileMode ? 20 : 12),
-                dp(mobileMode ? 16 : 42), dp(mobileMode ? 20 : 12));
+        controls.setPadding(dp(mobileMode ? 16 : 42), dp(mobileMode ? 20 : 8),
+                dp(mobileMode ? 16 : 42), dp(mobileMode ? 20 : 8));
         controls.setBackground(new android.graphics.drawable.GradientDrawable(
                 android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{Color.TRANSPARENT, 0xee000000, 0xfa000000}));
+                mobileMode ? new int[]{Color.TRANSPARENT, 0xee000000, 0xfa000000}
+                        : new int[]{Color.TRANSPARENT, 0xb8000b19, 0xed000b19}));
         controls.setVisibility(audioOnly ? View.VISIBLE : View.GONE);
 
         playbackMenu = createPlaybackMenu();
@@ -280,21 +288,23 @@ public final class PlayerActivity extends Activity {
                 mobileMode ? -2 : -1, mobileMode ? Gravity.BOTTOM : Gravity.END);
         root.addView(playbackMenu, menuParams);
 
-        TextView title = label(getIntent().getStringExtra("title"), isCompactPlayer() ? 20 : 28);
+        TextView title = label(getIntent().getStringExtra("title"),
+                mobileMode && isCompactPlayer() ? 20 : mobileMode ? 28 : 24);
         title.setMaxLines(2); title.setEllipsize(TextUtils.TruncateAt.END);
         title.setGravity(Gravity.BOTTOM);
-        controls.addView(title, new LinearLayout.LayoutParams(-1, dp(mobileMode ? 64 : 72)));
+        controls.addView(title, new LinearLayout.LayoutParams(-1, dp(mobileMode ? 64 : 60)));
         List<String> meta = new ArrayList<>();
         if (!mobileMode) meta.add(historyItem.source);
         meta.add(VideoPresentation.channel(historyItem));
         if (!VideoPresentation.views(historyItem).isEmpty()) meta.add(VideoPresentation.views(historyItem));
         if (!VideoPresentation.published(historyItem).isEmpty()) meta.add(VideoPresentation.published(historyItem));
-        TextView metadata = label(TextUtils.join(" · ", meta), isCompactPlayer() ? 13 : 16);
+        TextView metadata = label(TextUtils.join(" · ", meta),
+                mobileMode && isCompactPlayer() ? 13 : mobileMode ? 16 : 14);
         metadata.setTextColor(0xe0ffffff); metadata.setSingleLine(true);
-        controls.addView(metadata, new LinearLayout.LayoutParams(-1, dp(mobileMode ? 28 : 24)));
+        controls.addView(metadata, new LinearLayout.LayoutParams(-1, dp(mobileMode ? 28 : 22)));
         focusedHint = label("", 13);
         focusedHint.setVisibility(View.INVISIBLE);
-        controls.addView(focusedHint, new LinearLayout.LayoutParams(-1, dp(mobileMode ? 26 : 18)));
+        if (mobileMode) controls.addView(focusedHint, new LinearLayout.LayoutParams(-1, dp(26)));
 
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
@@ -383,16 +393,16 @@ public final class PlayerActivity extends Activity {
         if (!mobileMode) {
             LinearLayout timeRow = new LinearLayout(this);
             timeRow.setGravity(Gravity.CENTER_VERTICAL);
-            timeRow.addView(time, new LinearLayout.LayoutParams(0, dp(22), 1));
+            timeRow.addView(time, new LinearLayout.LayoutParams(0, dp(20), 1));
             tvDuration = label("—", 14);
             tvDuration.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
-            timeRow.addView(tvDuration, new LinearLayout.LayoutParams(0, dp(22), 1));
-            controls.addView(timeRow, new LinearLayout.LayoutParams(-1, dp(22)));
-            controls.addView(row, new LinearLayout.LayoutParams(-1, dp(76)));
+            timeRow.addView(tvDuration, new LinearLayout.LayoutParams(0, dp(20), 1));
+            controls.addView(timeRow, new LinearLayout.LayoutParams(-1, dp(20)));
+            controls.addView(row, new LinearLayout.LayoutParams(-1, dp(74)));
         }
 
         controlsLayoutParams = new FrameLayout.LayoutParams(-1,
-                dp(mobileMode ? CONTROLS_HEIGHT_DP : 288), Gravity.BOTTOM);
+                dp(mobileMode ? CONTROLS_HEIGHT_DP : 224), Gravity.BOTTOM);
         applyControlsLayout();
         root.addView(controls, controlsLayoutParams);
         playbackMenu.bringToFront();
@@ -432,13 +442,18 @@ public final class PlayerActivity extends Activity {
         button.setContentDescription(hint);
         button.setOnClickListener(v -> action.run());
         button.setOnFocusChangeListener((view, focused) -> {
+            if (focused) ui.removeCallbacks(hideControls);
+            else scheduleControlsHide();
             GradientDrawable background = new GradientDrawable();
-            background.setColor(focused ? (mobileMode ? 0xccdf3634
-                    : TvAppearancePreferences.focus(this)) : Color.TRANSPARENT);
-            if (!mobileMode && large) {
-                background.setStroke(dp(2), TvAppearancePreferences.accent(this));
+            background.setColor(mobileMode ? (focused ? 0xccdf3634 : Color.TRANSPARENT)
+                    : large ? (focused ? 0xb000bfc0 : 0x70006d78)
+                    : focused ? TvAppearancePreferences.focus(this) : Color.TRANSPARENT);
+            if (!mobileMode) {
+                background.setStroke(dp(2), focused || large
+                        ? TvAppearancePreferences.accent(this) : Color.TRANSPARENT);
                 background.setCornerRadius(dp(40));
-            } else background.setCornerRadius(dp(mobileMode ? 12 : 2));
+                view.setElevation(focused ? dp(6) : 0);
+            } else background.setCornerRadius(dp(12));
             view.setBackground(background);
             focusedHint.setText(focused ? hint : "");
             focusedHint.setVisibility(focused ? View.VISIBLE : View.INVISIBLE);
@@ -462,7 +477,7 @@ public final class PlayerActivity extends Activity {
             LinearLayout cell = new LinearLayout(this);
             cell.setOrientation(LinearLayout.VERTICAL);
             cell.setGravity(Gravity.CENTER_HORIZONTAL);
-            cell.addView(button, new LinearLayout.LayoutParams(dp(58), dp(50)));
+            cell.addView(button, new LinearLayout.LayoutParams(dp(54), dp(50)));
             String caption = hint.startsWith("Назад") ? "Назад"
                     : hint.startsWith("Вперёд") ? "Вперёд"
                     : hint.startsWith("Пауза") ? "Пауза / пуск"
@@ -477,7 +492,7 @@ public final class PlayerActivity extends Activity {
             captionLabel.setMaxLines(1);
             captionLabel.setEllipsize(TextUtils.TruncateAt.END);
             cell.addView(captionLabel, new LinearLayout.LayoutParams(-1, dp(24)));
-            row.addView(cell, new LinearLayout.LayoutParams(0, dp(76), 1));
+            row.addView(cell, new LinearLayout.LayoutParams(0, dp(74), 1));
             return button;
         }
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(large ? 58 : 48), dp(large ? 58 : 48));
@@ -487,8 +502,9 @@ public final class PlayerActivity extends Activity {
 
     private void setTvPlayerIcon(TextView button, String name) {
         button.setText("");
-        button.setCompoundDrawablesWithIntrinsicBounds(
-                TvIcons.icon(name, Color.WHITE, dp(largeIcon(name) ? 32 : 29)), null, null, null);
+        button.setCompoundDrawables(null, null, null, null);
+        button.setForegroundGravity(Gravity.CENTER);
+        button.setForeground(TvIcons.icon(name, Color.WHITE, dp(largeIcon(name) ? 32 : 29)));
     }
 
     private boolean largeIcon(String name) {
@@ -694,7 +710,16 @@ public final class PlayerActivity extends Activity {
             @Override public void onPlayerError(PlaybackException error) {
                 playbackFailed = true;
                 updateScreenAwake();
-                showError("Ошибка воспроизведения: " + error.getErrorCodeName());
+                if (BuildConfig.DEBUG) android.util.Log.w("RussTubePlayback", "source=" + videoSource
+                        + " streamHost=" + android.net.Uri.parse(streamUrl).getHost()
+                        + " code=" + error.getErrorCodeName()
+                        + " cause=" + (error.getCause() == null ? "none"
+                        : error.getCause().getClass().getSimpleName()));
+                if ("RUTUBE".equals(videoSource) && !rutubeAlternativeAttempted
+                        && error.errorCode >= 2000 && error.errorCode < 3000) {
+                    rutubeAlternativeAttempted = true;
+                    ui.post(PlayerActivity.this::retryRutubeAlternative);
+                } else showError("Ошибка воспроизведения: " + error.getErrorCodeName());
             }
         });
         player.setMediaItem(PlaybackEngineFactory.mediaItem(streamUrl, streamMimeType)
@@ -725,11 +750,12 @@ public final class PlayerActivity extends Activity {
     private void scheduleControlsHide() {
         ui.removeCallbacks(hideControls);
         if (audioOnly || playbackMenuVisible || captionsMenuVisible || scrubbing || dpadScrubbing
-                || timeline.hasFocus()
+                || timeline.hasFocus() || (!mobileMode && controls.hasFocus())
                 || controlsDragging || player == null
                 || controls.getVisibility() != View.VISIBLE
                 || player.getPlaybackState() == Player.STATE_ENDED) return;
-        if (player.isPlaying()) ui.postDelayed(hideControls, PLAYING_CONTROLS_TIMEOUT_MS);
+        if (player.isPlaying()) ui.postDelayed(hideControls,
+                mobileMode ? PLAYING_CONTROLS_TIMEOUT_MS : TV_CONTROLS_TIMEOUT_MS);
     }
 
     private void updateControls() {
@@ -1388,6 +1414,36 @@ public final class PlayerActivity extends Activity {
         message.setText(text + "\n\nOK — открыть официальный плеер");
     }
 
+    private void retryRutubeAlternative() {
+        if (destroyed || isFinishing() || player == null) return;
+        if (!historyItem.isLive) resumePosition = Math.max(0, player.getCurrentPosition());
+        player.release();
+        player = null;
+        loading.setVisibility(View.VISIBLE);
+        message.setVisibility(View.VISIBLE);
+        message.setText("Пробую другой поток RUTUBE…");
+        controls.setVisibility(View.GONE);
+        resolver.execute(() -> {
+            try {
+                PlaybackInfo alternative = new StreamResolver().resolveRutubeAlternative(
+                        getIntent().getStringExtra("resolver_url"), audioOnly);
+                runOnUiThread(() -> {
+                    if (destroyed || isFinishing()) return;
+                    streamUrl = alternative.streamUrl;
+                    streamMimeType = alternative.streamMimeType;
+                    streamSubtitles = alternative.subtitles;
+                    playbackFailed = false;
+                    startPlayerSafely();
+                });
+            } catch (Exception failure) {
+                runOnUiThread(() -> {
+                    if (!destroyed && !isFinishing())
+                        showError("Другой поток RUTUBE недоступен");
+                });
+            }
+        });
+    }
+
     @Override public boolean dispatchKeyEvent(KeyEvent event) {
         int keyCode = event.getKeyCode();
         if (keyCode == KeyEvent.KEYCODE_MENU) {
@@ -1399,9 +1455,15 @@ public final class PlayerActivity extends Activity {
         if (captionPanel != null || playbackMenuVisible) return super.dispatchKeyEvent(event);
         if (keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
             if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
-                showControls();
-                if (keyCode == KeyEvent.KEYCODE_DPAD_UP) playState.requestFocus();
-                else timeline.requestFocus();
+                if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN && controls.getVisibility() == View.VISIBLE
+                        && controls.hasFocus()) {
+                    ui.removeCallbacks(hideControls);
+                    dismissControls();
+                } else {
+                    showControls();
+                    if (keyCode == KeyEvent.KEYCODE_DPAD_UP) playState.requestFocus();
+                    else timeline.requestFocus();
+                }
             }
             return true;
         }

@@ -32,6 +32,10 @@ final class StreamResolver {
         return result;
     }
 
+    PlaybackInfo resolveRutubeAlternative(String resolverUrl, boolean audioOnly) throws Exception {
+        return inspectRutube(resolverUrl, audioOnly, true);
+    }
+
     MediaCapabilities inspect(String url) throws Exception {
         BoundedHttpReader.checkInterrupted();
         MediaCapabilities cached = CAPABILITIES.get(url);
@@ -276,6 +280,10 @@ final class StreamResolver {
     }
 
     private PlaybackInfo inspectRutube(String url, boolean audioOnly) throws Exception {
+        return inspectRutube(url, audioOnly, false);
+    }
+
+    private PlaybackInfo inspectRutube(String url, boolean audioOnly, boolean preferDash) throws Exception {
         String id = findRutubeId(url);
         String privateKey = queryParameter(url, "p");
         String optionsUrl = "https://rutube.ru/api/play/options/" + id
@@ -326,7 +334,8 @@ final class StreamResolver {
         }
         String stream;
         String mime;
-        if (audioOnly && dash != null && hasDashAudio(dash, referer, null)) {
+        if ((audioOnly && dash != null && hasDashAudio(dash, referer, null))
+                || (preferDash && dash != null)) {
             stream = dash;
             mime = "application/dash+xml";
         } else if (hls != null) {
@@ -334,6 +343,9 @@ final class StreamResolver {
                     ? findHlsAudioRendition(hls, referer, null) : null;
             stream = separateAudio != null ? separateAudio : hls;
             mime = "application/x-mpegURL";
+        } else if (dash != null) {
+            stream = dash;
+            mime = "application/dash+xml";
         } else {
             stream = fallback;
             mime = null;
