@@ -113,11 +113,16 @@ final class TvChannelStore {
     }
 
     static synchronized boolean initialDiscoveryDone(Context context, String source) {
-        return context.getSharedPreferences(PREFS, 0).getBoolean("discovered_" + source, false);
+        return context.getSharedPreferences(PREFS, 0).getBoolean(discoveryKey(source), false);
     }
 
     static synchronized void markInitialDiscovery(Context context, String source) {
-        context.getSharedPreferences(PREFS, 0).edit().putBoolean("discovered_" + source, true).commit();
+        context.getSharedPreferences(PREFS, 0).edit().putBoolean(discoveryKey(source), true).commit();
+    }
+
+    private static String discoveryKey(String source) {
+        // The first catalog version rejected keyed VK video URLs. Retry discovery once on upgrade.
+        return "VK VIDEO".equals(source) ? "discovered_VK VIDEO_keyed_v2" : "discovered_" + source;
     }
 
     static synchronized int merge(Context context, List<VideoItem> found) {
