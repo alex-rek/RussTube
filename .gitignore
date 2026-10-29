@@ -19,6 +19,8 @@ captures/
 # Packaged applications and signing material
 dist/
 screenshots/
+!docs/screenshots/
+!docs/screenshots/*.png
 *.apk
 *.aab
 *.apks
