@@ -83,6 +83,22 @@ public final class TvChannelStoreTest {
                 TvChannelStore.failureStatus("Эфир приостановлен"));
     }
 
+    @Test public void catalogKeepsCdnImageParametersRequiredForPlaybackCards() {
+        VideoItem channel = new VideoItem("OK", "Канал", "",
+                "https://iv.okcdn.ru/image.jpg?type=video&sig=abc%2Fdef",
+                "https://ok.ru/videoembed/123", "https://ok.ru/video/123")
+                .withChannel("", "", "", true);
+        TvChannelStore.Entry entry = TvChannelStore.fromVideo(channel);
+        assertNotNull(entry);
+        assertEquals(channel.thumbnail, entry.logoUrl);
+        assertEquals(channel.thumbnail, entry.video().thumbnail);
+        channel = new VideoItem("VK VIDEO", "Канал", "",
+                "http://insecure.example/image.jpg?token=secret",
+                "https://vkvideo.ru/video-12_34", "https://vkvideo.ru/video-12_34")
+                .withChannel("", "", "", true);
+        assertEquals("", TvChannelStore.fromVideo(channel).logoUrl);
+    }
+
     private static VideoItem live(String id, String title) {
         return new VideoItem("RUTUBE", title, "", "https://example.org/logo.png",
                 "https://rutube.ru/play/embed/" + id,

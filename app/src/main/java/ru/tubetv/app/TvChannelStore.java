@@ -121,8 +121,10 @@ final class TvChannelStore {
     }
 
     private static String discoveryKey(String source) {
-        // The first catalog version rejected keyed VK video URLs. Retry discovery once on upgrade.
-        return "VK VIDEO".equals(source) ? "discovered_VK VIDEO_keyed_v2" : "discovered_" + source;
+        // Earlier catalogs stripped thumbnail query parameters required by VK and OK CDNs.
+        // Refresh those catalogs once on upgrade without discarding saved channel settings.
+        return "VK VIDEO".equals(source) || "OK".equals(source)
+                ? "discovered_" + source + "_images_v3" : "discovered_" + source;
     }
 
     static synchronized int merge(Context context, List<VideoItem> found) {
@@ -308,7 +310,7 @@ final class TvChannelStore {
     static synchronized String exportJson(Context context) throws Exception {
         JSONObject root = new JSONObject().put("schema", 1);
         JSONArray data = new JSONArray();
-        for (Entry entry : load(context)) data.put(encode(entry));
+        for (Entry entry : load(context)) data.put(encode(entry, true));
         return root.put("channels", data).toString(2);
     }
 
@@ -320,9 +322,12 @@ final class TvChannelStore {
         JSONArray data = root.getJSONArray("channels");
         int added = 0;
         boolean changed = false;
+        Set<String> imageSources = new HashSet<>();
         for (int i = 0; i < data.length(); i++) {
             Entry incoming = decodeEntry(data.optJSONObject(i));
             if (incoming == null) continue;
+            if ("VK VIDEO".equals(incoming.source) || "OK".equals(incoming.source))
+                imageSources.add(incoming.source);
             Entry existing = find(entries, incoming.source, incoming.id);
             if (existing == null) {
                 if (entries.size() >= LIMIT) continue;
@@ -331,7 +336,10 @@ final class TvChannelStore {
             } else {
                 existing.pageUrl = incoming.pageUrl;
                 existing.title = incoming.title;
-                existing.logoUrl = incoming.logoUrl;
+                // Portable exports omit temporary CDN signatures. Keep a usable
+                // local thumbnail until the next catalog refresh replaces it.
+                if (existing.logoUrl.isEmpty() || incoming.logoUrl.contains("?"))
+                    existing.logoUrl = incoming.logoUrl;
                 existing.channelId = incoming.channelId;
                 existing.channelName = incoming.channelName;
                 existing.channelUrl = incoming.channelUrl;
@@ -344,7 +352,12 @@ final class TvChannelStore {
             }
             changed = true;
         }
-        if (changed) save(context, entries);
+        if (changed) {
+            save(context, entries);
+            SharedPreferences.Editor editor = context.getSharedPreferences(PREFS, 0).edit();
+            for (String source : imageSources) editor.remove(discoveryKey(source));
+            editor.apply();
+        }
         return added;
     }
 
@@ -356,17 +369,20 @@ final class TvChannelStore {
 
     private static void save(Context context, List<Entry> entries) {
         JSONArray data = new JSONArray();
-        try { for (Entry entry : entries) data.put(encode(entry)); }
+        try { for (Entry entry : entries) data.put(encode(entry, false)); }
         catch (Exception error) { throw new IllegalStateException(error); }
         if (!context.getSharedPreferences(PREFS, 0).edit()
                 .putString("entries", data.toString()).commit())
             throw new IllegalStateException("Не удалось сохранить каталог телеканалов");
     }
 
-    private static JSONObject encode(Entry entry) throws Exception {
+    private static JSONObject encode(Entry entry, boolean portable) throws Exception {
         return new JSONObject().put("source", entry.source).put("id", entry.id)
                 .put("page", entry.pageUrl).put("title", entry.title)
-                .put("logo", entry.logoUrl).put("order", entry.order)
+                // Signed CDN parameters can contain temporary credentials. They stay in
+                // local storage for image loading but never enter an exported catalog.
+                .put("logo", portable ? safePage(entry.logoUrl) : entry.logoUrl)
+                .put("order", entry.order)
                 .put("favorite", entry.favorite).put("hidden", entry.hidden)
                 .put("customTitle", entry.customTitle)
                 .put("channelId", entry.channelId).put("channelName", entry.channelName)
@@ -417,7 +433,15 @@ final class TvChannelStore {
     }
 
     private static String safeImage(String address) {
-        return safePage(address);
+        if (address == null || address.length() > 2048) return "";
+        try {
+            URI uri = new URI(address);
+            if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getUserInfo() != null
+                    || uri.getHost() == null || uri.getPort() != -1) return "";
+            String base = new URI("https", null, uri.getHost(), -1,
+                    uri.getPath(), null, null).toString();
+            return base + (uri.getRawQuery() == null ? "" : "?" + uri.getRawQuery());
+        } catch (Exception ignored) { return ""; }
     }
 
     private static String safePage(String address) {
