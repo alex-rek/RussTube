@@ -123,10 +123,10 @@ final class VideoActions {
                 window.setAttributes(params);
             }
             dialog.show();
-            if (TvAppearancePreferences.animations(activity)) {
+            int duration = TvAppearancePreferences.animationDurationMs(activity);
+            if (duration > 0) {
                 choices.setTranslationX(Math.round(380 * density));
-                choices.setAlpha(.82f);
-                choices.animate().translationX(0).alpha(1f).setDuration(340)
+                choices.animate().translationX(0).setDuration(duration)
                         .setInterpolator(new android.view.animation.DecelerateInterpolator(1.5f)).start();
             }
             return;

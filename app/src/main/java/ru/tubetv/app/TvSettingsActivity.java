@@ -77,7 +77,7 @@ public final class TvSettingsActivity extends Activity {
         LinearLayout columns = new LinearLayout(this);
         categoryRail = new LinearLayout(this);
         categoryRail.setOrientation(LinearLayout.VERTICAL);
-        categoryRail.setBackgroundColor(TvAppearancePreferences.surface(this));
+        categoryRail.setBackgroundColor(TvAppearancePreferences.panelSurface(this));
         for (int i = 0; i < CATEGORIES.length; i++) {
             final int index = i;
             TextView row = text(SYMBOLS[i] + "   " + CATEGORIES[i], 16, Color.WHITE);
@@ -96,7 +96,7 @@ public final class TvSettingsActivity extends Activity {
                 Math.round(getResources().getDisplayMetrics().widthPixels * .23f)), -1));
         drawer = new LinearLayout(this);
         drawer.setOrientation(LinearLayout.VERTICAL);
-        drawer.setBackgroundColor(TvAppearancePreferences.surface(this));
+        drawer.setBackgroundColor(TvAppearancePreferences.panelSurface(this));
         LinearLayout.LayoutParams drawerParams = new LinearLayout.LayoutParams(0, -1, 1);
         drawerParams.leftMargin = dp(14);
         columns.addView(drawer, drawerParams);
@@ -119,7 +119,7 @@ public final class TvSettingsActivity extends Activity {
     }
 
     private int rowBackground(boolean focused) {
-        return focused ? TvAppearancePreferences.focus(this) : TvAppearancePreferences.surface(this);
+        return focused ? TvAppearancePreferences.focus(this) : Color.TRANSPARENT;
     }
 
     private void updateCategorySelection() {
@@ -128,7 +128,7 @@ public final class TvSettingsActivity extends Activity {
             boolean focused = row.hasFocus();
             GradientDrawable background = new GradientDrawable();
             background.setColor(focused ? TvAppearancePreferences.focus(this)
-                    : TvAppearancePreferences.surface(this));
+                    : Color.TRANSPARENT);
             background.setCornerRadius(dp(8));
             background.setStroke(dp(2), focused ? TvAppearancePreferences.accent(this)
                     : Color.TRANSPARENT);
@@ -146,6 +146,8 @@ public final class TvSettingsActivity extends Activity {
     }
 
     private void renderPanel(int focusIndex) {
+        categoryRail.setBackgroundColor(TvAppearancePreferences.panelSurface(this));
+        drawer.setBackgroundColor(TvAppearancePreferences.panelSurface(this));
         drawer.removeAllViews();
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
@@ -318,16 +320,18 @@ public final class TvSettingsActivity extends Activity {
                     TvAppearancePreferences.setTheme(this, choice);
                     screen.post(this::recreate);
                 }));
-        boolean symbols = TvAppearancePreferences.symbols(this);
-        row("Фоновая символика", symbols ? "Включено" : "Выключено", () -> {
-            TvAppearancePreferences.setSymbols(this, !symbols);
-            renderPanel(1);
-        });
-        boolean animations = TvAppearancePreferences.animations(this);
-        row("Анимации", animations ? "Включены" : "Выключены", () -> {
-            TvAppearancePreferences.setAnimations(this, !animations);
-            renderPanel(2);
-        });
+        int animationSpeed = TvAppearancePreferences.animationSpeed(this);
+        row("Скорость анимации", animationSpeed + "/5  ›", () ->
+                openChoices("Скорость анимации", TvAppearancePreferences.ANIMATION_SPEEDS,
+                        animationSpeed, 1,
+                        choice -> TvAppearancePreferences.setAnimationSpeed(this, choice)));
+        int panelTransparency = TvAppearancePreferences.panelTransparency(this);
+        row("Прозрачность боковых панелей",
+                TvAppearancePreferences.PANEL_TRANSPARENCIES[panelTransparency] + "  ›", () ->
+                openChoices("Прозрачность боковых панелей",
+                        TvAppearancePreferences.PANEL_TRANSPARENCIES,
+                        panelTransparency, 2,
+                        choice -> TvAppearancePreferences.setPanelTransparency(this, choice)));
         section("Размеры");
         row("Масштаб интерфейса", TvScalePreferences.label(
                 TvScalePreferences.getStep(this, TvScalePreferences.INTERFACE)),
@@ -378,10 +382,10 @@ public final class TvSettingsActivity extends Activity {
         dashboardRoot.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         int width = Math.min(dp(500), Math.round(getResources().getDisplayMetrics().widthPixels * .47f));
         screen.addView(selectionPanel, new FrameLayout.LayoutParams(width, -1, Gravity.RIGHT));
-        if (TvAppearancePreferences.animations(this)) {
+        int duration = TvAppearancePreferences.animationDurationMs(this);
+        if (duration > 0) {
             selectionPanel.setTranslationX(width);
-            selectionPanel.setAlpha(.82f);
-            selectionPanel.animate().translationX(0).alpha(1f).setDuration(340)
+            selectionPanel.animate().translationX(0).setDuration(duration)
                     .setInterpolator(new android.view.animation.DecelerateInterpolator(1.5f)).start();
         }
     }

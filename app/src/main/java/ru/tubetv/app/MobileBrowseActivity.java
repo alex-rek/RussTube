@@ -1145,7 +1145,7 @@ public final class MobileBrowseActivity extends Activity {
             } else card = (Card) recycled.getTag();
             VideoItem item = getItem(position);
             card.artwork.setTag(item.stableKey());
-            card.source.setImageResource(SourceIcon.drawable(item.source));
+            card.source.setImageResource(SourceIcon.drawable(item));
             card.source.setContentDescription(item.source);
             card.duration.setText(item.isLive ? "В ЭФИРЕ" : VideoPresentation.duration(item.durationMs));
             card.duration.setVisibility(item.isLive || item.durationMs > 0 ? View.VISIBLE : View.GONE);

@@ -102,7 +102,7 @@ public final class BrowseActivity extends Activity {
     private int interfaceScaleStep;
     private int gridScaleStep;
     private int appearanceTheme;
-    private boolean appearanceSymbols;
+    private int appearanceTransparency;
     private String focusKey;
     private int focusPosition;
     private boolean focusPending = true;
@@ -144,7 +144,7 @@ public final class BrowseActivity extends Activity {
         interfaceScaleStep = TvScalePreferences.getStep(this, TvScalePreferences.INTERFACE);
         gridScaleStep = TvScalePreferences.getStep(this, TvScalePreferences.GRID);
         appearanceTheme = TvAppearancePreferences.theme(this);
-        appearanceSymbols = TvAppearancePreferences.symbols(this);
+        appearanceTransparency = TvAppearancePreferences.panelTransparency(this);
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN
                 | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
         setContentView(createContent());
@@ -176,7 +176,7 @@ public final class BrowseActivity extends Activity {
         rail = new LinearLayout(this);
         rail.setOrientation(LinearLayout.VERTICAL);
         rail.setPadding(0, dp(64), 0, dp(8));
-        rail.setBackgroundColor(TvAppearancePreferences.surface(this));
+        rail.setBackgroundColor(TvAppearancePreferences.panelSurface(this));
         for (int i = 0; i < NAV_NAMES.length; i++) {
             final Page target = NAV_PAGES[i];
             Button button = navigationButton(NAV_NAMES[i], NAV_ICONS[i], () -> {
@@ -1054,7 +1054,7 @@ public final class BrowseActivity extends Activity {
             return;
         }
         if (appearanceTheme != TvAppearancePreferences.theme(this)
-                || appearanceSymbols != TvAppearancePreferences.symbols(this)) {
+                || appearanceTransparency != TvAppearancePreferences.panelTransparency(this)) {
             rememberFocus();
             recreate();
             return;
@@ -1171,7 +1171,7 @@ public final class BrowseActivity extends Activity {
                         : item.source + " · " + VideoPresentation.channel(item));
                 holder.views.setText(channelsMode ? "" : VideoPresentation.views(item));
                 holder.date.setText(channelsMode ? "" : VideoPresentation.published(item));
-                holder.platform.setImageResource(SourceIcon.drawable(item.source));
+                holder.platform.setImageResource(SourceIcon.drawable(item));
                 holder.platform.setContentDescription(item.source);
                 holder.duration.setText(item.isLive ? "В ЭФИРЕ" : VideoPresentation.duration(item.durationMs));
                 holder.duration.setVisibility(item.isLive || item.durationMs > 0 ? View.VISIBLE : View.GONE);

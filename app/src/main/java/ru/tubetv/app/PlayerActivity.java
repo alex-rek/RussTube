@@ -985,10 +985,10 @@ public final class PlayerActivity extends Activity {
         int width = Math.min(dp(480), Math.round(getResources().getDisplayMetrics().widthPixels * .42f));
         if (!captionParents.isEmpty()) width = Math.round(width * .90f);
         playerRoot.addView(captionPanel, new FrameLayout.LayoutParams(width, -1, Gravity.RIGHT));
-        if (TvAppearancePreferences.animations(this)) {
+        int duration = TvAppearancePreferences.animationDurationMs(this);
+        if (duration > 0) {
             captionPanel.setTranslationX(width);
-            captionPanel.setAlpha(.82f);
-            captionPanel.animate().translationX(0).alpha(1f).setDuration(340)
+            captionPanel.animate().translationX(0).setDuration(duration)
                     .setInterpolator(new android.view.animation.DecelerateInterpolator(1.5f)).start();
         }
     }

@@ -23,13 +23,14 @@ final class SideSelectionPanel extends LinearLayout {
         super(context);
         markedChoices = selected >= 0;
         setOrientation(VERTICAL);
-        setBackgroundColor(TvAppearancePreferences.surface(context));
+        setBackgroundColor(TvAppearancePreferences.panelSurface(context));
         setElevation(dp(24));
         setPadding(dp(14), dp(16), dp(14), dp(16));
         TextView heading = new TextView(context);
         heading.setText(title);
         heading.setTextSize(20 * TvScalePreferences.get(context, TvScalePreferences.INTERFACE));
         heading.setTextColor(TvAppearancePreferences.text(context));
+        heading.setBackgroundColor(TvAppearancePreferences.surface(context));
         heading.setGravity(Gravity.CENTER_VERTICAL);
         heading.setMaxLines(2);
         heading.setPadding(dp(16), dp(4), dp(8), dp(12));
@@ -52,10 +53,10 @@ final class SideSelectionPanel extends LinearLayout {
             choice.setMinHeight(dp(52));
             choice.setPadding(dp(18), dp(9), dp(12), dp(9));
             choice.setFocusable(true);
-            choice.setBackgroundColor(TvAppearancePreferences.surface(context));
+            choice.setBackgroundColor(Color.TRANSPARENT);
             choice.setOnFocusChangeListener((v, focused) -> {
                 choice.setBackgroundColor(focused ? TvAppearancePreferences.focus(context)
-                        : TvAppearancePreferences.surface(context));
+                        : Color.TRANSPARENT);
                 choice.setTextColor(TvAppearancePreferences.text(context));
             });
             choice.setOnClickListener(v -> onSelect.select(index));
@@ -101,7 +102,7 @@ final class SideSelectionPanel extends LinearLayout {
         row.setFocusable(true);
         row.setOnFocusChangeListener((v, focus) -> row.setBackgroundColor(
                 focus ? TvAppearancePreferences.focus(context)
-                        : TvAppearancePreferences.surface(context)));
+                        : Color.TRANSPARENT));
         row.setOnClickListener(v -> action.run());
         rows.addView(row, new LayoutParams(-1, -2));
     }

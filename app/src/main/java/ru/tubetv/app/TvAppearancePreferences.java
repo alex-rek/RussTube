@@ -16,24 +16,44 @@ final class TvAppearancePreferences {
                 .putInt("theme", Math.max(0, Math.min(2, value))).apply();
     }
 
-    static boolean symbols(Context context) {
-        return context.getSharedPreferences("tv_appearance", 0)
-                .getBoolean("symbols", true);
+    static final String[] ANIMATION_SPEEDS = {
+            "0 — Выключена", "1 — Очень медленно", "2 — Медленно",
+            "3 — Обычно", "4 — Быстро", "5 — Очень быстро"
+    };
+    static final String[] PANEL_TRANSPARENCIES = {
+            "0%", "10%", "20%", "30%", "40%", "50%", "60%"
+    };
+    private static final int[] ANIMATION_DURATIONS_MS = {0, 700, 500, 340, 240, 160};
+
+    static int animationSpeed(Context context) {
+        android.content.SharedPreferences preferences = context.getSharedPreferences("tv_appearance", 0);
+        int fallback = preferences.getBoolean("animations", true) ? 3 : 0;
+        return Math.max(0, Math.min(5, preferences.getInt("animation_speed", fallback)));
     }
 
-    static void setSymbols(Context context, boolean value) {
+    static void setAnimationSpeed(Context context, int speed) {
         context.getSharedPreferences("tv_appearance", 0).edit()
-                .putBoolean("symbols", value).apply();
+                .putInt("animation_speed", Math.max(0, Math.min(5, speed))).apply();
     }
 
-    static boolean animations(Context context) {
-        return context.getSharedPreferences("tv_appearance", 0)
-                .getBoolean("animations", true);
+    static int animationDurationMs(Context context) {
+        return ANIMATION_DURATIONS_MS[animationSpeed(context)];
     }
 
-    static void setAnimations(Context context, boolean value) {
+    static int panelTransparency(Context context) {
+        return Math.max(0, Math.min(PANEL_TRANSPARENCIES.length - 1,
+                context.getSharedPreferences("tv_appearance", 0).getInt("panel_transparency", 0)));
+    }
+
+    static void setPanelTransparency(Context context, int level) {
         context.getSharedPreferences("tv_appearance", 0).edit()
-                .putBoolean("animations", value).apply();
+                .putInt("panel_transparency", Math.max(0,
+                        Math.min(PANEL_TRANSPARENCIES.length - 1, level))).apply();
+    }
+
+    static int panelSurface(Context context) {
+        int alpha = 255 * (100 - panelTransparency(context) * 10) / 100;
+        return (alpha << 24) | (surface(context) & 0x00ffffff);
     }
 
     static int background(Context context) {
