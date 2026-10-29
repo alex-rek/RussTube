@@ -22,6 +22,11 @@ public final class TvChannelStoreTest {
         assertNull(TvChannelStore.link("https://ok.ru@evil.example/video/1234567"));
         assertEquals("https://vkvideo.ru/video-12_34",
                 TvChannelStore.link("https://vkvideo.ru/video-12_34?t=55s").pageUrl);
+        TvChannelStore.Link keyed = TvChannelStore.link(
+                "https://vkvideo.ru/video-12_34_2cec856843657d26?t=55s");
+        assertNotNull(keyed);
+        assertEquals("-12_34", keyed.id);
+        assertEquals("https://vkvideo.ru/video-12_34_2cec856843657d26", keyed.pageUrl);
     }
 
     @Test public void rediscoveryKeepsUserSettingsAndDoesNotDuplicate() {
@@ -54,6 +59,22 @@ public final class TvChannelStoreTest {
                 .withChannel("another", "Вещатель", "", true);
         TvChannelStore.mergeEntries(catalog, java.util.Arrays.asList(rutube, ok));
         assertEquals(2, catalog.size());
+    }
+
+    @Test public void vkAccessKeyChangesKeepOneCatalogIdentity() {
+        List<TvChannelStore.Entry> catalog = new ArrayList<>();
+        VideoItem first = new VideoItem("VK VIDEO", "Первый", "", "",
+                "https://vkvideo.ru/video-12_34_oldkey", "https://vkvideo.ru/video-12_34_oldkey")
+                .withChannel("-12", "Телеканал", "", true);
+        VideoItem next = new VideoItem("VK VIDEO", "Первый", "", "",
+                "https://vkvideo.ru/video-12_34_newkey", "https://vkvideo.ru/video-12_34_newkey")
+                .withChannel("-12", "Телеканал", "", true);
+        assertEquals(1, TvChannelStore.mergeEntries(catalog, Collections.singletonList(first)));
+        catalog.get(0).favorite = true;
+        TvChannelStore.mergeEntries(catalog, Collections.singletonList(next));
+        assertEquals(1, catalog.size());
+        assertTrue(catalog.get(0).favorite);
+        assertEquals(next.pageUrl, catalog.get(0).pageUrl);
     }
 
     @Test public void http403AloneDoesNotClaimRegionalBlock() {

@@ -21,7 +21,8 @@ final class TvChannelStore {
     private static final String PREFS = "tv_channel_catalog";
     private static final int LIMIT = 1000;
     private static final Pattern RUTUBE = Pattern.compile("/(?:live/)?video/([0-9a-f]{32})(?:/|$)", Pattern.CASE_INSENSITIVE);
-    private static final Pattern VK = Pattern.compile("(?:^|/)video(-?[0-9]+_[0-9]+)(?:/|$)");
+    private static final Pattern VK = Pattern.compile(
+            "(?:^|/)video(-?[0-9]+_[0-9]+)(?:_([A-Za-z0-9_-]+))?(?:/|$)");
     private static final Pattern OK = Pattern.compile("/video/([0-9]+)(?:/|$)");
 
     enum Status {
@@ -101,6 +102,7 @@ final class TvChannelStore {
             String page = source.equals("RUTUBE")
                     ? "https://rutube.ru" + (path.startsWith("/live/") ? "/live/video/" : "/video/") + id + "/"
                     : source.equals("VK VIDEO") ? "https://vkvideo.ru/video" + id
+                    + (matcher.group(2) == null ? "" : "_" + matcher.group(2))
                     : "https://ok.ru/video/" + id;
             return new Link(source, id, page);
         } catch (Exception ignored) { return null; }
@@ -145,6 +147,9 @@ final class TvChannelStore {
                     existing.pageUrl = incoming.pageUrl;
                     existing.status = Status.UNKNOWN;
                     changed++;
+                }
+                if (!existing.pageUrl.equals(incoming.pageUrl)) {
+                    existing.pageUrl = incoming.pageUrl; changed++;
                 }
                 if (!existing.customTitle && !incoming.title.isEmpty()
                         && !incoming.title.equals(existing.title)) {

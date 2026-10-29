@@ -720,6 +720,8 @@ public final class MobileBrowseActivity extends Activity {
             if (liveGroup == LiveGroup.OK_TV) enqueue(source, OkClient::liveCatalog);
             enqueue(source, () -> repository.live(source, "телеканал прямой эфир"));
             enqueue(source, () -> repository.live(source, "тв онлайн"));
+            if (liveGroup == LiveGroup.VK_TV)
+                enqueue(source, () -> repository.live(source, "прямой эфир"));
         }
         render();
     }
