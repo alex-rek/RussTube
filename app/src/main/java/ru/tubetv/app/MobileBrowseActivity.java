@@ -61,6 +61,8 @@ public final class MobileBrowseActivity extends Activity {
     private static final int VOICE_SEARCH_REQUEST = 7143;
     private static final int EXPORT_LIBRARY_REQUEST = 7144;
     private static final int IMPORT_LIBRARY_REQUEST = 7145;
+    private static final int EXPORT_TV_CHANNELS = 7146;
+    private static final int IMPORT_TV_CHANNELS = 7147;
     private enum Page { HOME, SEARCH, FILMS, LIVE, SUBSCRIPTIONS, LIBRARY, HISTORY, FAVORITES, CHANNELS, POPULAR, SETTINGS }
     private enum FilmGroup { ALL, RUTUBE, VK, OK }
     private enum LiveGroup { ALL, RUTUBE_TV, VK_TV, OK_TV }
@@ -367,7 +369,8 @@ public final class MobileBrowseActivity extends Activity {
         list.setOnItemLongClickListener((parent, view, position, id) -> {
             if (position >= items.size()) return false;
             VideoItem item = items.get(position);
-            VideoActions.show(this, item, () -> showChannel(item), this::refreshFilmsIfVisible);
+            if (tvCatalogOpen()) showTvChannelActions(item);
+            else VideoActions.show(this, item, () -> showChannel(item), this::refreshFilmsIfVisible);
             return true;
         });
         feed.addView(list, new FrameLayout.LayoutParams(-1, -1));
@@ -472,6 +475,13 @@ public final class MobileBrowseActivity extends Activity {
                     action("Спорт", () -> findLive("спорт"));
                     action("Музыка", () -> findLive("музыка"));
                 }
+                else {
+                    action("Найти телеканалы", () -> refreshTvChannels(null));
+                    action("Добавить по ссылке", this::addTvChannel);
+                    action("Скрытые каналы", this::restoreTvChannels);
+                    action("Экспорт", this::exportTvChannels);
+                    action("Импорт", this::importTvChannels);
+                }
                 loadLive();
                 break;
             case SUBSCRIPTIONS:
@@ -498,6 +508,7 @@ public final class MobileBrowseActivity extends Activity {
             case FAVORITES:
                 heading.setText("Избранное");
                 baseItems.addAll(FavoriteStore.load(this));
+                baseItems.addAll(TvChannelStore.favorites(this));
                 break;
             case SETTINGS:
                 heading.setText("Настройки");
@@ -661,21 +672,21 @@ public final class MobileBrowseActivity extends Activity {
     }
 
     private void loadLive() {
+        if (tvCatalogOpen()) {
+            if (!TvChannelStore.initialDiscoveryDone(this, tvSource())) {
+                List<VideoItem> previous = new ArrayList<>(history);
+                previous.addAll(FavoriteStore.load(this));
+                TvChannelStore.merge(this, previous);
+            }
+            for (TvChannelStore.Entry entry : TvChannelStore.visible(this, tvSource()))
+                baseItems.add(entry.video());
+            if (!TvChannelStore.initialDiscoveryDone(this, tvSource())) {
+                TvChannelStore.markInitialDiscovery(this, tvSource());
+                refreshTvChannels(null);
+            }
+            return;
+        }
         switch (liveGroup) {
-            case RUTUBE_TV:
-                enqueue("RUTUBE", () -> RutubeTvCatalog.load());
-                enqueue("RUTUBE", () -> repository.live("RUTUBE", "телеканал прямой эфир"));
-                enqueue("RUTUBE", () -> repository.live("RUTUBE", "тв онлайн"));
-                break;
-            case VK_TV:
-                enqueue("VK VIDEO", () -> repository.live("VK VIDEO", "телеканал прямой эфир"));
-                enqueue("VK VIDEO", () -> repository.live("VK VIDEO", "тв онлайн"));
-                break;
-            case OK_TV:
-                enqueue("OK", () -> OkClient.liveCatalog());
-                enqueue("OK", () -> repository.live("OK", "телеканал прямой эфир"));
-                enqueue("OK", () -> repository.live("OK", "тв онлайн"));
-                break;
             default:
                 enqueue(PeerTubeClient.SOURCE,
                         () -> repository.live(PeerTubeClient.SOURCE, ""));
@@ -686,6 +697,111 @@ public final class MobileBrowseActivity extends Activity {
                 searchAll("24/7", true);
                 break;
         }
+    }
+
+    private boolean tvCatalogOpen() { return page == Page.LIVE && liveGroup != LiveGroup.ALL; }
+
+    private String tvSource() {
+        return liveGroup == LiveGroup.RUTUBE_TV ? "RUTUBE"
+                : liveGroup == LiveGroup.VK_TV ? "VK VIDEO" : "OK";
+    }
+
+    private void refreshTvChannels(String queryText) {
+        if (!tvCatalogOpen() || pending > 0) return;
+        String source = tvSource();
+        if (!MobileBrowsePreferences.sourceEnabled(this, source)) {
+            Toast.makeText(this, "Площадка отключена в настройках поиска", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (queryText != null && !queryText.trim().isEmpty()) {
+            enqueue(source, () -> repository.live(source, queryText.trim()));
+        } else {
+            if (liveGroup == LiveGroup.RUTUBE_TV) enqueue(source, RutubeTvCatalog::load);
+            if (liveGroup == LiveGroup.OK_TV) enqueue(source, OkClient::liveCatalog);
+            enqueue(source, () -> repository.live(source, "телеканал прямой эфир"));
+            enqueue(source, () -> repository.live(source, "тв онлайн"));
+        }
+        render();
+    }
+
+    private void refreshTvCatalog() { if (tvCatalogOpen()) show(Page.LIVE); }
+
+    private void tvError(Exception error) {
+        Toast.makeText(this, "Каталог: " + error.getMessage(), Toast.LENGTH_LONG).show();
+    }
+
+    private interface TvTextAction { void run(String value) throws Exception; }
+
+    private void tvTextInput(String title, String initial, TvTextAction action) {
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setText(initial);
+        input.setSelectAllOnFocus(true);
+        new AlertDialog.Builder(this).setTitle(title).setView(input)
+                .setPositiveButton("Сохранить", (dialog, which) -> {
+                    try { action.run(input.getText().toString().trim()); refreshTvCatalog(); }
+                    catch (Exception error) { tvError(error); }
+                }).setNegativeButton("Отмена", null).show();
+    }
+
+    private void addTvChannel() {
+        tvTextInput("Добавить телеканал по ссылке", "https://", value -> {
+            TvChannelStore.Link link = TvChannelStore.link(value);
+            if (link == null || !tvSource().equals(link.source))
+                throw new Exception("Нужна постоянная ссылка выбранной площадки");
+            TvChannelStore.addLink(this, value);
+        });
+    }
+
+    private void showTvChannelActions(VideoItem item) {
+        TvChannelStore.Entry entry = TvChannelStore.find(this, item);
+        if (entry == null) return;
+        String[] choices = {"Смотреть", entry.favorite ? "Убрать из избранного" : "В избранное",
+                "Переименовать", "Выше", "Ниже", "Скрыть канал", "Заменить ссылку"};
+        new AlertDialog.Builder(this).setTitle(entry.title).setItems(choices, (dialog, which) -> {
+            try {
+                switch (which) {
+                    case 0: VideoActions.play(this, item); return;
+                    case 1: TvChannelStore.favorite(this, entry, !entry.favorite); break;
+                    case 2: tvTextInput("Название телеканала", entry.title,
+                            value -> TvChannelStore.rename(this, entry, value)); return;
+                    case 3: TvChannelStore.move(this, entry, -1); break;
+                    case 4: TvChannelStore.move(this, entry, 1); break;
+                    case 5: TvChannelStore.hidden(this, entry, true); break;
+                    case 6: tvTextInput("Заменить ссылку", entry.pageUrl,
+                            value -> TvChannelStore.replaceLink(this, entry, value)); return;
+                }
+                refreshTvCatalog();
+            } catch (Exception error) { tvError(error); }
+        }).show();
+    }
+
+    private void restoreTvChannels() {
+        List<TvChannelStore.Entry> hidden = TvChannelStore.hiddenEntries(this, tvSource());
+        if (hidden.isEmpty()) {
+            Toast.makeText(this, "Скрытых телеканалов нет", Toast.LENGTH_SHORT).show(); return;
+        }
+        String[] labels = new String[hidden.size()];
+        for (int i = 0; i < hidden.size(); i++) labels[i] = hidden.get(i).title;
+        new AlertDialog.Builder(this).setTitle("Восстановить телеканал")
+                .setItems(labels, (dialog, which) -> {
+                    TvChannelStore.hidden(this, hidden.get(which), false); refreshTvCatalog();
+                }).setNeutralButton("Восстановить все", (dialog, which) -> {
+                    TvChannelStore.restoreHidden(this, tvSource()); refreshTvCatalog();
+                }).show();
+    }
+
+    private void exportTvChannels() {
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE).setType("application/json")
+                .putExtra(Intent.EXTRA_TITLE, "RussTube-tv-channels.json");
+        startActivityForResult(intent, EXPORT_TV_CHANNELS);
+    }
+
+    private void importTvChannels() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE).setType("application/json");
+        startActivityForResult(intent, IMPORT_TV_CHANNELS);
     }
 
     private void settings() {
@@ -740,7 +856,8 @@ public final class MobileBrowseActivity extends Activity {
                 if (isFinishing() || current != generation) return;
                 pending--;
                 if (failedRequest && !failed.contains(source)) failed.add(source);
-                candidates.addAll(result);
+                if (tvCatalogOpen()) TvChannelStore.merge(this, result);
+                else candidates.addAll(result);
                 if (subscription) subscriptionCandidates.addAll(result);
                 searchHandler.removeCallbacks(renderResults);
                 searchHandler.postDelayed(renderResults, items.isEmpty() || pending == 0 ? 0 : 80);
@@ -750,7 +867,10 @@ public final class MobileBrowseActivity extends Activity {
 
     private void rebuildResults() {
         baseItems.clear();
-        if (page == Page.HOME && activeChannel == null) {
+        if (tvCatalogOpen()) {
+            for (TvChannelStore.Entry entry : TvChannelStore.visible(this, tvSource()))
+                baseItems.add(entry.video());
+        } else if (page == Page.HOME && activeChannel == null) {
             baseItems.addAll(HomeFeed.combine(subscriptionCandidates, candidates,
                     history, MobileBrowsePreferences.recommendHistory(this)));
         } else {
@@ -842,6 +962,7 @@ public final class MobileBrowseActivity extends Activity {
 
     private void applySort() {
         items.clear();
+        if (tvCatalogOpen()) { items.addAll(baseItems); return; }
         Set<String> unavailable = UnavailableVideoStore.keys(this);
         for (VideoItem item : baseItems)
             if ((page == Page.HISTORY || page == Page.FAVORITES
@@ -944,10 +1065,15 @@ public final class MobileBrowseActivity extends Activity {
         super.onResume();
         updates.onResume();
         if (firstResume) { firstResume = false; return; }
-        if (skipResumeReload) { skipResumeReload = false; render(); return; }
+        if (skipResumeReload) {
+            skipResumeReload = false;
+            if (tvCatalogOpen()) rebuildResults(); else render();
+            return;
+        }
         if (activeChannel != null) showChannel(activeChannel);
         else if (page == Page.HOME || page == Page.HISTORY || page == Page.LIBRARY
                 || page == Page.FAVORITES || page == Page.SUBSCRIPTIONS || page == Page.CHANNELS) show(page);
+        else if (tvCatalogOpen()) { rebuildResults(); }
         else render();
     }
 
@@ -962,6 +1088,40 @@ public final class MobileBrowseActivity extends Activity {
             if (resultCode == RESULT_OK && data != null && data.getData() != null) {
                 if (requestCode == EXPORT_LIBRARY_REQUEST) writeLibrary(data.getData());
                 else readLibrary(data.getData());
+            }
+            return;
+        }
+        if (requestCode == EXPORT_TV_CHANNELS || requestCode == IMPORT_TV_CHANNELS) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                Uri uri = data.getData();
+                io.execute(() -> {
+                    try {
+                        if (requestCode == EXPORT_TV_CHANNELS) {
+                            try (OutputStream output = getContentResolver().openOutputStream(uri, "wt")) {
+                                if (output == null) throw new Exception("Файл недоступен");
+                                output.write(TvChannelStore.exportJson(this).getBytes(
+                                        java.nio.charset.StandardCharsets.UTF_8));
+                            }
+                        } else {
+                            java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+                            try (InputStream input = getContentResolver().openInputStream(uri)) {
+                                if (input == null) throw new Exception("Файл недоступен");
+                                byte[] buffer = new byte[8192]; int count;
+                                while ((count = input.read(buffer)) != -1) {
+                                    if (bytes.size() + count > 2 * 1024 * 1024)
+                                        throw new Exception("Файл каталога слишком большой");
+                                    bytes.write(buffer, 0, count);
+                                }
+                            }
+                            TvChannelStore.importJson(this, new String(bytes.toByteArray(),
+                                    java.nio.charset.StandardCharsets.UTF_8));
+                        }
+                        runOnUiThread(() -> {
+                            refreshTvCatalog();
+                            Toast.makeText(this, "Каталог телеканалов обновлён", Toast.LENGTH_LONG).show();
+                        });
+                    } catch (Exception error) { runOnUiThread(() -> tvError(error)); }
+                });
             }
             return;
         }
@@ -1158,15 +1318,26 @@ public final class MobileBrowseActivity extends Activity {
                     : item.source.contains("RUTUBE") ? 0xff4f3990 : 0xff246b76, 22));
             card.channel.setText(item.source + " · " + channel);
             List<String> details = new ArrayList<>();
-            if (!VideoPresentation.views(item).isEmpty()) details.add(VideoPresentation.views(item));
-            if (!VideoPresentation.published(item).isEmpty()) details.add(VideoPresentation.published(item));
+            if (tvCatalogOpen()) {
+                TvChannelStore.Entry channelEntry = TvChannelStore.find(MobileBrowseActivity.this, item);
+                if (channelEntry != null) {
+                    if (channelEntry.favorite) details.add("★");
+                    details.add(channelEntry.status.label);
+                }
+            } else {
+                if (!VideoPresentation.views(item).isEmpty()) details.add(VideoPresentation.views(item));
+                if (!VideoPresentation.published(item).isEmpty()) details.add(VideoPresentation.published(item));
+            }
             card.meta.setText(TextUtils.join(" · ", details));
             WatchProgressStore.Progress watched = WatchProgressStore.get(MobileBrowseActivity.this, item);
             long total = watched.durationMs > 0 ? watched.durationMs : item.durationMs;
             card.progress.setVisibility(watched.positionMs > 0 && total > 0 ? View.VISIBLE : View.GONE);
             if (total > 0) card.progress.setProgress((int) Math.min(1000, watched.positionMs * 1000 / total));
-            card.more.setOnClickListener(v -> VideoActions.show(MobileBrowseActivity.this, item,
-                    () -> showChannel(item), MobileBrowseActivity.this::refreshFilmsIfVisible));
+            card.more.setOnClickListener(v -> {
+                if (tvCatalogOpen()) showTvChannelActions(item);
+                else VideoActions.show(MobileBrowseActivity.this, item,
+                        () -> showChannel(item), MobileBrowseActivity.this::refreshFilmsIfVisible);
+            });
             int thumbnailWidth = list.getColumnWidth();
             if (thumbnailWidth <= 0) thumbnailWidth = Math.max(dp(180),
                     getResources().getDisplayMetrics().widthPixels - dp(28));

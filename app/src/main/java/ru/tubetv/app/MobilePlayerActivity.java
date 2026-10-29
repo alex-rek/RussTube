@@ -92,6 +92,7 @@ public final class MobilePlayerActivity extends Activity {
     private boolean focused = true;
     private boolean failed;
     private int liveRetries;
+    private boolean tvChannelSuccessRecorded;
     private boolean captionsDisabled = true;
     private boolean scrubbing;
     private boolean recorded;
@@ -470,15 +471,24 @@ public final class MobilePlayerActivity extends Activity {
                         errorText.setVisibility(View.GONE);
                         showControls();
                     } else if (state == Player.STATE_ENDED) {
-                        if (video.isLive && liveRetries < 2) {
+                        if (video.isLive && liveRetries < liveRetryLimit()) {
                             scheduleLiveRetry();
                         } else if (isFullscreen()) {
                             saveProgress();
                             finish();
-                        } else showControls();
+                        } else {
+                            if (video.isLive) TvChannelStore.playbackStatus(
+                                    MobilePlayerActivity.this, video, TvChannelStore.Status.PAUSED);
+                            showControls();
+                        }
                     }
                 }
                 @Override public void onIsPlayingChanged(boolean playing) {
+                    if (playing && video.isLive && !tvChannelSuccessRecorded) {
+                        tvChannelSuccessRecorded = true;
+                        TvChannelStore.playbackStatus(MobilePlayerActivity.this, video,
+                                TvChannelStore.Status.AVAILABLE);
+                    }
                     updateScreenAwake(); updateProgress(); scheduleHide();
                     updateHeadsetControls();
                 }
@@ -515,7 +525,7 @@ public final class MobilePlayerActivity extends Activity {
                     if (BuildConfig.DEBUG) android.util.Log.w("RussTubeLivePlayback",
                             "source=" + video.source + " code=" + error.getErrorCodeName(), error);
                     if (video.isLive && error.errorCode >= 2000 && error.errorCode < 3000
-                            && liveRetries < 2) scheduleLiveRetry();
+                            && liveRetries < liveRetryLimit()) scheduleLiveRetry();
                     else showError("Ошибка воспроизведения: " + error.getErrorCodeName());
                 }
             });
@@ -536,6 +546,7 @@ public final class MobilePlayerActivity extends Activity {
 
     private void showError(String text) {
         if (!video.isLive) UnavailableVideoStore.add(this, video);
+        else TvChannelStore.playbackStatus(this, video, TvChannelStore.failureStatus(text));
         failed = true; updateScreenAwake();
         loading.setVisibility(View.GONE);
         errorText.setVisibility(View.VISIBLE);
@@ -543,8 +554,9 @@ public final class MobilePlayerActivity extends Activity {
     }
 
     private void scheduleLiveRetry() {
-        if (!started || isFinishing() || liveRetries >= 2) return;
+        if (!started || isFinishing() || liveRetries >= liveRetryLimit()) return;
         liveRetries++;
+        tvChannelSuccessRecorded = false;
         failed = false;
         loading.setVisibility(View.VISIBLE);
         errorText.setVisibility(View.GONE);
@@ -559,6 +571,10 @@ public final class MobilePlayerActivity extends Activity {
             resumePosition = 0;
             resolveStream();
         }, 1500L * liveRetries);
+    }
+
+    private int liveRetryLimit() {
+        return TvChannelStore.find(this, video) == null ? 2 : 1;
     }
 
     private void toggleCaptions() {
