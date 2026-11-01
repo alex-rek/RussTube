@@ -8,7 +8,7 @@ import org.json.JSONObject;
 
 import java.net.URI;
 import java.util.ArrayList;
-import java.util.Comparator;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -198,7 +198,7 @@ final class TvChannelStore {
         List<Entry> result = new ArrayList<>();
         for (Entry entry : load(context))
             if (entry.source.equals(source) && !entry.hidden) result.add(entry);
-        result.sort(Comparator.comparingInt(value -> value.order));
+        Collections.sort(result, (left, right) -> Integer.compare(left.order, right.order));
         return result;
     }
 
@@ -212,7 +212,7 @@ final class TvChannelStore {
         List<Entry> result = new ArrayList<>();
         for (Entry entry : load(context))
             if (entry.source.equals(source) && entry.hidden) result.add(entry);
-        result.sort(Comparator.comparingInt(value -> value.order));
+        Collections.sort(result, (left, right) -> Integer.compare(left.order, right.order));
         return result;
     }
 
@@ -284,7 +284,7 @@ final class TvChannelStore {
         List<Entry> group = new ArrayList<>();
         for (Entry entry : entries)
             if (entry.source.equals(target.source) && !entry.hidden) group.add(entry);
-        group.sort(Comparator.comparingInt(value -> value.order));
+        Collections.sort(group, (left, right) -> Integer.compare(left.order, right.order));
         for (int i = 0; i < group.size(); i++) if (group.get(i).id.equals(target.id)) {
             int neighbor = i + (direction < 0 ? -1 : 1);
             if (neighbor < 0 || neighbor >= group.size()) return;

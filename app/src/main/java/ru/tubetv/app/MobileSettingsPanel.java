@@ -2,6 +2,7 @@ package ru.tubetv.app;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.Intent;
 import android.annotation.SuppressLint;
 import android.content.res.ColorStateList;
 import android.graphics.Typeface;
@@ -58,6 +59,10 @@ final class MobileSettingsPanel extends ScrollView {
         row("Сохранить в файл", saveLibrary);
         row("Загрузить из файла", loadLibrary);
         description("При загрузке новые записи добавляются к сохранённым, повторы пропускаются.");
+
+        section("Устройства");
+        row("Подключённые телевизоры и синхронизация  ›", () ->
+                activity.startActivity(new Intent(activity, LocalLinkActivity.class)));
 
         section("Плеер");
         row("Язык субтитров: " + CaptionPreferences.LANGUAGES[CaptionPreferences.language(activity)],

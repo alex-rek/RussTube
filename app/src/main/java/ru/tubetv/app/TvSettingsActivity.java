@@ -32,9 +32,9 @@ public final class TvSettingsActivity extends Activity {
     private static final int EXPORT_LIBRARY_REQUEST = 7144;
     private static final int IMPORT_LIBRARY_REQUEST = 7145;
     private static final String[] CATEGORIES = {
-            "Общие", "Интерфейс", "Плеер", "Поиск", "Сеть", "О программе"
+            "Общие", "Интерфейс", "Плеер", "Поиск", "Сеть", "Синхронизация", "О программе"
     };
-    private static final String[] SYMBOLS = {"⚙", "▦", "▶", "⌕", "◎", "ℹ"};
+    private static final String[] SYMBOLS = {"⚙", "▦", "▶", "⌕", "◎", "⇄", "ℹ"};
     private static final int PANEL = 0xff171a21;
     private static final int SECONDARY = 0xffaeb9cc;
     private FrameLayout screen;
@@ -176,6 +176,7 @@ public final class TvSettingsActivity extends Activity {
             case 2: playerSettings(); break;
             case 3: searchSettings(); break;
             case 4: networkSettings(); break;
+            case 5: synchronization(); break;
             default: about(); break;
         }
         focusRow(focusIndex);
@@ -221,6 +222,12 @@ public final class TvSettingsActivity extends Activity {
         row("Сохранить в файл", "JSON  ›", this::exportLibrary);
         row("Загрузить из файла", "JSON  ›", this::importLibrary);
         note("Файл совместим с RussTube Mobile. При загрузке новые записи добавляются к сохранённым.");
+    }
+
+    private void synchronization() {
+        row("Подключить устройство и синхронизировать", "›", () ->
+                startActivity(new Intent(this, LocalLinkActivity.class)));
+        note("Объединяются только подписки и избранное. Устройства должны быть в одной доступной сети.");
     }
 
     private void exportLibrary() {

@@ -72,27 +72,47 @@ final class MobileLibraryTransfer {
         LinkedHashMap<String, VideoItem> channels = new LinkedHashMap<>();
         LinkedHashMap<String, VideoItem> favorites = new LinkedHashMap<>();
         for (VideoItem item : existingChannels) channels.put(item.channelKey(), item);
-        for (VideoItem item : existingFavorites) favorites.put(item.stableKey(), item);
+        for (VideoItem item : existingFavorites) {
+            String key = favoriteKey(item);
+            if (!favorites.containsKey(key)) favorites.put(key, item);
+        }
+        int originalChannels = channels.size();
+        int originalFavorites = favorites.size();
         for (VideoItem item : imported.channels) {
             String key = item.channelKey();
             if (!channels.containsKey(key)) channels.put(key, item);
         }
         for (VideoItem item : imported.favorites) {
-            String key = item.stableKey();
+            String key = favoriteKey(item);
             if (!favorites.containsKey(key)) favorites.put(key, item);
         }
         if (channels.size() > MAX_CHANNELS || favorites.size() > MAX_FAVORITES)
             throw new Exception("Недостаточно места: максимум 100 каналов и 1000 избранных видео");
-        int newChannels = channels.size() - existingChannels.size();
-        int newFavorites = favorites.size() - existingFavorites.size();
+        int newChannels = channels.size() - originalChannels;
+        int newFavorites = favorites.size() - originalFavorites;
+        if (newChannels == 0 && newFavorites == 0
+                && originalFavorites == existingFavorites.size()) return new Result(0, 0);
         String channelsJson = encode(new ArrayList<>(channels.values())).toString();
         String favoritesJson = encode(new ArrayList<>(favorites.values())).toString();
-        if (!context.getSharedPreferences("subscriptions", 0).edit()
-                .putString("channels", channelsJson).commit()
-                || !context.getSharedPreferences("favorites", 0).edit()
-                .putString("videos", favoritesJson).commit())
-            throw new Exception("Не удалось сохранить библиотеку");
+        android.content.SharedPreferences channelPrefs = context.getSharedPreferences("subscriptions", 0);
+        android.content.SharedPreferences favoritePrefs = context.getSharedPreferences("favorites", 0);
+        String previousChannels = channelPrefs.getString("channels", "[]");
+        String previousFavorites = favoritePrefs.getString("videos", "[]");
+        if (!channelPrefs.edit().putString("channels", channelsJson).commit())
+            throw new Exception("Не удалось сохранить подписки");
+        if (!favoritePrefs.edit().putString("videos", favoritesJson).commit()) {
+            boolean restored = channelPrefs.edit().putString("channels", previousChannels).commit();
+            favoritePrefs.edit().putString("videos", previousFavorites).commit();
+            if (!restored) throw new Exception("Ошибка сохранения; подписки не удалось восстановить");
+            throw new Exception("Ошибка сохранения; исходные подписки восстановлены");
+        }
         return new Result(newChannels, newFavorites);
+    }
+
+    private static String favoriteKey(VideoItem item) {
+        String page = LocalLibraryCodec.safeVideoPage(item.source, item.pageUrl);
+        if (page.isEmpty()) page = LocalLibraryCodec.safeVideoPage(item.source, item.playUrl);
+        return page.isEmpty() ? item.stableKey() : item.source + ":" + page;
     }
 
     private static JSONArray encode(List<VideoItem> items) throws Exception {

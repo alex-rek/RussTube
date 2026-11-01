@@ -40,6 +40,10 @@ final class VideoActions {
         java.util.List<String> labels = new java.util.ArrayList<>();
         java.util.List<Runnable> actions = new java.util.ArrayList<>();
         labels.add("Смотреть"); actions.add(() -> play(activity, item));
+        if (BuildConfig.MOBILE_VARIANT) {
+            labels.add("Смотреть на телевизоре");
+            actions.add(() -> openOnTv(activity, item));
+        }
         if (hasChannel) {
             labels.add((subscribed ? "Отписаться от: " : "Подписаться на: ") + name);
             actions.add(() -> {
@@ -199,5 +203,41 @@ final class VideoActions {
                 .putExtra("channel_url", item.channelUrl).putExtra("live", item.isLive);
         intent.putExtra("views", item.views).putExtra("published_at", item.publishedAtMs);
         activity.startActivity(intent);
+    }
+
+    static void openOnTv(Activity activity, VideoItem item) {
+        java.util.List<LocalTrustedDevices.Peer> televisions = new java.util.ArrayList<>();
+        for (LocalTrustedDevices.Peer peer : LocalTrustedDevices.load(activity))
+            if ("TV".equals(peer.type)) televisions.add(peer);
+        if (televisions.isEmpty()) {
+            Toast.makeText(activity, "Сначала подключите телевизор в разделе Устройства",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        String[] names = new String[televisions.size()];
+        LocalLinkRuntime runtime = ((TubeApplication) activity.getApplication()).localLink();
+        LocalTlsTransport link = runtime.link();
+        for (int i = 0; i < names.length; i++) {
+            LocalTrustedDevices.Peer peer = televisions.get(i);
+            names[i] = peer.name + (link != null && link.session(peer.id) != null
+                    ? "" : " — не в сети");
+        }
+        new android.app.AlertDialog.Builder(activity).setTitle("Смотреть на телевизоре")
+                .setItems(names, (dialog, which) -> {
+                    LocalTrustedDevices.Peer peer = televisions.get(which);
+                    if (link == null || link.session(peer.id) == null) {
+                        Toast.makeText(activity, "Телевизор не подключён", Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    try {
+                        org.json.JSONObject video = LocalVideoIdentity.from(item);
+                        runtime.sendCommand(peer.id, "OPEN_VIDEO",
+                                new org.json.JSONObject().put("video", video));
+                        activity.startActivity(new Intent(activity, LocalRemoteActivity.class)
+                                .putExtra(LocalRemoteActivity.PEER_ID, peer.id));
+                    } catch (Exception error) {
+                        Toast.makeText(activity, error.getMessage(), Toast.LENGTH_LONG).show();
+                    }
+                }).setNegativeButton("Отмена", null).show();
     }
 }

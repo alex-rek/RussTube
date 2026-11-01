@@ -316,6 +316,7 @@ public final class MobilePlayerActivity extends Activity {
         favoriteButton = action(actions, "♡  Избранное", this::toggleFavorite);
         action(actions, "⚙  Скорость", this::chooseSpeed);
         action(actions, "HQ", this::chooseQuality);
+        action(actions, "▣ ТВ", () -> VideoActions.openOnTv(this, video));
         details.addView(actions, size(-1, 76));
         if (video.subtitle != null && !video.subtitle.isEmpty()) {
             TextView description = label(video.subtitle, 14, SECONDARY);

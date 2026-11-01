@@ -4,12 +4,14 @@ import android.app.Application;
 
 public final class TubeApplication extends Application {
     private ImageLoader imageLoader;
+    private LocalLinkRuntime localLink;
 
     @Override public void onCreate() {
         super.onCreate();
         imageLoader = new ImageLoader(this);
         ScopedCookies.install();
         NetworkProxy.install(this);
+        localLink = new LocalLinkRuntime(this);
         clearObsoleteCrashAfterUpdate();
         new Thread(DeviceCapabilities::warmUp, "codec-detection").start();
         Thread.UncaughtExceptionHandler previous = Thread.getDefaultUncaughtExceptionHandler();
@@ -20,6 +22,7 @@ public final class TubeApplication extends Application {
     }
 
     ImageLoader imageLoader() { return imageLoader; }
+    LocalLinkRuntime localLink() { return localLink; }
 
     @Override public void onTrimMemory(int level) {
         super.onTrimMemory(level);

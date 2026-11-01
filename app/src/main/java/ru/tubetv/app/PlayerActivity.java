@@ -28,6 +28,8 @@ import android.widget.ProgressBar;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import android.text.TextUtils;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 import androidx.annotation.OptIn;
 import androidx.core.content.ContextCompat;
@@ -64,6 +66,8 @@ public final class PlayerActivity extends Activity {
         @Override public void run() {
             updateControls();
             updateWallClock();
+            if (!BuildConfig.MOBILE_VARIANT)
+                ((TubeApplication) getApplication()).localLink().publishPlaybackState();
             if (activityStarted && !audioMovedToBackground) ui.postDelayed(this, 1000);
         }
     };
@@ -1141,6 +1145,60 @@ public final class PlayerActivity extends Activity {
         StateStore.savePlaybackSpeed(this, playbackSpeed);
         if (player != null) player.setPlaybackSpeed(playbackSpeed);
         updatePlaybackSettingsUi();
+    }
+
+    JSONObject localPlaybackState() throws Exception {
+        int state = player == null ? Player.STATE_IDLE : player.getPlaybackState();
+        String status = playbackFailed ? "ERROR" : state == Player.STATE_BUFFERING ? "BUFFERING"
+                : player != null && player.isPlaying() ? "PLAYING" : "PAUSED";
+        JSONArray commands = new JSONArray().put("PLAY").put("PAUSE")
+                .put("TOGGLE_PLAY_PAUSE").put("STOP").put("GET_PLAYBACK_STATE")
+                .put("SET_PLAYBACK_SPEED");
+        if (player != null && !historyItem.isLive && player.isCurrentMediaItemSeekable()) {
+            commands.put("SEEK_TO").put("SEEK_FORWARD").put("SEEK_BACKWARD");
+        }
+        return new JSONObject().put("status", status)
+                .put("platform", historyItem.source).put("title", historyItem.title)
+                .put("page", LocalLibraryCodec.safeVideoPage(historyItem.source, historyItem.pageUrl))
+                .put("positionMs", player == null ? 0 : Math.max(0, player.getCurrentPosition()))
+                .put("durationMs", player == null ? knownDuration
+                        : Math.max(0, player.getDuration()))
+                .put("live", historyItem.isLive).put("speed", playbackSpeed)
+                .put("commands", commands);
+    }
+
+    JSONObject applyLocalCommand(String command, JSONObject payload) throws Exception {
+        if (player == null || playbackFailed) throw new Exception("Плеер ещё не готов");
+        switch (command) {
+            case "PLAY": player.play(); break;
+            case "PAUSE": player.pause(); break;
+            case "TOGGLE_PLAY_PAUSE":
+                if (player.isPlaying()) player.pause(); else player.play();
+                break;
+            case "STOP": player.stop(); finish(); break;
+            case "SEEK_TO":
+            case "SEEK_FORWARD":
+            case "SEEK_BACKWARD":
+                if (historyItem.isLive || !player.isCurrentMediaItemSeekable())
+                    throw new Exception("Перемотка для этого эфира недоступна");
+                long target = "SEEK_TO".equals(command) ? payload.optLong("positionMs", -1)
+                        : player.getCurrentPosition() + ("SEEK_FORWARD".equals(command)
+                        ? 10_000L : -10_000L);
+                if (target < 0 && "SEEK_TO".equals(command))
+                    throw new Exception("Неверная позиция перемотки");
+                long duration = player.getDuration();
+                player.seekTo(Math.max(0, duration > 0 ? Math.min(target, duration) : target));
+                break;
+            case "SET_PLAYBACK_SPEED":
+                float speed = (float) payload.optDouble("speed", 0);
+                if (Math.abs(normalizedPlaybackSpeed(speed) - speed) > .01f)
+                    throw new Exception("Эта скорость не поддерживается");
+                setPlaybackSpeed(speed);
+                break;
+            case "GET_PLAYBACK_STATE": break;
+            default: throw new Exception("Команда не поддерживается этим плеером");
+        }
+        return localPlaybackState();
     }
 
     private void setQualityHeight(int height) {
