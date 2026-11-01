@@ -13,20 +13,20 @@ public class WatchProgressStoreTest {
         WatchProgressStore.save(preferences, item.source, item.pageUrl, position, item.durationMs);
     }
 
-    @Test public void viewBelowTenPercentDoesNotCreateProgress() {
+    @Test public void viewBelowFiveSecondsDoesNotCreateProgress() {
         VideoItem item = video("short");
-        save(item, 89_999);
+        save(item, 4_999);
         assertEquals(0, WatchProgressStore.get(preferences, item).positionMs);
         assertTrue(preferences.getAll().isEmpty());
     }
 
-    @Test public void tenPercentWorksForShortAndLongVideos() {
-        assertFalse(WatchProgressStore.isViewed(2_999, 30_000));
-        assertTrue(WatchProgressStore.isViewed(3_000, 30_000));
-        assertFalse(WatchProgressStore.isViewed(89_999, 900_000));
-        assertTrue(WatchProgressStore.isViewed(90_000, 900_000));
-        assertFalse(WatchProgressStore.isViewed(59_999, 0));
-        assertTrue(WatchProgressStore.isViewed(60_000, 0));
+    @Test public void fiveSecondsWorksForKnownAndUnknownDuration() {
+        assertFalse(WatchProgressStore.isViewed(4_999, 30_000));
+        assertTrue(WatchProgressStore.isViewed(5_000, 30_000));
+        assertFalse(WatchProgressStore.isViewed(4_999, 900_000));
+        assertTrue(WatchProgressStore.isViewed(5_000, 900_000));
+        assertFalse(WatchProgressStore.isViewed(4_999, 0));
+        assertTrue(WatchProgressStore.isViewed(5_000, 0));
     }
 
     @Test public void rewindToBeginningReplacesOldResumePosition() {

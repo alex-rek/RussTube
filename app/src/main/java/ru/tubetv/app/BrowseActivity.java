@@ -142,8 +142,7 @@ public final class BrowseActivity extends Activity {
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
         updates = new UpdateCoordinator(this);
-        sortMode = VideoSort.parse(getSharedPreferences("browse", 0)
-                .getString("video_sort", VideoSort.Mode.NEWEST.name()));
+        sortMode = FeedSortPreferences.get(this, page.name());
         qualityFilter = Math.max(0, Math.min(QUALITY_LABELS.length - 1,
                 getSharedPreferences("browse", 0).getInt("tv_quality_filter", 0)));
         interfaceScaleStep = TvScalePreferences.getStep(this, TvScalePreferences.INTERFACE);
@@ -375,6 +374,7 @@ public final class BrowseActivity extends Activity {
         if (target == Page.FILMS && page != Page.FILMS) filmGroup = FilmGroup.ALL;
         cancel();
         page = target;
+        sortMode = FeedSortPreferences.get(this, page.name());
         activeChannel = null;
         channelsMode = false;
         candidates.clear(); subscriptionCandidates.clear(); items.clear(); baseItems.clear(); history.clear();
@@ -386,7 +386,7 @@ public final class BrowseActivity extends Activity {
         addAction(page == Page.LIVE && liveGroup != LiveGroup.ALL
                 ? "Найти телеканалы" : "Обновить",
                 () -> { if (tvCatalogOpen()) refreshTvChannels(null); else show(page); });
-        if (page != Page.CHANNELS && !tvCatalogOpen()) addSortAction();
+        if (page != Page.CHANNELS && page != Page.HISTORY && !tvCatalogOpen()) addSortAction();
         switch (page) {
             case HOME:
             case RECOMMENDATIONS:
@@ -998,7 +998,9 @@ public final class BrowseActivity extends Activity {
                 for (VideoItem item : SavedFilmsStore.load(this))
                     if (filmGroup == FilmGroup.ALL || filmSource().equals(item.source))
                         unique.put(item.stableKey(), item);
-            for (VideoItem item : candidates) unique.put(item.stableKey(), item);
+            for (VideoItem item : page == Page.SUBSCRIPTIONS
+                    ? SubscriptionFeed.limit(candidates, history) : candidates)
+                unique.put(item.stableKey(), item);
             baseItems.addAll(unique.values());
             if (page == Page.POPULAR) Collections.sort(baseItems,
                     (a, b) -> Long.compare(b.views, a.views));
@@ -1128,8 +1130,7 @@ public final class BrowseActivity extends Activity {
         dialog.setContentView(new SideSelectionPanel(this, "Порядок видео", labels,
                 sortMode.ordinal(), choice -> {
                     sortMode = modes[choice];
-                    getSharedPreferences("browse", 0).edit()
-                            .putString("video_sort", sortMode.name()).apply();
+                    FeedSortPreferences.set(this, page.name(), sortMode);
                     if (sortButton != null) sortButton.setText(sortMode.label + "  ▾");
                     applySort();
                     display("Видео не найдены.");
@@ -1154,14 +1155,18 @@ public final class BrowseActivity extends Activity {
         int minWidth = page == Page.SEARCH && activeChannel == null
                 ? QUALITY_WIDTHS[qualityFilter] : 0;
         Set<String> unavailable = UnavailableVideoStore.keys(this);
+        Set<String> watched = new java.util.HashSet<>();
+        if (page == Page.SUBSCRIPTIONS || page == Page.POPULAR)
+            for (VideoItem entry : history) watched.add(entry.stableKey());
         for (VideoItem item : baseItems) {
+            if (watched.contains(item.stableKey())) continue;
             if (page != Page.HISTORY && page != Page.FAVORITES
                     && !(page == Page.CHANNELS && activeChannel == null)
                     && !VideoVisibility.showInDiscovery(item)) continue;
             if (item.maxWidth >= minWidth && (page == Page.HISTORY || page == Page.FAVORITES
                     || channelsMode || !unavailable.contains(item.stableKey()))) items.add(item);
         }
-        if (!channelsMode) VideoSort.apply(items, sortMode);
+        if (!channelsMode && page != Page.HISTORY) VideoSort.apply(items, sortMode);
         if (page == Page.FILMS && activeChannel == null) {
             Map<String, VideoItem> byKey = new LinkedHashMap<>();
             for (VideoItem item : items) byKey.put(item.stableKey(), item);
@@ -1350,10 +1355,10 @@ public final class BrowseActivity extends Activity {
             return;
         }
         returningFromPlayer = false;
-        sortMode = VideoSort.parse(getSharedPreferences("browse", 0)
-                .getString("video_sort", VideoSort.Mode.NEWEST.name()));
+        sortMode = FeedSortPreferences.get(this, page.name());
         if (activeChannel != null) { showChannel(activeChannel); return; }
         if (page == Page.HISTORY || page == Page.HOME || page == Page.RECOMMENDATIONS
+                || page == Page.POPULAR
                 || page == Page.SUBSCRIPTIONS || page == Page.CHANNELS || page == Page.FAVORITES) show(page);
         else { if (sortButton != null) sortButton.setText(sortMode.label + "  ▾");
             applySort(); display("Видео не найдены."); }

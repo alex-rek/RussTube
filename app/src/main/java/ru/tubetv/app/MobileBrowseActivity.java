@@ -132,8 +132,7 @@ public final class MobileBrowseActivity extends Activity {
         updates = new UpdateCoordinator(this);
         getWindow().setStatusBarColor(BACKGROUND);
         getWindow().setNavigationBarColor(BACKGROUND);
-        sortMode = VideoSort.parse(getSharedPreferences("browse", 0)
-                .getString("video_sort", VideoSort.Mode.NEWEST.name()));
+        sortMode = FeedSortPreferences.get(this, page.name());
         setContentView(createContent());
         if (state != null) {
             try { page = Page.valueOf(state.getString("page", "HOME")); }
@@ -410,6 +409,7 @@ public final class MobileBrowseActivity extends Activity {
         cancelQueuedSearch();
         cancel();
         page = target;
+        sortMode = FeedSortPreferences.get(this, page.name());
         activeChannel = null;
         items.clear(); baseItems.clear(); candidates.clear(); subscriptionCandidates.clear();
         history.clear();
@@ -517,7 +517,8 @@ public final class MobileBrowseActivity extends Activity {
         settingsPanel.setVisibility(target == Page.SETTINGS ? View.VISIBLE : View.GONE);
         list.setVisibility(target == Page.SETTINGS ? View.GONE : View.VISIBLE);
         actionsScroller.setVisibility(actions.getChildCount() == 0 ? View.GONE : View.VISIBLE);
-        sortRow.setVisibility(target == Page.CHANNELS ? View.GONE : View.VISIBLE);
+        sortRow.setVisibility(target == Page.CHANNELS || target == Page.HISTORY
+                || target == Page.LIBRARY ? View.GONE : View.VISIBLE);
         updateSortLabel();
         applySort();
         updateNavigation();
@@ -881,7 +882,9 @@ public final class MobileBrowseActivity extends Activity {
                 for (VideoItem saved : SavedFilmsStore.load(this))
                     if (filmGroup == FilmGroup.ALL || filmSource().equals(saved.source))
                         unique.put(saved.stableKey(), saved);
-            for (VideoItem item : candidates) unique.put(item.stableKey(), item);
+            for (VideoItem item : page == Page.SUBSCRIPTIONS
+                    ? SubscriptionFeed.limit(candidates, history) : candidates)
+                unique.put(item.stableKey(), item);
             baseItems.addAll(unique.values());
         }
         if (page == Page.POPULAR) Collections.sort(baseItems,
@@ -897,8 +900,7 @@ public final class MobileBrowseActivity extends Activity {
         new AlertDialog.Builder(this).setTitle("Порядок видео")
                 .setSingleChoiceItems(labels, sortMode.ordinal(), (dialog, choice) -> {
                     sortMode = modes[choice];
-                    getSharedPreferences("browse", 0).edit()
-                            .putString("video_sort", sortMode.name()).apply();
+                    FeedSortPreferences.set(this, page.name(), sortMode);
                     updateSortLabel();
                     applySort();
                     render();
@@ -937,6 +939,7 @@ public final class MobileBrowseActivity extends Activity {
                 && (!landscape || page == Page.FILMS || page == Page.LIVE)
                 ? View.VISIBLE : View.GONE);
         sortRow.setVisibility(!landscape && page != Page.SETTINGS
+                && page != Page.HISTORY && page != Page.LIBRARY
                 && (page != Page.CHANNELS || activeChannel != null)
                 ? View.VISIBLE : View.GONE);
         status.setVisibility(landscape || page == Page.SETTINGS ? View.GONE : View.VISIBLE);
@@ -966,13 +969,18 @@ public final class MobileBrowseActivity extends Activity {
         items.clear();
         if (tvCatalogOpen()) { items.addAll(baseItems); return; }
         Set<String> unavailable = UnavailableVideoStore.keys(this);
+        Set<String> watched = new java.util.HashSet<>();
+        if (page == Page.SUBSCRIPTIONS || page == Page.POPULAR)
+            for (VideoItem entry : history) watched.add(entry.stableKey());
         for (VideoItem item : baseItems)
             if ((page == Page.HISTORY || page == Page.FAVORITES
                     || (page == Page.CHANNELS && activeChannel == null)
                     || VideoVisibility.showInDiscovery(item))
+                    && !watched.contains(item.stableKey())
                     && (page != Page.HOME
                     || !unavailable.contains(item.stableKey()))) items.add(item);
-        if (page != Page.CHANNELS || activeChannel != null) VideoSort.apply(items, sortMode);
+        if (page != Page.HISTORY && (page != Page.CHANNELS || activeChannel != null))
+            VideoSort.apply(items, sortMode);
     }
 
     private void render() {
@@ -1074,6 +1082,7 @@ public final class MobileBrowseActivity extends Activity {
         }
         if (activeChannel != null) showChannel(activeChannel);
         else if (page == Page.HOME || page == Page.HISTORY || page == Page.LIBRARY
+                || page == Page.POPULAR
                 || page == Page.FAVORITES || page == Page.SUBSCRIPTIONS || page == Page.CHANNELS) show(page);
         else if (tvCatalogOpen()) { rebuildResults(); }
         else render();

@@ -12,15 +12,13 @@ import java.util.List;
 import java.util.Set;
 
 final class WatchProgressStore {
-    static final long MIN_POSITION_MS = 60_000L;
+    static final long MIN_POSITION_MS = 5_000L;
     private static final String PREFS = "watch_progress";
     static final int MAX_ENTRIES = 1000;
     private static final String ORDER = "order";
 
     static boolean isViewed(long positionMs, long durationMs) {
-        return positionMs >= (durationMs > 0 ? Math.max(1L,
-                durationMs / 10L + (durationMs % 10L == 0 ? 0L : 1L))
-                : MIN_POSITION_MS);
+        return positionMs >= MIN_POSITION_MS;
     }
 
     static void save(Context context, String source, String pageUrl, long positionMs, long durationMs) {
@@ -31,7 +29,7 @@ final class WatchProgressStore {
                                   long positionMs, long durationMs) {
         if (pageUrl == null || pageUrl.isEmpty()) return;
         String key = key(source, pageUrl);
-        // A new entry starts at 10% watched; existing entries can still be rewound.
+        // A new entry starts after five seconds; existing entries can still be rewound.
         if (!isViewed(positionMs, durationMs) && !preferences.contains(key + "_position")) return;
         SharedPreferences.Editor editor = preferences.edit()
                 .putLong(key + "_position", Math.max(0L, positionMs));

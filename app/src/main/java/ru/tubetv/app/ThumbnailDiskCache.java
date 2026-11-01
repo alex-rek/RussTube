@@ -15,7 +15,7 @@ import java.util.Comparator;
 /** Bounded raw-response cache. Full URL is hashed, including expiring auth parameters. */
 final class ThumbnailDiskCache {
     private static final long LIMIT = 64L * 1024 * 1024;
-    private static final long DEFAULT_AGE = 6L * 60 * 60 * 1000;
+    private static final long DEFAULT_AGE = 3L * 24 * 60 * 60 * 1000;
     private final File directory;
 
     ThumbnailDiskCache(File appCacheDir) {

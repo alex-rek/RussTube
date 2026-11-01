@@ -346,16 +346,7 @@ public final class TvSettingsActivity extends Activity {
         row("Масштаб сетки видео", TvScalePreferences.label(
                 TvScalePreferences.getStep(this, TvScalePreferences.GRID)),
                 () -> openScale("Масштаб сетки видео", TvScalePreferences.GRID));
-        section("Порядок видео");
-        VideoSort.Mode current = VideoSort.parse(getSharedPreferences("browse", 0)
-                .getString("video_sort", VideoSort.Mode.NEWEST.name()));
-        VideoSort.Mode[] modes = VideoSort.Mode.values();
-        String[] sortLabels = new String[modes.length];
-        for (int i = 0; i < modes.length; i++) sortLabels[i] = modes[i].label;
-        row("Порядок видео", current.label, () -> openChoices("Порядок видео", sortLabels,
-                current.ordinal(), 5, choice -> getSharedPreferences("browse", 0).edit()
-                        .putString("video_sort", modes[choice].name()).apply()));
-        note("Выбор применяется к ленте после возврата в каталог.");
+        note("Порядок видео выбирается отдельно в каждом разделе каталога.");
     }
 
     private void openScale(String title, String key) {
