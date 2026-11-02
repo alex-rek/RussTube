@@ -73,6 +73,7 @@ public final class BrowseActivity extends Activity {
     private final List<VideoItem> baseItems = new ArrayList<>();
     private final List<VideoItem> candidates = new ArrayList<>();
     private final List<VideoItem> subscriptionCandidates = new ArrayList<>();
+    private final Map<String, Integer> homeExtraQueries = new LinkedHashMap<>();
     private final List<VideoItem> history = new ArrayList<>();
     private final Map<String, TvChannelStore.Entry> tvEntries = new LinkedHashMap<>();
     private final Set<String> qualityRequested = new HashSet<>();
@@ -96,9 +97,11 @@ public final class BrowseActivity extends Activity {
     private TextView empty;
     private LinearLayout searchRow;
     private LinearLayout actions;
+    private HorizontalScrollView actionScroller;
     private EditText query;
     private Button findButton;
     private GridView grid;
+    private TvHomeRows homeRows;
     private Cards adapter;
     private LinearLayout rail;
     private ScrollView menuContainer;
@@ -106,6 +109,7 @@ public final class BrowseActivity extends Activity {
     private boolean menuExpanded;
     private int interfaceScaleStep;
     private int gridScaleStep;
+    private int homeRowCount;
     private int appearanceTheme;
     private int appearanceTransparency;
     private String focusKey;
@@ -121,6 +125,13 @@ public final class BrowseActivity extends Activity {
     private String pendingResultsEmptyText;
     private final Runnable renderResults = () -> {
         long started = android.os.SystemClock.elapsedRealtime();
+        if (page == Page.HOME && activeChannel == null) {
+            updateHomeRows();
+            if (BuildConfig.DEBUG) android.util.Log.i("RussTubeTvPerf", "homeRowsMs="
+                    + (android.os.SystemClock.elapsedRealtime() - started)
+                    + " candidates=" + candidates.size());
+            return;
+        }
         rebuildBaseItems();
         applySort();
         display(pendingResultsEmptyText);
@@ -156,6 +167,7 @@ public final class BrowseActivity extends Activity {
                 getSharedPreferences("browse", 0).getInt("tv_quality_filter", 0)));
         interfaceScaleStep = TvScalePreferences.getStep(this, TvScalePreferences.INTERFACE);
         gridScaleStep = TvScalePreferences.getStep(this, TvScalePreferences.GRID);
+        homeRowCount = TvHomePreferences.count(this);
         appearanceTheme = TvAppearancePreferences.theme(this);
         appearanceTransparency = TvAppearancePreferences.panelTransparency(this);
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN
@@ -299,7 +311,7 @@ public final class BrowseActivity extends Activity {
         searchRow.addView(findButton, row(100, 42, 8, 0));
         content.addView(searchRow, row(-1, 48, 0, 6));
         actions = new LinearLayout(this);
-        HorizontalScrollView actionScroller = new HorizontalScrollView(this);
+        actionScroller = new HorizontalScrollView(this);
         actionScroller.setHorizontalScrollBarEnabled(false);
         actionScroller.setFillViewport(false);
         actionScroller.addView(actions, new HorizontalScrollView.LayoutParams(-2, -1));
@@ -369,6 +381,19 @@ public final class BrowseActivity extends Activity {
             return false;
         });
         results.addView(grid, new FrameLayout.LayoutParams(-1, -1));
+        homeRows = new TvHomeRows(this, new TvHomeRows.Actions() {
+            @Override public void play(VideoItem item) {
+                returningFromPlayer = true;
+                VideoActions.play(BrowseActivity.this, item);
+            }
+            @Override public void menu(VideoItem item) {
+                VideoActions.show(BrowseActivity.this, item,
+                        () -> showChannel(item), BrowseActivity.this::refreshSavedFilms);
+            }
+            @Override public void navigation() { openNavigation(); }
+        });
+        homeRows.setVisibility(View.GONE);
+        results.addView(homeRows, new FrameLayout.LayoutParams(-1, -1));
         empty = label("", 18, Color.rgb(168, 182, 204));
         empty.setGravity(Gravity.CENTER);
         empty.setPadding(dp(30), dp(20), dp(30), dp(20));
@@ -388,27 +413,39 @@ public final class BrowseActivity extends Activity {
         if (target == Page.FILMS && page != Page.FILMS) filmGroup = FilmGroup.ALL;
         cancel();
         page = target;
+        if (page == Page.HOME) focusPending = true;
         sortMode = FeedSortPreferences.get(this, page.name());
         activeChannel = null;
         channelsMode = false;
         candidates.clear(); subscriptionCandidates.clear(); items.clear(); baseItems.clear(); history.clear();
+        homeExtraQueries.clear();
         for (WatchHistoryStore.Entry entry : WatchHistoryStore.load(this)) history.add(entry.item);
         updateNavigation();
+        boolean home = page == Page.HOME;
+        grid.setVisibility(home ? View.GONE : View.VISIBLE);
+        homeRows.setVisibility(home ? View.VISIBLE : View.GONE);
+        actionScroller.setVisibility(home ? View.GONE : View.VISIBLE);
+        status.setVisibility(home ? View.GONE : View.VISIBLE);
+        empty.setVisibility(home ? View.GONE : View.VISIBLE);
         searchRow.setVisibility(page == Page.SEARCH || page == Page.LIVE ? View.VISIBLE : View.GONE);
         findButton.setVisibility(page == Page.LIVE ? View.VISIBLE : View.GONE);
         actions.removeAllViews();
-        addAction(page == Page.LIVE && liveGroup != LiveGroup.ALL
-                ? "Найти телеканалы" : "Обновить",
-                () -> { if (tvCatalogOpen()) refreshTvChannels(null); else show(page); });
-        if (page != Page.CHANNELS && page != Page.HISTORY && !tvCatalogOpen()) addSortAction();
+        if (!home) {
+            addAction(page == Page.LIVE && liveGroup != LiveGroup.ALL
+                    ? "Найти телеканалы" : "Обновить",
+                    () -> { if (tvCatalogOpen()) refreshTvChannels(null); else show(page); });
+            if (page != Page.CHANNELS && page != Page.HISTORY && !tvCatalogOpen()) addSortAction();
+        }
         switch (page) {
             case HOME:
             case RECOMMENDATIONS:
                 heading.setText(page == Page.HOME ? "Главная" : "Рекомендации");
                 description.setText("Новые видео подписок и рекомендации по вашим интересам");
-                addAction("Наука", () -> discover("наука"));
-                addAction("Путешествия", () -> discover("путешествия"));
-                addAction("Технологии", () -> discover("технологии"));
+                if (!home) {
+                    addAction("Наука", () -> discover("наука"));
+                    addAction("Путешествия", () -> discover("путешествия"));
+                    addAction("Технологии", () -> discover("технологии"));
+                }
                 boolean byHistory = getSharedPreferences("browse", 0)
                         .getBoolean("recommendations", true);
                 boolean bySubscriptions = getSharedPreferences("browse", 0)
@@ -417,8 +454,14 @@ public final class BrowseActivity extends Activity {
                     for (VideoItem channel : SubscriptionStore.load(this))
                         enqueueSubscription(channel);
                 }
-                if (byHistory) {
-                    List<String> queries = RecommendationEngine.queries(history);
+                if (byHistory || home) {
+                    List<String> queries = byHistory ? RecommendationEngine.queries(history)
+                            : new ArrayList<>();
+                    if (home && queries.isEmpty()) {
+                        queries.add("популярное");
+                        for (String source : MobileBrowsePreferences.enabledSources(this, false))
+                            homeExtraQueries.put(source, 1);
+                    }
                     if (!queries.isEmpty()) {
                         description.setText("Новые видео подписок и рекомендации · "
                                 + String.join(" · ", queries));
@@ -426,7 +469,8 @@ public final class BrowseActivity extends Activity {
                     }
                 }
                 if (pending == 0) {
-                    display("Подпишитесь на каналы или посмотрите несколько видео — здесь появятся новые видео и рекомендации.");
+                    if (home) updateHomeRows();
+                    else display("Подпишитесь на каналы или посмотрите несколько видео — здесь появятся новые видео и рекомендации.");
                     return;
                 }
                 break;
@@ -544,6 +588,7 @@ public final class BrowseActivity extends Activity {
                 baseItems.addAll(TvChannelStore.favorites(this));
                 break;
         }
+        if (home) { updateHomeRows(); return; }
         applySort();
         display(page == Page.SEARCH ? "Введите запрос для поиска видео."
                 : tvCatalogOpen() ? "Каталог пуст. Выберите «Найти телеканалы» или «Добавить по ссылке»."
@@ -919,6 +964,11 @@ public final class BrowseActivity extends Activity {
     private void showChannel(VideoItem channel) {
         focusKey = null; focusPosition = 0; focusPending = true;
         cancel(); channelsMode = false; activeChannel = channel;
+        homeRows.setVisibility(View.GONE);
+        grid.setVisibility(View.VISIBLE);
+        actionScroller.setVisibility(View.VISIBLE);
+        status.setVisibility(View.VISIBLE);
+        empty.setVisibility(View.VISIBLE);
         searchRow.setVisibility(View.GONE);
         items.clear(); baseItems.clear(); candidates.clear();
         heading.setText(channel.channelName.isEmpty() ? "Канал " + channel.channelId : channel.channelName);
@@ -1022,6 +1072,42 @@ public final class BrowseActivity extends Activity {
             if (page == Page.POPULAR) Collections.sort(baseItems,
                     (a, b) -> Long.compare(b.views, a.views));
         }
+    }
+
+    private void updateHomeRows() {
+        if (page != Page.HOME || activeChannel != null) return;
+        Set<String> enabled = new HashSet<>();
+        Set<String> disabled = new HashSet<>();
+        for (String source : FeedRepository.SOURCES) {
+            if (MobileBrowsePreferences.sourceEnabled(this, source)) enabled.add(source);
+            else disabled.add(source);
+        }
+        Map<String, List<VideoItem>> rows = TvHomeFeed.build(subscriptionCandidates,
+                candidates, history, UnavailableVideoStore.keys(this), enabled,
+                TvHomePreferences.count(this), getSharedPreferences("browse", 0)
+                        .getBoolean("recommendations", true));
+        if (pending == 0) for (String source : FeedRepository.SOURCES) {
+            int step = homeExtraQueries.containsKey(source) ? homeExtraQueries.get(source) : 0;
+            if (enabled.contains(source) && rows.get(source).size() < TvHomePreferences.count(this)
+                    && step < 2) {
+                String query = step == 0 ? "популярное" : "интересное";
+                homeExtraQueries.put(source, step + 1);
+                enqueue(source, () -> repository.search(source, query));
+            }
+        }
+        homeRows.setRows(rows, pending > 0, disabled);
+        if (focusPending && !menuExpanded && homeRows.hasVideos()) {
+            homeRows.post(() -> {
+                if (page == Page.HOME && !menuExpanded) homeRows.focusFirst();
+            });
+            focusPending = false;
+        }
+        if (focusPending && pending == 0 && !homeRows.hasVideos() && !menuExpanded) {
+            focusPending = false;
+            openNavigation();
+        }
+        if (pending == 0) TvHomeChannels.publishAsync(this,
+                TvHomeChannels.RECOMMENDATIONS, rows.get(TvHomeFeed.RECOMMENDED));
     }
 
     private String qualityButtonLabel() { return "Качество: " + QUALITY_LABELS[qualityFilter]; }
@@ -1327,7 +1413,11 @@ public final class BrowseActivity extends Activity {
         }
         if (menuExpanded && event.getKeyCode() == KeyEvent.KEYCODE_DPAD_RIGHT
                 && event.getAction() == KeyEvent.ACTION_DOWN) {
-            setMenuExpanded(false); if (!items.isEmpty()) grid.requestFocus(); else query.requestFocus(); return true;
+            setMenuExpanded(false);
+            if (page == Page.HOME && activeChannel == null) homeRows.focusFirst();
+            else if (!items.isEmpty()) grid.requestFocus();
+            else query.requestFocus();
+            return true;
         }
         return super.dispatchKeyEvent(event);
     }
@@ -1358,6 +1448,10 @@ public final class BrowseActivity extends Activity {
             return;
         }
         if (newGridStep != gridScaleStep) {
+            if (page == Page.HOME && activeChannel == null) {
+                recreate();
+                return;
+            }
             gridScaleStep = newGridStep;
             grid.setColumnWidth(cardDp(Math.round(190 * TvScalePreferences.get(this, TvScalePreferences.GRID))));
             grid.requestLayout();
@@ -1365,6 +1459,14 @@ public final class BrowseActivity extends Activity {
         if (returningFromPlayer && page != Page.FAVORITES) {
             returningFromPlayer = false;
             cardRevision++;
+            history.clear();
+            for (WatchHistoryStore.Entry entry : WatchHistoryStore.load(this))
+                history.add(entry.item);
+            if (page == Page.HOME && activeChannel == null) {
+                updateHomeRows();
+                homeRows.post(homeRows::restoreSelection);
+                return;
+            }
             if (tvCatalogOpen()) rebuildBaseItems();
             applySort();
             adapter.notifyDataSetChanged();

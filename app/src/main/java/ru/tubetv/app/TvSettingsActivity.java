@@ -353,6 +353,13 @@ public final class TvSettingsActivity extends Activity {
         row("Масштаб сетки видео", TvScalePreferences.label(
                 TvScalePreferences.getStep(this, TvScalePreferences.GRID)),
                 () -> openScale("Масштаб сетки видео", TvScalePreferences.GRID));
+        section("Главная страница");
+        int homeCount = TvHomePreferences.count(this);
+        String[] homeCounts = {"10", "20", "30"};
+        row("Количество видео в разделе", homeCount + "  ›", () ->
+                openChoices("Количество видео в разделе", homeCounts,
+                        homeCount / 10 - 1, 5,
+                        choice -> TvHomePreferences.setCount(this, TvHomePreferences.COUNTS[choice])));
         note("Порядок видео выбирается отдельно в каждом разделе каталога.");
     }
 
