@@ -74,6 +74,13 @@ public final class BrowseActivity extends Activity {
     private final List<VideoItem> candidates = new ArrayList<>();
     private final List<VideoItem> subscriptionCandidates = new ArrayList<>();
     private final Map<String, Integer> homeExtraQueries = new LinkedHashMap<>();
+    private final Map<String, Integer> homeSourcePending = new LinkedHashMap<>();
+    private final Set<String> homeFallbackStarted = new HashSet<>();
+    private int homeSubscriptionsPending;
+    private final Map<String, List<VideoItem>> homeDisplayedRows = new LinkedHashMap<>();
+    private String homeCacheSignature;
+    private boolean homeSkipNetwork;
+    private boolean homeHadCache;
     private final List<VideoItem> history = new ArrayList<>();
     private final Map<String, TvChannelStore.Entry> tvEntries = new LinkedHashMap<>();
     private final Set<String> qualityRequested = new HashSet<>();
@@ -415,20 +422,46 @@ public final class BrowseActivity extends Activity {
         if (target == Page.FILMS && page != Page.FILMS) filmGroup = FilmGroup.ALL;
         cancel();
         page = target;
-        if (page == Page.HOME) focusPending = true;
+        boolean home = page == Page.HOME;
+        if (home) focusPending = true;
         sortMode = FeedSortPreferences.get(this, page.name());
         activeChannel = null;
         channelsMode = false;
         candidates.clear(); subscriptionCandidates.clear(); items.clear(); baseItems.clear(); history.clear();
         homeExtraQueries.clear();
+        homeSourcePending.clear();
+        homeFallbackStarted.clear();
+        homeSubscriptionsPending = 0;
         for (WatchHistoryStore.Entry entry : WatchHistoryStore.load(this)) history.add(entry.item);
+        if (home) {
+            homeDisplayedRows.clear();
+            homeCacheSignature = homeCacheSignature();
+            TvHomeMemoryCache.Snapshot cached = TvHomeMemoryCache.get(homeCacheSignature);
+            homeHadCache = cached != null;
+            homeSkipNetwork = cached != null
+                    && cached.isFresh(android.os.SystemClock.elapsedRealtime());
+            if (cached != null) {
+                Set<String> enabled = new HashSet<>();
+                for (String source : FeedRepository.SOURCES)
+                    if (MobileBrowsePreferences.sourceEnabled(this, source)) enabled.add(source);
+                homeDisplayedRows.putAll(TvHomeFeed.build(cached.subscriptions,
+                        cached.candidates, history, UnavailableVideoStore.keys(this), enabled,
+                        TvHomePreferences.count(this), getSharedPreferences("browse", 0)
+                                .getBoolean("recommendations", true)));
+                if (homeSkipNetwork) {
+                    candidates.addAll(cached.candidates);
+                    subscriptionCandidates.addAll(cached.subscriptions);
+                }
+            }
+        }
         updateNavigation();
-        boolean home = page == Page.HOME;
         heading.setVisibility(home ? View.GONE : View.VISIBLE);
         description.setVisibility(home ? View.GONE : View.VISIBLE);
         grid.setVisibility(home ? View.GONE : View.VISIBLE);
         homeRows.setVisibility(home ? View.VISIBLE : View.GONE);
-        if (home) homeRows.setRows(Collections.emptyMap(), true, Collections.emptySet());
+        if (home) homeRows.setRows(homeDisplayedRows,
+                homeSkipNetwork ? Collections.emptySet() : new HashSet<>(TvHomeFeed.ORDER),
+                Collections.emptySet());
         actionScroller.setVisibility(home ? View.GONE : View.VISIBLE);
         status.setVisibility(home ? View.GONE : View.VISIBLE);
         empty.setVisibility(home ? View.GONE : View.VISIBLE);
@@ -455,11 +488,11 @@ public final class BrowseActivity extends Activity {
                         .getBoolean("recommendations", true);
                 boolean bySubscriptions = getSharedPreferences("browse", 0)
                         .getBoolean("recommend_subscriptions", true);
-                if (bySubscriptions) {
+                if (bySubscriptions && (!home || !homeSkipNetwork)) {
                     for (VideoItem channel : SubscriptionStore.load(this))
                         enqueueSubscription(channel);
                 }
-                if (byHistory || home) {
+                if ((byHistory || home) && (!home || !homeSkipNetwork)) {
                     List<String> queries = byHistory ? RecommendationEngine.queries(history)
                             : new ArrayList<>();
                     if (home && queries.isEmpty()) {
@@ -1016,6 +1049,12 @@ public final class BrowseActivity extends Activity {
                          boolean trustedFilmCollection) {
         int current = generation;
         boolean filmMode = page == Page.FILMS && activeChannel == null;
+        boolean homeJob = page == Page.HOME && activeChannel == null;
+        if (homeJob) {
+            if (subscription) homeSubscriptionsPending++;
+            else homeSourcePending.put(source, homeSourcePending.containsKey(source)
+                    ? homeSourcePending.get(source) + 1 : 1);
+        }
         pending++;
         jobs.add(io.submit(() -> {
             long started = android.os.SystemClock.elapsedRealtime();
@@ -1040,6 +1079,10 @@ public final class BrowseActivity extends Activity {
             runOnUiThread(() -> {
                 if (isFinishing() || current != generation) return;
                 pending--;
+                if (homeJob) {
+                    if (subscription) homeSubscriptionsPending--;
+                    else homeSourcePending.put(source, homeSourcePending.get(source) - 1);
+                }
                 if (problem != null && !failed.contains(problem)) failed.add(problem);
                 if (tvCatalogOpen()) TvChannelStore.merge(this, result);
                 else candidates.addAll(result);
@@ -1093,20 +1136,43 @@ public final class BrowseActivity extends Activity {
                 candidates, history, UnavailableVideoStore.keys(this), enabled,
                 TvHomePreferences.count(this), getSharedPreferences("browse", 0)
                         .getBoolean("recommendations", true));
-        if (pending == 0) for (String source : FeedRepository.SOURCES) {
+        if (pending == 0 && !homeSkipNetwork) for (String source : FeedRepository.SOURCES) {
             int step = homeExtraQueries.containsKey(source) ? homeExtraQueries.get(source) : 0;
             if (enabled.contains(source) && TvHomePreferences.sectionEnabled(this, source)
                     && rows.get(source).size() < TvHomePreferences.count(this)
                     && step < 2) {
                 String query = step == 0 ? "популярное" : "интересное";
                 homeExtraQueries.put(source, step + 1);
+                homeFallbackStarted.add(source);
                 enqueue(source, () -> repository.search(source, query));
             }
         }
-        // Publish the ordered snapshot only after all source batches have completed.
-        // Otherwise each response can reorder and recreate the visible cards.
-        if (pending > 0) return;
-        homeRows.setRows(rows, false, disabled);
+        List<VideoItem> shownRecent = homeDisplayedRows.get(TvHomeFeed.RECENT);
+        if (homeSubscriptionsPending > 0 && (shownRecent == null || shownRecent.isEmpty()))
+            rows.put(TvHomeFeed.RECENT, Collections.emptyList());
+        for (String source : FeedRepository.SOURCES) {
+            Integer waiting = homeSourcePending.get(source);
+            List<VideoItem> shown = homeDisplayedRows.get(source);
+            if (waiting != null && waiting > 0 && !homeFallbackStarted.contains(source)
+                    && (shown == null || shown.isEmpty()))
+                rows.put(source, Collections.emptyList());
+        }
+        Set<String> hidden = new HashSet<>(UnavailableVideoStore.keys(this));
+        for (VideoItem item : history) hidden.add(item.stableKey());
+        Map<String, List<VideoItem>> visible = TvHomeFeed.freezeVisible(
+                homeDisplayedRows, rows, hidden);
+        homeDisplayedRows.clear();
+        homeDisplayedRows.putAll(visible);
+        Set<String> loading = new HashSet<>();
+        if (pending > 0) {
+            loading.add(TvHomeFeed.RECOMMENDED);
+            if (homeSubscriptionsPending > 0) loading.add(TvHomeFeed.RECENT);
+            for (String source : FeedRepository.SOURCES) {
+                Integer waiting = homeSourcePending.get(source);
+                if (waiting != null && waiting > 0) loading.add(source);
+            }
+        }
+        homeRows.setRows(visible, loading, disabled);
         if (focusPending && !menuExpanded && homeRows.hasVideos()) {
             homeRows.post(() -> {
                 if (page == Page.HOME && !menuExpanded) homeRows.focusFirst();
@@ -1117,8 +1183,29 @@ public final class BrowseActivity extends Activity {
             focusPending = false;
             openNavigation();
         }
+        if (!homeSkipNetwork && (pending == 0 || !homeHadCache)) {
+            TvHomeMemoryCache.save(homeCacheSignature, candidates, subscriptionCandidates,
+                    pending == 0 ? android.os.SystemClock.elapsedRealtime() : 0);
+        }
         if (pending == 0) TvHomeChannels.publishAsync(this,
                 TvHomeChannels.RECOMMENDATIONS, rows.get(TvHomeFeed.RECOMMENDED));
+    }
+
+    private String homeCacheSignature() {
+        StringBuilder key = new StringBuilder();
+        key.append(TvHomePreferences.count(this)).append('|')
+                .append(getSharedPreferences("browse", 0).getBoolean("recommendations", true))
+                .append('|').append(getSharedPreferences("browse", 0)
+                        .getBoolean("recommend_subscriptions", true));
+        for (String source : FeedRepository.SOURCES)
+            key.append('|').append(source).append(':')
+                    .append(MobileBrowsePreferences.sourceEnabled(this, source));
+        for (String section : TvHomeFeed.ORDER)
+            key.append('|').append(section).append(':')
+                    .append(TvHomePreferences.sectionEnabled(this, section));
+        for (VideoItem channel : SubscriptionStore.load(this))
+            key.append('|').append(channel.stableKey());
+        return key.toString();
     }
 
     private String qualityButtonLabel() { return "Качество: " + QUALITY_LABELS[qualityFilter]; }

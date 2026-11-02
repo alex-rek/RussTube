@@ -63,4 +63,46 @@ public final class TvHomeFeedTest {
         assertEquals(newer.stableKey(), rows.get(TvHomeFeed.RUTUBE).get(0).stableKey());
         assertEquals(older.stableKey(), rows.get(TvHomeFeed.RUTUBE).get(1).stableKey());
     }
+
+    @Test public void visibleRowKeepsItsOrderUntilNextVisitAndHidesWatched() {
+        VideoItem older = video("RUTUBE", "older", 10);
+        VideoItem newer = video("RUTUBE", "newer", 20);
+        Map<String, List<VideoItem>> shown = Collections.singletonMap(TvHomeFeed.RUTUBE,
+                Collections.singletonList(older));
+        Map<String, List<VideoItem>> latest = Collections.singletonMap(TvHomeFeed.RUTUBE,
+                Arrays.asList(newer, older));
+        Map<String, List<VideoItem>> stable = TvHomeFeed.freezeVisible(shown, latest,
+                Collections.emptySet());
+        assertEquals(Collections.singletonList(older), stable.get(TvHomeFeed.RUTUBE));
+        Map<String, List<VideoItem>> afterWatch = TvHomeFeed.freezeVisible(stable, latest,
+                Collections.singleton(older.stableKey()));
+        assertEquals(Collections.singletonList(newer), afterWatch.get(TvHomeFeed.RUTUBE));
+    }
+
+    @Test public void memorySnapshotExpiresAfterFiveMinutes() {
+        TvHomeMemoryCache.Snapshot snapshot = new TvHomeMemoryCache.Snapshot("sources",
+                Collections.singletonList(video("RUTUBE", "one", 1)),
+                Collections.emptyList(), 1_000);
+        assertTrue(snapshot.isFresh(1_000));
+        assertTrue(snapshot.isFresh(300_999));
+        assertFalse(snapshot.isFresh(301_000));
+        TvHomeMemoryCache.Snapshot partial = new TvHomeMemoryCache.Snapshot("sources",
+                Collections.singletonList(video("RUTUBE", "one", 1)),
+                Collections.emptyList(), 0);
+        assertFalse(partial.isFresh(60_000));
+    }
+
+    @Test public void nextReadyRowAppearsWithoutReorderingVisibleRow() {
+        VideoItem rutube = video("RUTUBE", "rutube", 10);
+        VideoItem vk = video("VK VIDEO", "vk", 20);
+        Map<String, List<VideoItem>> first = Collections.singletonMap(TvHomeFeed.RUTUBE,
+                Collections.singletonList(rutube));
+        Map<String, List<VideoItem>> latest = new java.util.LinkedHashMap<>();
+        latest.put(TvHomeFeed.RUTUBE, Collections.singletonList(rutube));
+        latest.put(TvHomeFeed.VK, Collections.singletonList(vk));
+        Map<String, List<VideoItem>> shown = TvHomeFeed.freezeVisible(first, latest,
+                Collections.emptySet());
+        assertEquals(Collections.singletonList(rutube), shown.get(TvHomeFeed.RUTUBE));
+        assertEquals(Collections.singletonList(vk), shown.get(TvHomeFeed.VK));
+    }
 }

@@ -4,7 +4,7 @@
 
 Для просмотра не требуется регистрация или вход в аккаунты видеоплощадок.
 
-[Скачать RussTube для Android](https://github.com/alex-rek/RussTube/releases/download/v0.6.18/RussTube-Mobile-0.6.18-debug.apk) · [Скачать RussTubeTV](https://github.com/alex-rek/RussTube/releases/download/v0.6.18/RussTube-TV-0.6.18-debug.apk) · [Все релизы](https://github.com/alex-rek/RussTube/releases)
+[Скачать RussTube для Android](https://github.com/alex-rek/RussTube/releases/download/v0.6.19/RussTube-Mobile-0.6.19-debug.apk) · [Скачать RussTubeTV](https://github.com/alex-rek/RussTube/releases/download/v0.6.19/RussTube-TV-0.6.19-debug.apk) · [Все релизы](https://github.com/alex-rek/RussTube/releases)
 
 ## RussTube для телефона
 

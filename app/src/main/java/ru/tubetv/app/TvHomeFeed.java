@@ -45,6 +45,24 @@ final class TvHomeFeed {
         return rows;
     }
 
+    /** Keep visible positions fixed while other sources finish; remove newly watched items. */
+    static Map<String, List<VideoItem>> freezeVisible(Map<String, List<VideoItem>> visible,
+            Map<String, List<VideoItem>> latest, Set<String> hidden) {
+        Map<String, List<VideoItem>> result = new LinkedHashMap<>();
+        for (String section : ORDER) {
+            List<VideoItem> existing = visible.get(section);
+            List<VideoItem> kept = new ArrayList<>();
+            if (existing != null) for (VideoItem item : existing)
+                if (!hidden.contains(item.stableKey())) kept.add(item);
+            List<VideoItem> replacement = latest.get(section);
+            if (kept.isEmpty() && replacement != null)
+                for (VideoItem item : replacement)
+                    if (!hidden.contains(item.stableKey())) kept.add(item);
+            result.put(section, kept);
+        }
+        return result;
+    }
+
     private static List<VideoItem> select(List<VideoItem> candidates, Set<String> watched,
             Set<String> unavailable, int limit) {
         LinkedHashMap<String, VideoItem> unique = new LinkedHashMap<>();

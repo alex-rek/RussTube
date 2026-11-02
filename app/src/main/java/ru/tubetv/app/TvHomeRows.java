@@ -68,13 +68,14 @@ final class TvHomeRows extends ScrollView {
         setOnScrollChangeListener((View view, int x, int y, int oldX, int oldY) -> refreshVisible());
     }
 
-    void setRows(Map<String, List<VideoItem>> content, boolean loading,
+    void setRows(Map<String, List<VideoItem>> content, Set<String> loadingSections,
             Set<String> disabledSources) {
         for (Row row : rows.values()) {
             boolean enabled = TvHomePreferences.sectionEnabled(activity, row.section);
             row.root.setVisibility(enabled ? VISIBLE : GONE);
             List<VideoItem> next = content.get(row.section);
-            row.update(!enabled || next == null ? new ArrayList<>() : next, loading,
+            row.update(!enabled || next == null ? new ArrayList<>() : next,
+                    loadingSections.contains(row.section),
                     disabledSources.contains(row.section));
         }
         post(this::refreshVisible);
