@@ -53,4 +53,14 @@ public final class TvHomeFeedTest {
         assertEquals(20, rows.get(TvHomeFeed.VK).size());
         assertEquals(20, rows.get(TvHomeFeed.RECOMMENDED).size());
     }
+
+    @Test public void newSourceVideosAreOnTheLeftRegardlessOfArrivalOrder() {
+        VideoItem older = video("RUTUBE", "older", 10);
+        VideoItem newer = video("RUTUBE", "newer", 20);
+        Map<String, List<VideoItem>> rows = TvHomeFeed.build(Collections.emptyList(),
+                Arrays.asList(older, newer), Collections.emptyList(), Collections.emptySet(),
+                Collections.singleton("RUTUBE"), 10, true);
+        assertEquals(newer.stableKey(), rows.get(TvHomeFeed.RUTUBE).get(0).stableKey());
+        assertEquals(older.stableKey(), rows.get(TvHomeFeed.RUTUBE).get(1).stableKey());
+    }
 }

@@ -2,6 +2,7 @@ package ru.tubetv.app;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -35,7 +36,10 @@ final class TvHomeFeed {
             List<VideoItem> fromSource = new ArrayList<>();
             if (enabledSources.contains(source)) for (VideoItem item : candidates)
                 if (source.equals(item.source)) fromSource.add(item);
-            rows.put(source, select(RecommendationEngine.rank(fromSource, history),
+            List<VideoItem> ranked = RecommendationEngine.rank(fromSource, history);
+            // Keep recommendations for equally dated videos, but place newer uploads first.
+            Collections.sort(ranked, (a, b) -> Long.compare(b.publishedAtMs, a.publishedAtMs));
+            rows.put(source, select(ranked,
                     watched, unavailable, limit));
         }
         return rows;

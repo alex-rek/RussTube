@@ -30,8 +30,8 @@ final class TvHomeRows extends ScrollView {
         void navigation();
     }
 
-    private static final String[] TITLES = {
-            "Рекомендованные", "Недавно опубликованные", "RUTUBE рекомендует",
+    static final String[] TITLES = {
+            "Рекомендованные", "Новые", "RUTUBE рекомендует",
             "VK Видео рекомендует", "OK рекомендует", "Дзен рекомендует", "PeerTube"
     };
     private final Activity activity;
@@ -47,7 +47,7 @@ final class TvHomeRows extends ScrollView {
         super(activity);
         this.activity = activity;
         this.actions = actions;
-        cardWidth = px(Math.round(190 * TvScalePreferences.get(activity, TvScalePreferences.GRID)));
+        cardWidth = px(Math.round(190 * TvScalePreferences.get(activity, TvScalePreferences.HOME_GRID)));
         cardHeight = Math.round(cardWidth * 9f / 16f) + px(112);
         gap = px(14);
         setFillViewport(false);
@@ -62,7 +62,7 @@ final class TvHomeRows extends ScrollView {
             Row row = new Row(section, TITLES[index++]);
             rows.put(section, row);
             LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
-            rowParams.bottomMargin = px(17);
+            rowParams.bottomMargin = px(9);
             stack.addView(row.root, rowParams);
         }
         setOnScrollChangeListener((View view, int x, int y, int oldX, int oldY) -> refreshVisible());
@@ -71,8 +71,10 @@ final class TvHomeRows extends ScrollView {
     void setRows(Map<String, List<VideoItem>> content, boolean loading,
             Set<String> disabledSources) {
         for (Row row : rows.values()) {
+            boolean enabled = TvHomePreferences.sectionEnabled(activity, row.section);
+            row.root.setVisibility(enabled ? VISIBLE : GONE);
             List<VideoItem> next = content.get(row.section);
-            row.update(next == null ? new ArrayList<>() : next, loading,
+            row.update(!enabled || next == null ? new ArrayList<>() : next, loading,
                     disabledSources.contains(row.section));
         }
         post(this::refreshVisible);
@@ -121,9 +123,9 @@ final class TvHomeRows extends ScrollView {
             root = new LinearLayout(activity);
             root.setOrientation(LinearLayout.VERTICAL);
             root.setClipChildren(false);
-            TextView heading = text(title, 18, TvAppearancePreferences.text(activity));
+            TextView heading = text(title, 15, TvAppearancePreferences.text(activity));
             heading.setTypeface(Typeface.DEFAULT_BOLD);
-            root.addView(heading, new LinearLayout.LayoutParams(-1, px(32)));
+            root.addView(heading, new LinearLayout.LayoutParams(-1, px(25)));
             scroll = new HorizontalScrollView(activity) {
                 @Override protected void onScrollChanged(int left, int top, int oldLeft, int oldTop) {
                     super.onScrollChanged(left, top, oldLeft, oldTop);
@@ -136,9 +138,9 @@ final class TvHomeRows extends ScrollView {
             strip = new LinearLayout(activity);
             strip.setClipChildren(false);
             scroll.addView(strip, new HorizontalScrollView.LayoutParams(-2, -1));
-            root.addView(scroll, new LinearLayout.LayoutParams(-1, cardHeight + px(10)));
+            root.addView(scroll, new LinearLayout.LayoutParams(-1, cardHeight + px(6)));
             empty = text("", 14, TvAppearancePreferences.secondary(activity));
-            root.addView(empty, new LinearLayout.LayoutParams(-1, px(34)));
+            root.addView(empty, new LinearLayout.LayoutParams(-1, px(28)));
         }
 
         void update(List<VideoItem> next, boolean loading, boolean disabled) {

@@ -354,13 +354,37 @@ public final class TvSettingsActivity extends Activity {
                 TvScalePreferences.getStep(this, TvScalePreferences.GRID)),
                 () -> openScale("Масштаб сетки видео", TvScalePreferences.GRID));
         section("Главная страница");
+        row("Масштаб карточек главной", TvScalePreferences.label(
+                TvScalePreferences.getStep(this, TvScalePreferences.HOME_GRID)),
+                () -> openScale("Масштаб карточек главной", TvScalePreferences.HOME_GRID));
         int homeCount = TvHomePreferences.count(this);
         String[] homeCounts = {"10", "20", "30"};
         row("Количество видео в разделе", homeCount + "  ›", () ->
                 openChoices("Количество видео в разделе", homeCounts,
-                        homeCount / 10 - 1, 5,
+                        homeCount / 10 - 1, 6,
                         choice -> TvHomePreferences.setCount(this, TvHomePreferences.COUNTS[choice])));
+        int visibleSections = 0;
+        for (String section : TvHomeFeed.ORDER)
+            if (TvHomePreferences.sectionEnabled(this, section)) visibleSections++;
+        row("Разделы главной", visibleSections + " из " + TvHomeFeed.ORDER.size() + "  ›",
+                this::openHomeSections);
         note("Порядок видео выбирается отдельно в каждом разделе каталога.");
+    }
+
+    private void openHomeSections() {
+        if (selectionPanel != null) return;
+        boolean[] saved = new boolean[TvHomeFeed.ORDER.size()];
+        for (int i = 0; i < saved.length; i++)
+            saved[i] = TvHomePreferences.sectionEnabled(this, TvHomeFeed.ORDER.get(i));
+        selectionOrigin = getCurrentFocus();
+        selectionPanel = new SideSelectionPanel(this, "Разделы главной", TvHomeRows.TITLES,
+                saved, selected -> {
+                    for (int i = 0; i < selected.length; i++)
+                        TvHomePreferences.setSectionEnabled(this, TvHomeFeed.ORDER.get(i), selected[i]);
+                    closeSelection();
+                    renderPanel(7);
+                }, this::closeSelection);
+        showSelection();
     }
 
     private void openScale(String title, String key) {
@@ -372,7 +396,8 @@ public final class TvSettingsActivity extends Activity {
                 TvScalePreferences.getStep(this, key), selected -> {
                     TvScalePreferences.setStep(this, key, selected);
                     closeSelection();
-                    renderPanel(TvScalePreferences.GRID.equals(key) ? 4 : 3);
+                    renderPanel(TvScalePreferences.HOME_GRID.equals(key) ? 5
+                            : TvScalePreferences.GRID.equals(key) ? 4 : 3);
                 });
         showSelection();
     }

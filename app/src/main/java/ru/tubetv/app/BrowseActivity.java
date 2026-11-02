@@ -110,6 +110,7 @@ public final class BrowseActivity extends Activity {
     private int interfaceScaleStep;
     private int gridScaleStep;
     private int homeRowCount;
+    private int homeGridScaleStep;
     private int appearanceTheme;
     private int appearanceTransparency;
     private String focusKey;
@@ -168,6 +169,7 @@ public final class BrowseActivity extends Activity {
         interfaceScaleStep = TvScalePreferences.getStep(this, TvScalePreferences.INTERFACE);
         gridScaleStep = TvScalePreferences.getStep(this, TvScalePreferences.GRID);
         homeRowCount = TvHomePreferences.count(this);
+        homeGridScaleStep = TvScalePreferences.getStep(this, TvScalePreferences.HOME_GRID);
         appearanceTheme = TvAppearancePreferences.theme(this);
         appearanceTransparency = TvAppearancePreferences.panelTransparency(this);
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN
@@ -422,8 +424,11 @@ public final class BrowseActivity extends Activity {
         for (WatchHistoryStore.Entry entry : WatchHistoryStore.load(this)) history.add(entry.item);
         updateNavigation();
         boolean home = page == Page.HOME;
+        heading.setVisibility(home ? View.GONE : View.VISIBLE);
+        description.setVisibility(home ? View.GONE : View.VISIBLE);
         grid.setVisibility(home ? View.GONE : View.VISIBLE);
         homeRows.setVisibility(home ? View.VISIBLE : View.GONE);
+        if (home) homeRows.setRows(Collections.emptyMap(), true, Collections.emptySet());
         actionScroller.setVisibility(home ? View.GONE : View.VISIBLE);
         status.setVisibility(home ? View.GONE : View.VISIBLE);
         empty.setVisibility(home ? View.GONE : View.VISIBLE);
@@ -964,6 +969,8 @@ public final class BrowseActivity extends Activity {
     private void showChannel(VideoItem channel) {
         focusKey = null; focusPosition = 0; focusPending = true;
         cancel(); channelsMode = false; activeChannel = channel;
+        heading.setVisibility(View.VISIBLE);
+        description.setVisibility(View.VISIBLE);
         homeRows.setVisibility(View.GONE);
         grid.setVisibility(View.VISIBLE);
         actionScroller.setVisibility(View.VISIBLE);
@@ -1088,14 +1095,18 @@ public final class BrowseActivity extends Activity {
                         .getBoolean("recommendations", true));
         if (pending == 0) for (String source : FeedRepository.SOURCES) {
             int step = homeExtraQueries.containsKey(source) ? homeExtraQueries.get(source) : 0;
-            if (enabled.contains(source) && rows.get(source).size() < TvHomePreferences.count(this)
+            if (enabled.contains(source) && TvHomePreferences.sectionEnabled(this, source)
+                    && rows.get(source).size() < TvHomePreferences.count(this)
                     && step < 2) {
                 String query = step == 0 ? "популярное" : "интересное";
                 homeExtraQueries.put(source, step + 1);
                 enqueue(source, () -> repository.search(source, query));
             }
         }
-        homeRows.setRows(rows, pending > 0, disabled);
+        // Publish the ordered snapshot only after all source batches have completed.
+        // Otherwise each response can reorder and recreate the visible cards.
+        if (pending > 0) return;
+        homeRows.setRows(rows, false, disabled);
         if (focusPending && !menuExpanded && homeRows.hasVideos()) {
             homeRows.post(() -> {
                 if (page == Page.HOME && !menuExpanded) homeRows.focusFirst();
@@ -1436,6 +1447,11 @@ public final class BrowseActivity extends Activity {
         if (firstResume) { firstResume = false; return; }
         int newInterfaceStep = TvScalePreferences.getStep(this, TvScalePreferences.INTERFACE);
         int newGridStep = TvScalePreferences.getStep(this, TvScalePreferences.GRID);
+        int newHomeGridStep = TvScalePreferences.getStep(this, TvScalePreferences.HOME_GRID);
+        if (newHomeGridStep != homeGridScaleStep) {
+            recreate();
+            return;
+        }
         if (newInterfaceStep != interfaceScaleStep) {
             rememberFocus();
             recreate();

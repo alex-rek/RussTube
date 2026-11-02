@@ -8,6 +8,7 @@ import java.util.Locale;
 final class TvScalePreferences {
     static final String INTERFACE = "interface_scale_step";
     static final String GRID = "grid_scale_step";
+    static final String HOME_GRID = "home_grid_scale_step";
     static final int DEFAULT_STEP = 10;
     static final int LAST_STEP = 20;
 
