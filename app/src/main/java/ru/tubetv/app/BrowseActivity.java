@@ -124,6 +124,14 @@ public final class BrowseActivity extends Activity {
         rebuildBaseItems();
         applySort();
         display(pendingResultsEmptyText);
+        if (pending == 0 && activeChannel == null && (!items.isEmpty() || failed.isEmpty())) {
+            if (page == Page.HOME || page == Page.RECOMMENDATIONS)
+                TvHomeChannels.publishAsync(this, TvHomeChannels.RECOMMENDATIONS, items);
+            else if (page == Page.FILMS)
+                TvHomeChannels.publishAsync(this, TvHomeChannels.FILMS, items);
+            else if (page == Page.LIVE)
+                TvHomeChannels.publishTvCatalogAsync(this);
+        }
         if (BuildConfig.DEBUG) android.util.Log.i("RussTubeTvPerf", "renderResultsMs="
                 + (android.os.SystemClock.elapsedRealtime() - started) + " cards=" + items.size());
     };
@@ -142,6 +150,7 @@ public final class BrowseActivity extends Activity {
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
         updates = new UpdateCoordinator(this);
+        TvHomeChannels.initialize(this);
         sortMode = FeedSortPreferences.get(this, page.name());
         qualityFilter = Math.max(0, Math.min(QUALITY_LABELS.length - 1,
                 getSharedPreferences("browse", 0).getInt("tv_quality_filter", 0)));
@@ -162,6 +171,11 @@ public final class BrowseActivity extends Activity {
             catch (IllegalArgumentException ignored) { filmGroup = FilmGroup.ALL; }
             focusKey = state.getString("focus_key");
             focusPosition = state.getInt("focus_position", 0);
+        } else {
+            String section = getIntent().getStringExtra("open_section");
+            if (TvHomeChannels.FILMS.equals(section)) page = Page.FILMS;
+            else if (TvHomeChannels.TV.equals(section)) page = Page.LIVE;
+            else if (TvHomeChannels.RECOMMENDATIONS.equals(section)) page = Page.RECOMMENDATIONS;
         }
         show(page);
         String channel = getIntent().getStringExtra("channel");
@@ -534,6 +548,9 @@ public final class BrowseActivity extends Activity {
         display(page == Page.SEARCH ? "Введите запрос для поиска видео."
                 : tvCatalogOpen() ? "Каталог пуст. Выберите «Найти телеканалы» или «Добавить по ссылке»."
                 : page == Page.FILMS ? "Полнометражные видео пока не найдены." : "Пока здесь нет видео.");
+        if (page == Page.LIVE) TvHomeChannels.publishTvCatalogAsync(this);
+        else if (page == Page.FILMS && pending == 0 && !items.isEmpty())
+            TvHomeChannels.publishAsync(this, TvHomeChannels.FILMS, items);
         if (page == Page.SEARCH) query.requestFocus();
     }
 

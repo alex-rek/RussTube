@@ -1,4 +1,18 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
-    <application android:banner="@mipmap/tv_banner" tools:replace="android:banner" />
+    <uses-permission android:name="com.android.providers.tv.permission.WRITE_EPG_DATA" />
+    <application android:banner="@mipmap/tv_banner" tools:replace="android:banner">
+        <activity android:name=".TvHomeEntryActivity" android:exported="true" />
+        <service android:name=".TvHomeRefreshJob" android:permission="android.permission.BIND_JOB_SERVICE"
+            android:exported="true" />
+        <receiver android:name=".TvHomeReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.media.tv.action.INITIALIZE_PROGRAMS" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.media.tv.ACTION_PREVIEW_PROGRAM_BROWSABLE_DISABLED" />
+            </intent-filter>
+        </receiver>
+    </application>
 </manifest>

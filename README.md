@@ -4,7 +4,7 @@
 
 Для просмотра не требуется регистрация или вход в аккаунты видеоплощадок.
 
-[Скачать RussTube для Android](https://github.com/alex-rek/RussTube/releases/download/v0.6.15/RussTube-Mobile-0.6.15-debug.apk) · [Скачать RussTubeTV](https://github.com/alex-rek/RussTube/releases/download/v0.6.15/RussTube-TV-0.6.15-debug.apk) · [Все релизы](https://github.com/alex-rek/RussTube/releases)
+[Скачать RussTube для Android](https://github.com/alex-rek/RussTube/releases/download/v0.6.16/RussTube-Mobile-0.6.16-debug.apk) · [Скачать RussTubeTV](https://github.com/alex-rek/RussTube/releases/download/v0.6.16/RussTube-TV-0.6.16-debug.apk) · [Все релизы](https://github.com/alex-rek/RussTube/releases)
 
 ## RussTube для телефона
 
@@ -16,7 +16,7 @@
 
 ## RussTubeTV для Android TV и Google TV
 
-Телевизионная версия рассчитана на управление пультом: навигацию по карточкам, контекстные действия и настройки в боковых панелях. В приложении есть поиск, рекомендации, фильмы, подписки, история и избранное. В разделе «В эфире» телеканалы RUTUBE, VK Видео и OK.ru сохраняются в локальном каталоге и остаются доступными после перезапуска.
+Телевизионная версия рассчитана на управление пультом: навигацию по карточкам, контекстные действия и настройки в боковых панелях. В приложении есть поиск, рекомендации, фильмы, подписки, история и избранное. В разделе «В эфире» телеканалы RUTUBE, VK Видео и OK.ru сохраняются в локальном каталоге и остаются доступными после перезапуска. Подборки «Рекомендации», «Фильмы» и «ТВ» передаются на главный экран Android TV; их показ зависит от настроек главного экрана устройства.
 
 | Главная | Плеер |
 |:---:|:---:|

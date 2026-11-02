@@ -222,6 +222,13 @@ public final class TvSettingsActivity extends Activity {
         row("Сохранить в файл", "JSON  ›", this::exportLibrary);
         row("Загрузить из файла", "JSON  ›", this::importLibrary);
         note("Файл совместим с RussTube Mobile. При загрузке новые записи добавляются к сохранённым.");
+        if (TvHomeChannels.supported()) {
+            section("Главный экран Android TV / Google TV");
+            row("Добавить Рекомендации", "›", () -> TvHomeChannels.requestVisible(this, TvHomeChannels.RECOMMENDATIONS));
+            row("Добавить Фильмы", "›", () -> TvHomeChannels.requestVisible(this, TvHomeChannels.FILMS));
+            row("Добавить ТВ", "›", () -> TvHomeChannels.requestVisible(this, TvHomeChannels.TV));
+            note("Рекомендации добавляются по умолчанию. Показ других каналов подтверждается в системе.");
+        }
     }
 
     private void synchronization() {
