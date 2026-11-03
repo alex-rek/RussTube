@@ -68,7 +68,9 @@ public final class MobilePlayerActivity extends Activity {
     private ExoPlayer player;
     private HeadsetMediaControls headsetControls;
     private LinearLayout root;
+    private LinearLayout mediaBody;
     private LinearLayout toolbar;
+    private LinearLayout detailActions;
     private ScrollView detailsScroll;
     private MirrorVideoView surface;
     private FrameLayout videoFrame;
@@ -110,9 +112,10 @@ public final class MobilePlayerActivity extends Activity {
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
+        landscapeFullscreen = !isTabletLandscape();
         if (state != null) {
             portraitFullscreen = state.getBoolean("portrait_fullscreen", false);
-            landscapeFullscreen = state.getBoolean("landscape_fullscreen", true);
+            landscapeFullscreen = state.getBoolean("landscape_fullscreen", landscapeFullscreen);
             aspectMode = state.getInt("aspect_mode", 0);
         }
         getWindow().setStatusBarColor(BACKGROUND);
@@ -272,7 +275,10 @@ public final class MobilePlayerActivity extends Activity {
         controls.addView(timeline, size(-1, 24));
         videoFrame.addView(controls, new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM));
         videoFrame.setOnClickListener(v -> toggleControlsVisibility());
-        root.addView(videoFrame, size(-1, -2));
+        mediaBody = new LinearLayout(this);
+        mediaBody.setOrientation(LinearLayout.VERTICAL);
+        root.addView(mediaBody, new LinearLayout.LayoutParams(-1, 0, 1));
+        mediaBody.addView(videoFrame, size(-1, -2));
 
         detailsScroll = new ScrollView(this);
         detailsScroll.setFillViewport(true);
@@ -311,13 +317,13 @@ public final class MobilePlayerActivity extends Activity {
         }
         details.addView(channelRow, size(-1, 52));
 
-        LinearLayout actions = new LinearLayout(this);
-        actions.setPadding(0, dp(18), 0, dp(10));
-        favoriteButton = action(actions, "♡  Избранное", this::toggleFavorite);
-        action(actions, "⚙  Скорость", this::chooseSpeed);
-        action(actions, "HQ", this::chooseQuality);
-        action(actions, "▣ ТВ", () -> VideoActions.openOnTv(this, video));
-        details.addView(actions, size(-1, 76));
+        detailActions = new LinearLayout(this);
+        detailActions.setPadding(0, dp(18), 0, dp(10));
+        favoriteButton = action(detailActions, "♡  Избранное", this::toggleFavorite);
+        action(detailActions, "⚙  Скорость", this::chooseSpeed);
+        action(detailActions, "HQ", this::chooseQuality);
+        action(detailActions, "▣ ТВ", () -> VideoActions.openOnTv(this, video));
+        details.addView(detailActions, size(-1, 76));
         if (video.subtitle != null && !video.subtitle.isEmpty()) {
             TextView description = label(video.subtitle, 14, SECONDARY);
             description.setPadding(0, dp(12), 0, dp(12));
@@ -330,18 +336,40 @@ public final class MobilePlayerActivity extends Activity {
         channelVideos.setVisibility(video.channelId.isEmpty() ? View.GONE : View.VISIBLE);
         details.addView(channelVideos, size(-1, 48));
         detailsScroll.addView(details);
-        root.addView(detailsScroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        mediaBody.addView(detailsScroll, new LinearLayout.LayoutParams(-1, 0, 1));
         updateActions();
         return root;
     }
 
     private void applyOrientation() {
         boolean fullscreen = isFullscreen();
+        boolean split = isTabletLandscape() && !fullscreen;
         toolbar.setVisibility(fullscreen ? View.GONE : View.VISIBLE);
         detailsScroll.setVisibility(fullscreen ? View.GONE : View.VISIBLE);
-        videoFrame.setLayoutParams(fullscreen
-                ? new LinearLayout.LayoutParams(-1, 0, 1)
-                : size(-1, -2));
+        mediaBody.setOrientation(split ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
+        mediaBody.setGravity(split ? Gravity.CENTER_VERTICAL : Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        mediaBody.setPadding(split ? dp(14) : 0, 0, split ? dp(14) : 0, 0);
+        boolean tabletPortrait = TabletLayout.isTablet(getResources()
+                .getConfiguration().smallestScreenWidthDp) && !split && !fullscreen;
+        int videoWidth = tabletPortrait
+                ? Math.min(getResources().getDisplayMetrics().widthPixels, dp(800)) : -1;
+        videoFrame.setLayoutParams(split
+                ? new LinearLayout.LayoutParams(0, -2, 0.62f)
+                : fullscreen ? new LinearLayout.LayoutParams(-1, 0, 1)
+                : size(videoWidth, -2));
+        detailsScroll.setLayoutParams(split
+                ? new LinearLayout.LayoutParams(0, -1, 0.38f)
+                : new LinearLayout.LayoutParams(-1, 0, 1));
+        detailActions.setOrientation(split ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
+        detailActions.setLayoutParams(size(-1, split ? 220 : 76));
+        for (int i = 0; i < detailActions.getChildCount(); i++) {
+            LinearLayout.LayoutParams params = split
+                    ? new LinearLayout.LayoutParams(-1, dp(44))
+                    : new LinearLayout.LayoutParams(0, dp(44), 1);
+            params.rightMargin = split ? 0 : dp(8);
+            params.bottomMargin = split ? dp(5) : 0;
+            detailActions.getChildAt(i).setLayoutParams(params);
+        }
         getWindow().getDecorView().setSystemUiVisibility(fullscreen
                 ? View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
                     | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
@@ -362,6 +390,12 @@ public final class MobilePlayerActivity extends Activity {
     private boolean isFullscreen() {
         return portraitFullscreen || (landscapeFullscreen
                 && getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE);
+    }
+
+    private boolean isTabletLandscape() {
+        Configuration configuration = getResources().getConfiguration();
+        return TabletLayout.isTablet(configuration.smallestScreenWidthDp)
+                && configuration.orientation == Configuration.ORIENTATION_LANDSCAPE;
     }
 
     private void toggleFullscreen() {
@@ -415,7 +449,7 @@ public final class MobilePlayerActivity extends Activity {
 
     @Override public void onConfigurationChanged(Configuration configuration) {
         super.onConfigurationChanged(configuration);
-        landscapeFullscreen = true;
+        landscapeFullscreen = !isTabletLandscape();
         applyOrientation();
     }
 

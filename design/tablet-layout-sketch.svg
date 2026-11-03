@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1310" viewBox="0 0 1800 1310" role="img" aria-label="Набросок планшетного интерфейса RussTube: каталог в горизонтальной и вертикальной ориентации, плеер в горизонтальной ориентации">
+  <defs>
+    <linearGradient id="back" x2="1" y2="1"><stop stop-color="#071426"/><stop offset="1" stop-color="#10243b"/></linearGradient>
+    <linearGradient id="aurora" x2="1" y2="1"><stop stop-color="#00d9c0"/><stop offset=".48" stop-color="#19c8ff"/><stop offset="1" stop-color="#855bff"/></linearGradient>
+    <linearGradient id="thumbA" x2="1" y2="1"><stop stop-color="#125c70"/><stop offset=".52" stop-color="#16498b"/><stop offset="1" stop-color="#332477"/></linearGradient>
+    <linearGradient id="thumbB" x2="1" y2="1"><stop stop-color="#543957"/><stop offset=".55" stop-color="#173c68"/><stop offset="1" stop-color="#118e98"/></linearGradient>
+    <linearGradient id="thumbC" x2="1" y2="1"><stop stop-color="#155452"/><stop offset=".52" stop-color="#28718a"/><stop offset="1" stop-color="#142a62"/></linearGradient>
+    <linearGradient id="video" x2="1" y2="1"><stop stop-color="#0e4169"/><stop offset=".5" stop-color="#253e78"/><stop offset="1" stop-color="#622d72"/></linearGradient>
+    <filter id="shadow"><feDropShadow dx="0" dy="10" stdDeviation="18" flood-color="#000" flood-opacity=".35"/></filter>
+    <symbol id="card" viewBox="0 0 250 188">
+      <rect width="250" height="188" rx="14" fill="#10243b"/>
+      <rect width="250" height="140" rx="14" fill="url(#thumbA)"/>
+      <path d="M0 112 Q72 62 137 111 T250 76 V140 H0Z" fill="#00d9c0" opacity=".22"/>
+      <path d="M0 138 Q85 102 148 131 T250 94 V140 H0Z" fill="#020d27" opacity=".52"/>
+      <circle cx="207" cy="39" r="19" fill="#00162b" opacity=".6"/>
+      <path d="M202 30 L202 48 L216 39 Z" fill="#f4f8ff"/>
+      <rect x="9" y="9" width="28" height="28" rx="7" fill="#071426" opacity=".85"/>
+      <text x="23" y="29" text-anchor="middle" font-size="18" fill="#00d9c0" font-weight="700">R</text>
+      <rect x="202" y="112" width="39" height="20" rx="5" fill="#071426" opacity=".85"/>
+      <text x="221" y="127" text-anchor="middle" font-size="12" fill="white">12:40</text>
+      <text x="12" y="161" font-size="15" fill="#f4f8ff" font-weight="700">Название видео</text>
+      <text x="12" y="178" font-size="11" fill="#aec1da">Канал · 2 дня назад</text>
+    </symbol>
+    <style>
+      text{font-family:Arial,Segoe UI,sans-serif}
+      .section{font-size:24px;font-weight:700;fill:#f4f8ff}
+      .label{font-size:17px;fill:#aec1da}
+      .small{font-size:14px;fill:#aec1da}
+      .nav{font-size:15px;fill:#f4f8ff}
+      .frame{fill:url(#back);stroke:#285071;stroke-width:2}
+    </style>
+  </defs>
+  <rect width="1800" height="1310" fill="#04101e"/>
+  <text x="42" y="42" font-size="28" font-weight="700" fill="#f4f8ff">RussTube · набросок для планшета</text>
+  <text x="1535" y="40" class="small">Расположение элементов, не финальный макет</text>
+
+  <!-- Landscape catalog -->
+  <text x="42" y="83" class="label">Каталог · альбомная ориентация</text>
+  <rect x="42" y="101" width="1092" height="590" rx="24" class="frame" filter="url(#shadow)"/>
+  <rect x="58" y="117" width="82" height="558" rx="18" fill="#10243b"/>
+  <rect x="67" y="178" width="64" height="62" rx="12" fill="#0b5064" stroke="#00d9c0" stroke-width="2"/>
+  <text x="99" y="152" text-anchor="middle" font-size="19" font-weight="700" fill="#00d9c0">RT</text>
+  <text x="99" y="208" text-anchor="middle" font-size="25" fill="white">⌂</text>
+  <text x="99" y="222" text-anchor="middle" font-size="10" fill="white">Главная</text>
+  <text x="99" y="284" text-anchor="middle" font-size="24" fill="#aec1da">▣</text>
+  <text x="99" y="301" text-anchor="middle" font-size="10" fill="#aec1da">Фильмы</text>
+  <text x="99" y="359" text-anchor="middle" font-size="24" fill="#aec1da">◉</text>
+  <text x="99" y="376" text-anchor="middle" font-size="10" fill="#aec1da">В эфире</text>
+  <text x="99" y="433" text-anchor="middle" font-size="24" fill="#aec1da">♡</text>
+  <text x="99" y="450" text-anchor="middle" font-size="10" fill="#aec1da">Подписки</text>
+  <text x="99" y="509" text-anchor="middle" font-size="24" fill="#aec1da">☷</text>
+  <text x="99" y="526" text-anchor="middle" font-size="10" fill="#aec1da">Вы</text>
+  <rect x="165" y="124" width="560" height="48" rx="15" fill="#10243b" stroke="#315d75"/>
+  <text x="184" y="155" font-size="17" fill="#aec1da">⌕  Поиск видео и каналов</text>
+  <text x="860" y="154" font-size="28" font-weight="700" fill="#f4f8ff">Russ<tspan fill="#00d9c0">Tube</tspan></text>
+  <text x="166" y="211" class="section">Рекомендованные</text>
+  <use href="#card" x="166" y="225" width="280" height="210"/>
+  <use href="#card" x="465" y="225" width="280" height="210"/>
+  <use href="#card" x="764" y="225" width="280" height="210"/>
+  <text x="166" y="460" class="section">Новые видео подписок</text>
+  <use href="#card" x="166" y="474" width="280" height="210"/>
+  <use href="#card" x="465" y="474" width="280" height="210"/>
+  <use href="#card" x="764" y="474" width="280" height="210"/>
+  <text x="551" y="716" text-anchor="middle" class="small">Ряды листаются независимо по горизонтали · карточки появляются по мере прокрутки</text>
+
+  <!-- Portrait catalog -->
+  <text x="1171" y="83" class="label">Каталог · книжная ориентация</text>
+  <rect x="1171" y="101" width="586" height="1161" rx="24" class="frame" filter="url(#shadow)"/>
+  <text x="1195" y="147" font-size="26" font-weight="700" fill="#f4f8ff">Russ<tspan fill="#00d9c0">Tube</tspan></text>
+  <rect x="1195" y="169" width="538" height="49" rx="14" fill="#10243b" stroke="#315d75"/>
+  <text x="1215" y="200" font-size="17" fill="#aec1da">⌕  Поиск видео и каналов</text>
+  <text x="1195" y="258" class="section">Главная</text>
+  <text x="1195" y="293" class="label">Рекомендованные</text>
+  <use href="#card" x="1195" y="309" width="252" height="202"/>
+  <use href="#card" x="1468" y="309" width="252" height="202"/>
+  <use href="#card" x="1195" y="529" width="252" height="202"/>
+  <use href="#card" x="1468" y="529" width="252" height="202"/>
+  <text x="1195" y="780" class="label">Недавно опубликованные</text>
+  <use href="#card" x="1195" y="796" width="252" height="202"/>
+  <use href="#card" x="1468" y="796" width="252" height="202"/>
+  <rect x="1185" y="1184" width="558" height="64" rx="18" fill="#10243b" stroke="#315d75"/>
+  <text x="1240" y="1214" text-anchor="middle" font-size="22" fill="#00d9c0">⌂</text>
+  <text x="1240" y="1233" text-anchor="middle" font-size="11" fill="#00d9c0">Главная</text>
+  <text x="1350" y="1214" text-anchor="middle" font-size="20" fill="#aec1da">▣</text>
+  <text x="1350" y="1233" text-anchor="middle" font-size="11" fill="#aec1da">Фильмы</text>
+  <text x="1460" y="1214" text-anchor="middle" font-size="20" fill="#aec1da">◉</text>
+  <text x="1460" y="1233" text-anchor="middle" font-size="11" fill="#aec1da">В эфире</text>
+  <text x="1570" y="1214" text-anchor="middle" font-size="20" fill="#aec1da">♡</text>
+  <text x="1570" y="1233" text-anchor="middle" font-size="11" fill="#aec1da">Подписки</text>
+  <text x="1680" y="1214" text-anchor="middle" font-size="20" fill="#aec1da">☷</text>
+  <text x="1680" y="1233" text-anchor="middle" font-size="11" fill="#aec1da">Вы</text>
+
+  <!-- Landscape player -->
+  <text x="42" y="746" class="label">Плеер · альбомная ориентация</text>
+  <rect x="42" y="763" width="1092" height="499" rx="24" class="frame" filter="url(#shadow)"/>
+  <text x="68" y="806" font-size="20" fill="#f4f8ff">‹  Назад</text>
+  <text x="936" y="806" font-size="20" font-weight="700" fill="#f4f8ff">Russ<tspan fill="#00d9c0">Tube</tspan></text>
+  <rect x="68" y="830" width="674" height="379" rx="16" fill="url(#video)"/>
+  <path d="M68 1105 Q195 1006 318 1098 T563 1036 T742 1086 V1209 H68Z" fill="#071426" opacity=".62"/>
+  <circle cx="405" cy="1015" r="39" fill="#071426" opacity=".72" stroke="#00d9c0" stroke-width="3"/>
+  <path d="M396 995 L396 1035 L426 1015 Z" fill="white"/>
+  <rect x="85" y="1161" width="640" height="4" rx="2" fill="#7c96ad"/>
+  <rect x="85" y="1161" width="245" height="4" rx="2" fill="#00d9c0"/>
+  <text x="88" y="1190" class="small">12:40</text>
+  <text x="673" y="1190" class="small">48:12</text>
+  <text x="775" y="863" font-size="25" font-weight="700" fill="#f4f8ff">Байкал. Сила природы</text>
+  <text x="775" y="895" class="label">RUTUBE · Мир без границ</text>
+  <text x="775" y="926" class="small">12,4 тыс. просмотров · 12 окт. 2026</text>
+  <rect x="775" y="954" width="333" height="56" rx="12" fill="#0b5064" stroke="#00d9c0" stroke-width="2"/>
+  <text x="941" y="989" text-anchor="middle" font-size="19" fill="#f4f8ff">▶  Продолжить</text>
+  <rect x="775" y="1024" width="160" height="52" rx="12" fill="#10243b"/>
+  <text x="855" y="1057" text-anchor="middle" font-size="16" fill="#f4f8ff">♡  Избранное</text>
+  <rect x="948" y="1024" width="160" height="52" rx="12" fill="#10243b"/>
+  <text x="1028" y="1057" text-anchor="middle" font-size="16" fill="#f4f8ff">▣  На ТВ</text>
+  <text x="775" y="1121" class="label">Описание и видео канала</text>
+  <text x="775" y="1150" class="small">Подробности прокручиваются отдельно</text>
+  <text x="775" y="1183" class="small">⛶  Полный экран по кнопке</text>
+</svg>

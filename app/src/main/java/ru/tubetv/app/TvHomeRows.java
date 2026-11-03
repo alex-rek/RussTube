@@ -41,13 +41,20 @@ final class TvHomeRows extends ScrollView {
     private final int cardWidth;
     private final int cardHeight;
     private final int gap;
+    private final boolean tabletMode;
     private String selectedSection = TvHomeFeed.RECOMMENDED;
 
     TvHomeRows(Activity activity, Actions actions) {
+        this(activity, actions, false);
+    }
+
+    TvHomeRows(Activity activity, Actions actions, boolean tabletMode) {
         super(activity);
         this.activity = activity;
         this.actions = actions;
-        cardWidth = px(Math.round(190 * TvScalePreferences.get(activity, TvScalePreferences.HOME_GRID)));
+        this.tabletMode = tabletMode;
+        cardWidth = px(tabletMode ? 260 : Math.round(190
+                * TvScalePreferences.get(activity, TvScalePreferences.HOME_GRID)));
         cardHeight = Math.round(cardWidth * 9f / 16f) + px(112);
         gap = px(14);
         setFillViewport(false);
@@ -71,9 +78,10 @@ final class TvHomeRows extends ScrollView {
     void setRows(Map<String, List<VideoItem>> content, Set<String> loadingSections,
             Set<String> disabledSources) {
         for (Row row : rows.values()) {
-            boolean enabled = TvHomePreferences.sectionEnabled(activity, row.section);
-            row.root.setVisibility(enabled ? VISIBLE : GONE);
+            boolean enabled = tabletMode || TvHomePreferences.sectionEnabled(activity, row.section);
             List<VideoItem> next = content.get(row.section);
+            row.root.setVisibility(enabled && (!tabletMode || next != null && !next.isEmpty())
+                    ? VISIBLE : GONE);
             row.update(!enabled || next == null ? new ArrayList<>() : next,
                     loadingSections.contains(row.section),
                     disabledSources.contains(row.section));
@@ -124,7 +132,8 @@ final class TvHomeRows extends ScrollView {
             root = new LinearLayout(activity);
             root.setOrientation(LinearLayout.VERTICAL);
             root.setClipChildren(false);
-            TextView heading = text(title, 15, TvAppearancePreferences.text(activity));
+            TextView heading = text(title, 15, tabletMode ? MobileAuroraTheme.TEXT
+                    : TvAppearancePreferences.text(activity));
             heading.setTypeface(Typeface.DEFAULT_BOLD);
             root.addView(heading, new LinearLayout.LayoutParams(-1, px(25)));
             scroll = new HorizontalScrollView(activity) {
@@ -140,7 +149,8 @@ final class TvHomeRows extends ScrollView {
             strip.setClipChildren(false);
             scroll.addView(strip, new HorizontalScrollView.LayoutParams(-2, -1));
             root.addView(scroll, new LinearLayout.LayoutParams(-1, cardHeight + px(6)));
-            empty = text("", 14, TvAppearancePreferences.secondary(activity));
+            empty = text("", 14, tabletMode ? MobileAuroraTheme.MUTED
+                    : TvAppearancePreferences.secondary(activity));
             root.addView(empty, new LinearLayout.LayoutParams(-1, px(28)));
         }
 
@@ -150,6 +160,13 @@ final class TvHomeRows extends ScrollView {
             empty.setVisibility(next.isEmpty() ? VISIBLE : GONE);
             scroll.setVisibility(next.isEmpty() ? GONE : VISIBLE);
             if (sameItems(next)) return;
+            if (tabletMode && next.size() >= items.size() && sameKeyPrefix(next)) {
+                int previous = items.size();
+                items = new ArrayList<>(next);
+                for (int i = previous; i < items.size(); i++) addSlot();
+                post(this::populate);
+                return;
+            }
             boolean focused = getFocusedChild() != null;
             String focusedKey = focused && selected < items.size()
                     ? items.get(selected).stableKey() : null;
@@ -157,11 +174,7 @@ final class TvHomeRows extends ScrollView {
             strip.removeAllViews();
             slots.clear();
             for (int i = 0; i < items.size(); i++) {
-                FrameLayout slot = new FrameLayout(activity);
-                LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(cardWidth, cardHeight);
-                params.rightMargin = gap;
-                strip.addView(slot, params);
-                slots.add(slot);
+                addSlot();
                 if (focusedKey != null && focusedKey.equals(items.get(i).stableKey())) selected = i;
             }
             selected = Math.max(0, Math.min(selected, items.size() - 1));
@@ -171,8 +184,23 @@ final class TvHomeRows extends ScrollView {
         boolean sameItems(List<VideoItem> next) {
             if (items.size() != next.size()) return false;
             for (int i = 0; i < next.size(); i++)
-                if (items.get(i) != next.get(i)) return false;
+                if (tabletMode ? !items.get(i).stableKey().equals(next.get(i).stableKey())
+                        : items.get(i) != next.get(i)) return false;
             return true;
+        }
+
+        boolean sameKeyPrefix(List<VideoItem> next) {
+            for (int i = 0; i < items.size(); i++)
+                if (!items.get(i).stableKey().equals(next.get(i).stableKey())) return false;
+            return true;
+        }
+
+        void addSlot() {
+            FrameLayout slot = new FrameLayout(activity);
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(cardWidth, cardHeight);
+            params.rightMargin = gap;
+            strip.addView(slot, params);
+            slots.add(slot);
         }
 
         void populate() {
@@ -238,19 +266,22 @@ final class TvHomeRows extends ScrollView {
             artwork.addView(duration, durationParams);
             card.addView(artwork, new LinearLayout.LayoutParams(-1,
                     Math.round(cardWidth * 9f / 16f)));
-            TextView title = text(item.title, 14, TvAppearancePreferences.text(activity));
+            TextView title = text(item.title, 14, tabletMode ? MobileAuroraTheme.TEXT
+                    : TvAppearancePreferences.text(activity));
             title.setMaxLines(2);
             title.setEllipsize(TextUtils.TruncateAt.END);
             title.setPadding(px(10), px(5), px(10), 0);
             card.addView(title, new LinearLayout.LayoutParams(-1, px(48)));
             TextView channel = text(item.source + " · " + VideoPresentation.channel(item),
-                    11, TvAppearancePreferences.secondary(activity));
+                    11, tabletMode ? MobileAuroraTheme.MUTED
+                            : TvAppearancePreferences.secondary(activity));
             channel.setSingleLine(true);
             channel.setEllipsize(TextUtils.TruncateAt.END);
             channel.setPadding(px(10), 0, px(10), 0);
             card.addView(channel, new LinearLayout.LayoutParams(-1, px(23)));
             TextView views = text(VideoPresentation.views(item), 11,
-                    TvAppearancePreferences.secondary(activity));
+                    tabletMode ? MobileAuroraTheme.MUTED
+                            : TvAppearancePreferences.secondary(activity));
             views.setPadding(px(10), 0, px(10), 0);
             card.addView(views, new LinearLayout.LayoutParams(-1, px(23)));
             ((TubeApplication) activity.getApplication()).imageLoader().load(item.source,
@@ -305,11 +336,14 @@ final class TvHomeRows extends ScrollView {
 
     private GradientDrawable border(boolean focused) {
         GradientDrawable shape = new GradientDrawable();
-        shape.setColor(focused ? TvAppearancePreferences.focus(activity)
+        shape.setColor(focused ? tabletMode ? 0xff0b5064
+                : TvAppearancePreferences.focus(activity)
+                : tabletMode ? MobileAuroraTheme.SURFACE_DARK
                 : TvAppearancePreferences.surface(activity));
         shape.setCornerRadius(px(8));
         shape.setStroke(px(focused ? 3 : 1), focused
-                ? TvAppearancePreferences.accent(activity) : Color.TRANSPARENT);
+                ? tabletMode ? MobileAuroraTheme.TEAL
+                : TvAppearancePreferences.accent(activity) : Color.TRANSPARENT);
         return shape;
     }
 

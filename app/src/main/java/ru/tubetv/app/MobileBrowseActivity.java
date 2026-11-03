@@ -46,6 +46,7 @@ import java.util.ArrayList;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -123,9 +124,13 @@ public final class MobileBrowseActivity extends Activity {
     private HorizontalScrollView topics;
     private EditText query;
     private GridView list;
+    private TvHomeRows tabletHomeRows;
+    private final Map<String, List<VideoItem>> tabletDisplayedRows = new LinkedHashMap<>();
     private FeedAdapter adapter;
     private MobileSettingsPanel settingsPanel;
     private LinearLayout navigation;
+    private LinearLayout tabletRail;
+    private LinearLayout layoutRoot;
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
@@ -154,6 +159,7 @@ public final class MobileBrowseActivity extends Activity {
 
     private View createContent() {
         LinearLayout root = new LinearLayout(this);
+        layoutRoot = root;
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(BACKGROUND);
 
@@ -378,6 +384,21 @@ public final class MobileBrowseActivity extends Activity {
         empty.setPadding(dp(28), dp(18), dp(28), dp(18));
         feed.addView(empty, new FrameLayout.LayoutParams(-1, -1));
         list.setEmptyView(empty);
+        tabletHomeRows = new TvHomeRows(this, new TvHomeRows.Actions() {
+            @Override public void play(VideoItem item) {
+                skipResumeReload = true;
+                VideoActions.play(MobileBrowseActivity.this, item);
+            }
+            @Override public void menu(VideoItem item) {
+                VideoActions.show(MobileBrowseActivity.this, item,
+                        () -> showChannel(item), MobileBrowseActivity.this::refreshFilmsIfVisible);
+            }
+            @Override public void navigation() {
+                if (tabletRail.getChildCount() > 1) tabletRail.getChildAt(1).requestFocus();
+            }
+        }, true);
+        tabletHomeRows.setVisibility(View.GONE);
+        feed.addView(tabletHomeRows, new FrameLayout.LayoutParams(-1, -1));
         settingsPanel = new MobileSettingsPanel(this,
                 () -> startActivity(new Intent(this, NetworkSettingsActivity.class)), () -> show(page),
                 this::exportLibrary, this::importLibrary);
@@ -393,14 +414,27 @@ public final class MobileBrowseActivity extends Activity {
         navParams.leftMargin = dp(2);
         navParams.rightMargin = dp(2);
         root.addView(navigation, navParams);
+        tabletRail = new LinearLayout(this);
+        tabletRail.setOrientation(LinearLayout.VERTICAL);
+        tabletRail.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        tabletRail.setBackground(MobileAuroraTheme.stroke(PANEL, dp(16), 0xff315d75, dp(1)));
+        FrameLayout shell = new FrameLayout(this);
+        shell.setBackgroundColor(BACKGROUND);
+        shell.addView(root, new FrameLayout.LayoutParams(-1, -1));
+        FrameLayout.LayoutParams railParams = new FrameLayout.LayoutParams(
+                dp(TabletLayout.RAIL_WIDTH_DP), -1, Gravity.START);
+        shell.addView(tabletRail, railParams);
+        tabletRail.setVisibility(View.GONE);
         ViewCompat.setOnApplyWindowInsetsListener(root, (view, insets) -> {
             Insets safe = insets.getInsets(WindowInsetsCompat.Type.systemBars()
                     | WindowInsetsCompat.Type.displayCutout());
-            root.setPadding(0, safe.top, 0, safe.bottom);
+            root.setPadding(safe.left + (isTabletLandscape() ? dp(TabletLayout.RAIL_WIDTH_DP) : 0),
+                    safe.top, safe.right, safe.bottom);
+            tabletRail.setPadding(0, safe.top + dp(10), 0, safe.bottom);
             return insets;
         });
         ViewCompat.requestApplyInsets(root);
-        return root;
+        return shell;
     }
 
     private void show(Page target) {
@@ -929,27 +963,51 @@ public final class MobileBrowseActivity extends Activity {
     private void applyLayout() {
         boolean landscape = getResources().getConfiguration().orientation
                 == Configuration.ORIENTATION_LANDSCAPE;
-        headerContainer.setVisibility(landscape ? View.GONE : View.VISIBLE);
-        landscapeControls.setVisibility(landscape ? View.VISIBLE : View.GONE);
-        searchRow.setVisibility(!landscape && page == Page.SEARCH ? View.VISIBLE : View.GONE);
-        topics.setVisibility(!landscape && activeChannel == null
+        boolean tablet = isTablet();
+        boolean tabletLandscape = tablet && landscape;
+        headerContainer.setVisibility(tabletLandscape || !landscape ? View.VISIBLE : View.GONE);
+        headerContainer.getLayoutParams().height = dp(tabletLandscape ? 64 : 106);
+        headerContainer.requestLayout();
+        heading.setVisibility(tabletLandscape ? View.GONE : View.VISIBLE);
+        landscapeControls.setVisibility(landscape && !tablet ? View.VISIBLE : View.GONE);
+        searchRow.setVisibility(tabletLandscape || !landscape && page == Page.SEARCH
+                ? View.VISIBLE : View.GONE);
+        topics.setVisibility((!landscape || tabletLandscape) && activeChannel == null
                 && (page == Page.HOME || page == Page.SEARCH || page == Page.POPULAR)
                 ? View.VISIBLE : View.GONE);
         actionsScroller.setVisibility(actions.getChildCount() > 0
-                && (!landscape || page == Page.FILMS || page == Page.LIVE)
+                && (!landscape || tabletLandscape || page == Page.FILMS || page == Page.LIVE)
                 ? View.VISIBLE : View.GONE);
-        sortRow.setVisibility(!landscape && page != Page.SETTINGS
+        sortRow.setVisibility((!landscape || tabletLandscape) && page != Page.SETTINGS
                 && page != Page.HISTORY && page != Page.LIBRARY
                 && (page != Page.CHANNELS || activeChannel != null)
                 ? View.VISIBLE : View.GONE);
-        status.setVisibility(landscape || page == Page.SETTINGS ? View.GONE : View.VISIBLE);
+        status.setVisibility(landscape && !tabletLandscape || page == Page.SETTINGS
+                ? View.GONE : View.VISIBLE);
         navigation.setVisibility(landscape ? View.GONE : View.VISIBLE);
+        tabletRail.setVisibility(tabletLandscape ? View.VISIBLE : View.GONE);
+        ViewCompat.requestApplyInsets(layoutRoot);
         float widthDp = getResources().getDisplayMetrics().widthPixels
                 / getResources().getDisplayMetrics().density;
-        int columns = widthDp >= 1000 ? 3 : widthDp >= 600 || landscape ? 2 : 1;
+        int columns = TabletLayout.columns(Math.round(widthDp), tablet, landscape);
         list.setNumColumns(columns);
         list.setHorizontalSpacing(dp(14));
+        FrameLayout.LayoutParams settingsParams = (FrameLayout.LayoutParams) settingsPanel.getLayoutParams();
+        settingsParams.width = tablet ? Math.min(dp(600), dp(Math.round(widthDp)
+                - (tabletLandscape ? TabletLayout.RAIL_WIDTH_DP : 0))) : -1;
+        settingsParams.gravity = Gravity.END;
+        settingsPanel.setLayoutParams(settingsParams);
+        updateTabletHomeRows();
         adapter.notifyDataSetChanged();
+    }
+
+    private boolean isTablet() {
+        return TabletLayout.isTablet(getResources().getConfiguration().smallestScreenWidthDp);
+    }
+
+    private boolean isTabletLandscape() {
+        return isTablet() && getResources().getConfiguration().orientation
+                == Configuration.ORIENTATION_LANDSCAPE;
     }
 
     @Override public void onConfigurationChanged(Configuration configuration) {
@@ -999,10 +1057,56 @@ public final class MobileBrowseActivity extends Activity {
                 : page == Page.LIBRARY || page == Page.HISTORY ? "История просмотра пока пуста"
                 : page == Page.CHANNELS && activeChannel == null ? "Подписок пока нет"
                 : "Видео пока не найдены");
+        updateTabletHomeRows();
+    }
+
+    private void updateTabletHomeRows() {
+        if (tabletHomeRows == null) return;
+        boolean showRows = isTabletLandscape() && page == Page.HOME && activeChannel == null;
+        tabletHomeRows.setVisibility(showRows ? View.VISIBLE : View.GONE);
+        list.setVisibility(showRows || page == Page.SETTINGS ? View.GONE : View.VISIBLE);
+        if (!showRows) {
+            empty.setVisibility(page != Page.SETTINGS && items.isEmpty()
+                    ? View.VISIBLE : View.GONE);
+            return;
+        }
+        Set<String> enabled = new HashSet<>();
+        for (String source : FeedRepository.SOURCES)
+            if (MobileBrowsePreferences.sourceEnabled(this, source)) enabled.add(source);
+        Set<String> hidden = new HashSet<>(UnavailableVideoStore.keys(this));
+        for (VideoItem item : history) hidden.add(item.stableKey());
+        Map<String, List<VideoItem>> latest = TvHomeFeed.build(subscriptionCandidates,
+                candidates, history, UnavailableVideoStore.keys(this), enabled, 30,
+                MobileBrowsePreferences.recommendHistory(this));
+        Map<String, List<VideoItem>> visible = new LinkedHashMap<>();
+        for (String section : TvHomeFeed.ORDER) {
+            LinkedHashMap<String, VideoItem> stable = new LinkedHashMap<>();
+            boolean sourceEnabled = section.equals(TvHomeFeed.RECOMMENDED)
+                    || section.equals(TvHomeFeed.RECENT) || enabled.contains(section);
+            if (sourceEnabled && pending > 0) {
+                List<VideoItem> existing = tabletDisplayedRows.get(section);
+                if (existing != null) for (VideoItem item : existing)
+                    if (!hidden.contains(item.stableKey())) stable.put(item.stableKey(), item);
+            }
+            List<VideoItem> found = latest.get(section);
+            if (sourceEnabled && found != null) for (VideoItem item : found)
+                if (!hidden.contains(item.stableKey()) && stable.size() < 30)
+                    stable.putIfAbsent(item.stableKey(), item);
+            visible.put(section, new ArrayList<>(stable.values()));
+        }
+        tabletDisplayedRows.clear();
+        tabletDisplayedRows.putAll(visible);
+        tabletHomeRows.setRows(visible, Collections.emptySet(), Collections.emptySet());
+        empty.setVisibility(tabletHomeRows.hasVideos() ? View.GONE : View.VISIBLE);
     }
 
     private void updateNavigation() {
         navigation.removeAllViews();
+        tabletRail.removeAllViews();
+        TextView railBrand = label("RT", 18, ACCENT);
+        railBrand.setTypeface(Typeface.DEFAULT_BOLD);
+        railBrand.setGravity(Gravity.CENTER);
+        tabletRail.addView(railBrand, size(-1, 56));
         Page selected = page == Page.SEARCH || page == Page.POPULAR ? Page.HOME
                 : page == Page.HISTORY || page == Page.FAVORITES || page == Page.CHANNELS
                         || page == Page.SETTINGS ? Page.LIBRARY : page;
@@ -1021,6 +1125,27 @@ public final class MobileBrowseActivity extends Activity {
             tab.addView(name, size(-1, 22));
             navigation.addView(tab, new LinearLayout.LayoutParams(0, -1, 1));
             tab.setOnClickListener(v -> {
+                if (page != target || activeChannel != null) show(target);
+            });
+            LinearLayout railTab = new LinearLayout(this);
+            railTab.setOrientation(LinearLayout.VERTICAL);
+            railTab.setGravity(Gravity.CENTER);
+            railTab.setContentDescription(TAB_LABELS[i]);
+            railTab.setBackground(active ? MobileAuroraTheme.stroke(0xff0b5064,
+                    dp(12), ACCENT, dp(2)) : round(PANEL, 12));
+            ImageView railIcon = new ImageView(this);
+            railIcon.setImageDrawable(TvIcons.icon(TAB_ICONS[i],
+                    active ? ACCENT : 0xffa4b9db, dp(25)));
+            railTab.addView(railIcon, size(27, 27));
+            TextView railName = label(TAB_LABELS[i], 10, active ? ACCENT : 0xffa4b9db);
+            railName.setGravity(Gravity.CENTER);
+            railTab.addView(railName, size(-1, 20));
+            LinearLayout.LayoutParams railItemParams = size(-1, 68);
+            railItemParams.leftMargin = dp(5);
+            railItemParams.rightMargin = dp(5);
+            railItemParams.bottomMargin = dp(4);
+            tabletRail.addView(railTab, railItemParams);
+            railTab.setOnClickListener(v -> {
                 if (page != target || activeChannel != null) show(target);
             });
         }
