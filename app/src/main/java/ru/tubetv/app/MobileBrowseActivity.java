@@ -6,6 +6,7 @@ import android.content.Intent;
 import android.net.Uri;
 import android.content.res.Configuration;
 import android.content.res.ColorStateList;
+import android.animation.ValueAnimator;
 import android.graphics.Color;
 import android.graphics.Rect;
 import android.graphics.Typeface;
@@ -22,6 +23,7 @@ import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.animation.DecelerateInterpolator;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.BaseAdapter;
@@ -131,6 +133,14 @@ public final class MobileBrowseActivity extends Activity {
     private LinearLayout navigation;
     private LinearLayout tabletRail;
     private LinearLayout layoutRoot;
+    private LinearLayout topChrome;
+    private ValueAnimator chromeAnimator;
+    private float chromeHiddenFraction;
+    private boolean chromeHidden;
+    private boolean userScrolling;
+    private int lastScrollFirst = -1;
+    private int lastScrollTop;
+    private int scrollDistance;
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
@@ -162,6 +172,9 @@ public final class MobileBrowseActivity extends Activity {
         layoutRoot = root;
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(BACKGROUND);
+        topChrome = new LinearLayout(this);
+        topChrome.setOrientation(LinearLayout.VERTICAL);
+        root.addView(topChrome, size(-1, -2));
 
         header = new LinearLayout(this);
         header.setOrientation(LinearLayout.VERTICAL);
@@ -236,7 +249,7 @@ public final class MobileBrowseActivity extends Activity {
         compactAction(compactRow, "Избранное", () -> show(Page.FAVORITES));
         compactAction(compactRow, "Настройки", this::settings);
         landscapeControls.addView(compactRow);
-        root.addView(landscapeControls, size(-1, 52));
+        topChrome.addView(landscapeControls, size(-1, 52));
 
         searchRow = new LinearLayout(this);
         searchRow.setBaselineAligned(false);
@@ -262,7 +275,7 @@ public final class MobileBrowseActivity extends Activity {
         searchRow.addView(query, new LinearLayout.LayoutParams(0, dp(48), 1));
         TextView voice = icon("mic", "Голосовой поиск", this::startVoiceSearch);
         searchRow.addView(voice, size(48, 48));
-        root.addView(searchRow, size(-1, 66));
+        topChrome.addView(searchRow, size(-1, 66));
         watchQuery(query, landscapeQuery);
         watchQuery(landscapeQuery, query);
 
@@ -277,7 +290,7 @@ public final class MobileBrowseActivity extends Activity {
         aurora.setScaleType(ImageView.ScaleType.CENTER_CROP);
         headerContainer.addView(aurora, new FrameLayout.LayoutParams(-1, -1));
         headerContainer.addView(header, new FrameLayout.LayoutParams(-1, -1));
-        root.addView(headerContainer, 0, size(-1, 106));
+        topChrome.addView(headerContainer, 0, size(-1, 106));
 
         topics = new HorizontalScrollView(this);
         topics.setHorizontalScrollBarEnabled(false);
@@ -302,14 +315,14 @@ public final class MobileBrowseActivity extends Activity {
             });
         }
         topics.addView(topicRow);
-        root.addView(topics, size(-1, 50));
+        topChrome.addView(topics, size(-1, 50));
 
         actions = new LinearLayout(this);
         actions.setPadding(dp(16), 0, dp(16), dp(4));
         actionsScroller = new HorizontalScrollView(this);
         actionsScroller.setHorizontalScrollBarEnabled(false);
         actionsScroller.addView(actions);
-        root.addView(actionsScroller, size(-1, 49));
+        topChrome.addView(actionsScroller, size(-1, 49));
         sortRow = new LinearLayout(this);
         sortRow.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
         sortRow.setPadding(dp(16), 0, dp(16), 0);
@@ -319,10 +332,10 @@ public final class MobileBrowseActivity extends Activity {
         sortButton.setBackground(round(0xff0c2a43, 12));
         sortButton.setOnClickListener(v -> chooseSort());
         sortRow.addView(sortButton, size(-2, 38));
-        root.addView(sortRow, size(-1, 48));
+        topChrome.addView(sortRow, size(-1, 48));
         status = label("", 12, SECONDARY);
         status.setPadding(dp(16), 0, dp(16), 0);
-        root.addView(status, size(-1, 28));
+        topChrome.addView(status, size(-1, 28));
 
         FrameLayout feed = new FrameLayout(this);
         list = new GridView(this);
@@ -337,9 +350,20 @@ public final class MobileBrowseActivity extends Activity {
         adapter = new FeedAdapter();
         list.setAdapter(adapter);
         list.setOnScrollListener(new AbsListView.OnScrollListener() {
-            @Override public void onScrollStateChanged(AbsListView view, int state) { }
+            @Override public void onScrollStateChanged(AbsListView view, int state) {
+                userScrolling = state != SCROLL_STATE_IDLE;
+                scrollDistance = 0;
+            }
             @Override public void onScroll(AbsListView view, int first, int count, int total) {
                 if (count <= 0) return;
+                int top = view.getChildAt(0).getTop();
+                if (lastScrollFirst >= 0 && userScrolling && page != Page.SETTINGS) {
+                    int delta = first > lastScrollFirst ? dp(24)
+                            : first < lastScrollFirst ? -dp(24) : lastScrollTop - top;
+                    onCardScroll(delta);
+                }
+                lastScrollFirst = first;
+                lastScrollTop = top;
                 int width = list.getColumnWidth();
                 if (width <= 0) width = Math.max(dp(180), getResources().getDisplayMetrics().widthPixels - dp(28));
                 for (int i = first + count; i < Math.min(items.size(), first + count + 4); i++)
@@ -348,12 +372,14 @@ public final class MobileBrowseActivity extends Activity {
             }
         });
         list.setOnTouchListener((view, event) -> {
-            if (page != Page.HOME || activeChannel != null) return false;
+            if (page == Page.SETTINGS) return false;
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
                 pullStartY = event.getY();
                 pullFromTop = list.getFirstVisiblePosition() == 0
                         && (list.getChildCount() == 0 || list.getChildAt(0).getTop()
                         >= list.getPaddingTop());
+            } else if (event.getActionMasked() == MotionEvent.ACTION_MOVE) {
+                if (pullFromTop && event.getY() - pullStartY > dp(18)) setChromeHidden(false);
             } else if (event.getActionMasked() == MotionEvent.ACTION_UP) {
                 if (pullFromTop && event.getY() - pullStartY > dp(110)) refresh();
                 pullFromTop = false;
@@ -368,14 +394,15 @@ public final class MobileBrowseActivity extends Activity {
             if (page == Page.CHANNELS && activeChannel == null) showChannel(item);
             else {
                 skipResumeReload = true;
-                VideoActions.play(this, item);
+                VideoActions.play(this, item, items);
             }
         });
         list.setOnItemLongClickListener((parent, view, position, id) -> {
             if (position >= items.size()) return false;
             VideoItem item = items.get(position);
             if (tvCatalogOpen()) showTvChannelActions(item);
-            else VideoActions.show(this, item, () -> showChannel(item), this::refreshFilmsIfVisible);
+            else VideoActions.show(this, item, () -> showChannel(item),
+                    this::refreshFilmsIfVisible, items);
             return true;
         });
         feed.addView(list, new FrameLayout.LayoutParams(-1, -1));
@@ -387,16 +414,34 @@ public final class MobileBrowseActivity extends Activity {
         tabletHomeRows = new TvHomeRows(this, new TvHomeRows.Actions() {
             @Override public void play(VideoItem item) {
                 skipResumeReload = true;
-                VideoActions.play(MobileBrowseActivity.this, item);
+                VideoActions.play(MobileBrowseActivity.this, item, items);
+            }
+            @Override public void play(VideoItem item, List<VideoItem> section) {
+                skipResumeReload = true;
+                VideoActions.play(MobileBrowseActivity.this, item, section);
             }
             @Override public void menu(VideoItem item) {
                 VideoActions.show(MobileBrowseActivity.this, item,
-                        () -> showChannel(item), MobileBrowseActivity.this::refreshFilmsIfVisible);
+                        () -> showChannel(item), MobileBrowseActivity.this::refreshFilmsIfVisible,
+                        items);
+            }
+            @Override public void menu(VideoItem item, List<VideoItem> section) {
+                VideoActions.show(MobileBrowseActivity.this, item,
+                        () -> showChannel(item), MobileBrowseActivity.this::refreshFilmsIfVisible,
+                        section);
             }
             @Override public void navigation() {
                 if (tabletRail.getChildCount() > 1) tabletRail.getChildAt(1).requestFocus();
             }
         }, true);
+        tabletHomeRows.setScrollMotionListener(dy -> {
+            if (page == Page.HOME && isTabletLandscape() && tabletHomeRows.isShown())
+                onCardScroll(dy);
+        });
+        tabletHomeRows.setPullRefreshListener(() -> {
+            if (page == Page.HOME && activeChannel == null) refresh();
+        }, () -> setChromeHidden(false));
+        tabletHomeRows.setBackgroundColor(BACKGROUND);
         tabletHomeRows.setVisibility(View.GONE);
         feed.addView(tabletHomeRows, new FrameLayout.LayoutParams(-1, -1));
         settingsPanel = new MobileSettingsPanel(this,
@@ -428,8 +473,7 @@ public final class MobileBrowseActivity extends Activity {
         ViewCompat.setOnApplyWindowInsetsListener(root, (view, insets) -> {
             Insets safe = insets.getInsets(WindowInsetsCompat.Type.systemBars()
                     | WindowInsetsCompat.Type.displayCutout());
-            root.setPadding(safe.left + (isTabletLandscape() ? dp(TabletLayout.RAIL_WIDTH_DP) : 0),
-                    safe.top, safe.right, safe.bottom);
+            root.setPadding(safe.left, safe.top, safe.right, safe.bottom);
             tabletRail.setPadding(0, safe.top + dp(10), 0, safe.bottom);
             return insets;
         });
@@ -960,7 +1004,61 @@ public final class MobileBrowseActivity extends Activity {
         return button;
     }
 
+    private void onCardScroll(int delta) {
+        if (delta == 0 || page == Page.SETTINGS) return;
+        if (scrollDistance != 0 && Integer.signum(scrollDistance) != Integer.signum(delta))
+            scrollDistance = 0;
+        scrollDistance = Math.max(-dp(32), Math.min(dp(32), scrollDistance + delta));
+        if (scrollDistance >= dp(16)) {
+            setChromeHidden(true);
+            scrollDistance = 0;
+        } else if (scrollDistance <= -dp(16)) {
+            setChromeHidden(false);
+            scrollDistance = 0;
+        }
+    }
+
+    private void setChromeHidden(boolean hidden) {
+        if (chromeHidden == hidden) return;
+        chromeHidden = hidden;
+        if (chromeAnimator != null) chromeAnimator.cancel();
+        float start = chromeHiddenFraction;
+        float end = hidden ? 1f : 0f;
+        chromeAnimator = ValueAnimator.ofFloat(start, end);
+        chromeAnimator.setDuration(Math.max(90, Math.round(240 * Math.abs(end - start))));
+        chromeAnimator.setInterpolator(new DecelerateInterpolator());
+        chromeAnimator.addUpdateListener(animation ->
+                applyChromeFraction((float) animation.getAnimatedValue()));
+        chromeAnimator.start();
+    }
+
+    private void applyChromeFraction(float fraction) {
+        chromeHiddenFraction = fraction;
+        LinearLayout.LayoutParams topParams = (LinearLayout.LayoutParams) topChrome.getLayoutParams();
+        topParams.topMargin = -Math.round(topChrome.getMeasuredHeight() * fraction);
+        topChrome.setLayoutParams(topParams);
+        LinearLayout.LayoutParams navParams = (LinearLayout.LayoutParams) navigation.getLayoutParams();
+        navParams.bottomMargin = -Math.round(navigation.getMeasuredHeight() * fraction);
+        navigation.setLayoutParams(navParams);
+        FrameLayout.LayoutParams contentParams = (FrameLayout.LayoutParams) layoutRoot.getLayoutParams();
+        contentParams.leftMargin = isTabletLandscape()
+                ? Math.round(dp(TabletLayout.RAIL_WIDTH_DP) * (1f - fraction)) : 0;
+        layoutRoot.setLayoutParams(contentParams);
+        tabletRail.setTranslationX(isTabletLandscape()
+                ? -dp(TabletLayout.RAIL_WIDTH_DP) * fraction : 0f);
+    }
+
+    private void resetChrome() {
+        if (chromeAnimator != null) chromeAnimator.cancel();
+        chromeHidden = false;
+        userScrolling = false;
+        scrollDistance = 0;
+        lastScrollFirst = -1;
+        applyChromeFraction(0f);
+    }
+
     private void applyLayout() {
+        resetChrome();
         boolean landscape = getResources().getConfiguration().orientation
                 == Configuration.ORIENTATION_LANDSCAPE;
         boolean tablet = isTablet();
@@ -997,8 +1095,8 @@ public final class MobileBrowseActivity extends Activity {
                 - (tabletLandscape ? TabletLayout.RAIL_WIDTH_DP : 0))) : -1;
         settingsParams.gravity = Gravity.END;
         settingsPanel.setLayoutParams(settingsParams);
-        updateTabletHomeRows();
         adapter.notifyDataSetChanged();
+        updateTabletHomeRows();
     }
 
     private boolean isTablet() {

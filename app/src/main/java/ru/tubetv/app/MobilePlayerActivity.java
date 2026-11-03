@@ -24,6 +24,7 @@ import android.view.Surface;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
@@ -48,6 +49,7 @@ import androidx.media3.exoplayer.ExoPlayer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import org.json.JSONArray;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -69,8 +71,12 @@ public final class MobilePlayerActivity extends Activity {
     private HeadsetMediaControls headsetControls;
     private LinearLayout root;
     private LinearLayout mediaBody;
+    private LinearLayout playerTop;
+    private ScrollView relatedScroll;
+    private TextView pageFullscreenButton;
     private LinearLayout toolbar;
     private LinearLayout detailActions;
+    private LinearLayout channelRow;
     private ScrollView detailsScroll;
     private MirrorVideoView surface;
     private FrameLayout videoFrame;
@@ -87,6 +93,7 @@ public final class MobilePlayerActivity extends Activity {
     private TextView subscribeButton;
     private SeekBar timeline;
     private VideoItem video;
+    private final List<VideoItem> relatedVideos = new ArrayList<>();
     private String streamUrl;
     private String streamMimeType;
     private List<MediaItem.SubtitleConfiguration> streamSubtitles = java.util.Collections.emptyList();
@@ -131,6 +138,13 @@ public final class MobilePlayerActivity extends Activity {
                 .withChannel(intent.getStringExtra("channel_id"), intent.getStringExtra("channel_name"),
                         intent.getStringExtra("channel_url"), intent.getBooleanExtra("live", false))
                 .withMetrics(intent.getLongExtra("views", -1), intent.getLongExtra("published_at", 0));
+        try {
+            JSONArray related = new JSONArray(intent.getStringExtra("related_items"));
+            for (int i = 0; i < Math.min(20, related.length()); i++) {
+                VideoItem candidate = VideoJson.decode(related.getJSONObject(i));
+                if (!candidate.stableKey().equals(video.stableKey())) relatedVideos.add(candidate);
+            }
+        } catch (Exception ignored) { }
         if (intent.getBooleanExtra("resume_background_audio", false)) {
             autoResume = AudioPlaybackService.shouldAutoResume();
             resumePosition = AudioPlaybackService.takePosition(this, video, resumePosition);
@@ -177,11 +191,16 @@ public final class MobilePlayerActivity extends Activity {
         official.setContentDescription("Открыть на платформе");
         official.setOnClickListener(v -> openOfficial());
         toolbar.addView(official, size(48, 52));
+        TextView expand = label("⛶", 26, Color.WHITE);
+        expand.setGravity(Gravity.CENTER);
+        expand.setContentDescription("На весь экран");
+        expand.setOnClickListener(v -> toggleFullscreen());
+        toolbar.addView(expand, size(48, 52));
         root.addView(toolbar, size(-1, 52));
 
         videoFrame = new FrameLayout(this) {
             @Override protected void onMeasure(int widthSpec, int heightSpec) {
-                if (isFullscreen()) {
+                if (isFullscreen() || isTabletLandscape()) {
                     super.onMeasure(widthSpec, heightSpec);
                     return;
                 }
@@ -278,7 +297,53 @@ public final class MobilePlayerActivity extends Activity {
         mediaBody = new LinearLayout(this);
         mediaBody.setOrientation(LinearLayout.VERTICAL);
         root.addView(mediaBody, new LinearLayout.LayoutParams(-1, 0, 1));
-        mediaBody.addView(videoFrame, size(-1, -2));
+        playerTop = new LinearLayout(this);
+        mediaBody.addView(playerTop, size(-1, -2));
+        playerTop.addView(videoFrame, size(-1, -2));
+        relatedScroll = new ScrollView(this);
+        relatedScroll.setFillViewport(false);
+        relatedScroll.setVerticalScrollBarEnabled(false);
+        LinearLayout related = new LinearLayout(this);
+        related.setOrientation(LinearLayout.VERTICAL);
+        related.setPadding(dp(10), dp(8), dp(8), dp(12));
+        TextView relatedTitle = label("Ещё видео из раздела", 17, Color.WHITE);
+        relatedTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        related.addView(relatedTitle, size(-1, 38));
+        for (VideoItem candidate : relatedVideos) {
+            LinearLayout card = new LinearLayout(this);
+            card.setOrientation(LinearLayout.VERTICAL);
+            card.setBackground(round(MobileAuroraTheme.SURFACE, 12));
+            ImageView image = new ImageView(this);
+            image.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            image.setBackgroundColor(0xff17324b);
+            card.addView(image, size(-1, 122));
+            ((TubeApplication) getApplication()).imageLoader().load(candidate.source,
+                    candidate.thumbnail, image, dp(240), dp(122));
+            TextView name = label(candidate.title, 14, Color.WHITE);
+            name.setMaxLines(2);
+            name.setEllipsize(TextUtils.TruncateAt.END);
+            name.setPadding(dp(9), dp(7), dp(9), dp(3));
+            card.addView(name, size(-1, -2));
+            TextView source = label(candidate.source + " · "
+                    + VideoPresentation.channel(candidate), 12, SECONDARY);
+            source.setMaxLines(1);
+            source.setEllipsize(TextUtils.TruncateAt.END);
+            source.setPadding(dp(9), 0, dp(9), dp(8));
+            card.addView(source, size(-1, -2));
+            LinearLayout.LayoutParams cardParams = size(-1, -2);
+            cardParams.bottomMargin = dp(10);
+            related.addView(card, cardParams);
+            card.setOnClickListener(v -> {
+                if (player != null) player.pause();
+                VideoActions.play(this, candidate, relatedVideos);
+                finish();
+            });
+        }
+        if (relatedVideos.isEmpty()) related.addView(label(
+                "Другие видео появятся при открытии из каталога", 13, SECONDARY), size(-1, -2));
+        relatedScroll.addView(related);
+        relatedScroll.setVisibility(View.GONE);
+        playerTop.addView(relatedScroll, size(0, -1));
 
         detailsScroll = new ScrollView(this);
         detailsScroll.setFillViewport(true);
@@ -296,7 +361,7 @@ public final class MobilePlayerActivity extends Activity {
         metrics.setPadding(0, dp(7), 0, dp(18));
         details.addView(metrics, size(-1, -2));
 
-        LinearLayout channelRow = new LinearLayout(this);
+        channelRow = new LinearLayout(this);
         channelRow.setGravity(Gravity.CENTER_VERTICAL);
         String channel = VideoPresentation.channel(video);
         TextView avatar = label(channel.substring(0, 1).toUpperCase(), 19, Color.WHITE);
@@ -323,6 +388,7 @@ public final class MobilePlayerActivity extends Activity {
         action(detailActions, "⚙  Скорость", this::chooseSpeed);
         action(detailActions, "HQ", this::chooseQuality);
         action(detailActions, "▣ ТВ", () -> VideoActions.openOnTv(this, video));
+        pageFullscreenButton = action(detailActions, "⛶  На весь экран", this::toggleFullscreen);
         details.addView(detailActions, size(-1, 76));
         if (video.subtitle != null && !video.subtitle.isEmpty()) {
             TextView description = label(video.subtitle, 14, SECONDARY);
@@ -346,28 +412,28 @@ public final class MobilePlayerActivity extends Activity {
         boolean split = isTabletLandscape() && !fullscreen;
         toolbar.setVisibility(fullscreen ? View.GONE : View.VISIBLE);
         detailsScroll.setVisibility(fullscreen ? View.GONE : View.VISIBLE);
-        mediaBody.setOrientation(split ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
-        mediaBody.setGravity(split ? Gravity.CENTER_VERTICAL : Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        mediaBody.setOrientation(LinearLayout.VERTICAL);
         mediaBody.setPadding(split ? dp(14) : 0, 0, split ? dp(14) : 0, 0);
-        boolean tabletPortrait = TabletLayout.isTablet(getResources()
-                .getConfiguration().smallestScreenWidthDp) && !split && !fullscreen;
-        int videoWidth = tabletPortrait
-                ? Math.min(getResources().getDisplayMetrics().widthPixels, dp(800)) : -1;
+        playerTop.setOrientation(split ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
+        playerTop.setLayoutParams(fullscreen || split
+                ? new LinearLayout.LayoutParams(-1, 0, 1) : size(-1, -2));
+        relatedScroll.setVisibility(split ? View.VISIBLE : View.GONE);
         videoFrame.setLayoutParams(split
-                ? new LinearLayout.LayoutParams(0, -2, 0.62f)
+                ? new LinearLayout.LayoutParams(0, -1, 0.65f)
                 : fullscreen ? new LinearLayout.LayoutParams(-1, 0, 1)
-                : size(videoWidth, -2));
+                : size(-1, -2));
+        relatedScroll.setLayoutParams(split
+                ? new LinearLayout.LayoutParams(0, -1, 0.35f) : size(0, -1));
         detailsScroll.setLayoutParams(split
-                ? new LinearLayout.LayoutParams(0, -1, 0.38f)
+                ? size(-1, 150)
                 : new LinearLayout.LayoutParams(-1, 0, 1));
-        detailActions.setOrientation(split ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
-        detailActions.setLayoutParams(size(-1, split ? 220 : 76));
+        channelRow.setVisibility(split ? View.GONE : View.VISIBLE);
+        detailActions.setOrientation(LinearLayout.HORIZONTAL);
+        detailActions.setLayoutParams(size(-1, 76));
+        pageFullscreenButton.setVisibility(split ? View.VISIBLE : View.GONE);
         for (int i = 0; i < detailActions.getChildCount(); i++) {
-            LinearLayout.LayoutParams params = split
-                    ? new LinearLayout.LayoutParams(-1, dp(44))
-                    : new LinearLayout.LayoutParams(0, dp(44), 1);
-            params.rightMargin = split ? 0 : dp(8);
-            params.bottomMargin = split ? dp(5) : 0;
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(44), 1);
+            params.rightMargin = dp(8);
             detailActions.getChildAt(i).setLayoutParams(params);
         }
         getWindow().getDecorView().setSystemUiVisibility(fullscreen
@@ -426,15 +492,17 @@ public final class MobilePlayerActivity extends Activity {
         float scale = Math.min(frameWidth / width, frameHeight / videoHeight);
         int fittedWidth = Math.max(1, Math.round(width * scale));
         int fittedHeight = Math.max(1, Math.round(videoHeight * scale));
-        if (aspectMode == 1) {
+        int effectiveAspect = !isFullscreen() && TabletLayout.isTablet(
+                getResources().getConfiguration().smallestScreenWidthDp) ? 0 : aspectMode;
+        if (effectiveAspect == 1) {
             fittedWidth = videoFrame.getWidth();
             fittedHeight = videoFrame.getHeight();
             float videoAspect = width / videoHeight;
             float frameAspect = frameWidth / frameHeight;
             surface.setCrop(videoAspect > frameAspect ? frameAspect / videoAspect : 1f,
                     videoAspect < frameAspect ? videoAspect / frameAspect : 1f);
-        } else if (aspectMode == 2 || aspectMode == 3) {
-            float ratio = aspectMode == 2 ? 16f / 9f : 4f / 3f;
+        } else if (effectiveAspect == 2 || effectiveAspect == 3) {
+            float ratio = effectiveAspect == 2 ? 16f / 9f : 4f / 3f;
             fittedWidth = Math.min(videoFrame.getWidth(), Math.round(frameHeight * ratio));
             fittedHeight = Math.min(videoFrame.getHeight(), Math.round(frameWidth / ratio));
             surface.setCrop(1f, 1f);

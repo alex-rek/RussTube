@@ -8,6 +8,7 @@ import android.graphics.drawable.GradientDrawable;
 import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
@@ -28,7 +29,10 @@ final class TvHomeRows extends ScrollView {
         void play(VideoItem item);
         void menu(VideoItem item);
         void navigation();
+        default void play(VideoItem item, List<VideoItem> section) { play(item); }
+        default void menu(VideoItem item, List<VideoItem> section) { menu(item); }
     }
+    interface ScrollMotionListener { void onScroll(int dy); }
 
     static final String[] TITLES = {
             "Рекомендованные", "Новые", "RUTUBE рекомендует",
@@ -43,6 +47,12 @@ final class TvHomeRows extends ScrollView {
     private final int gap;
     private final boolean tabletMode;
     private String selectedSection = TvHomeFeed.RECOMMENDED;
+    private ScrollMotionListener scrollMotionListener;
+    private Runnable pullRefresh;
+    private Runnable pullReveal;
+    private float pullStartX;
+    private float pullStartY;
+    private boolean pullFromTop;
 
     TvHomeRows(Activity activity, Actions actions) {
         this(activity, actions, false);
@@ -72,7 +82,48 @@ final class TvHomeRows extends ScrollView {
             rowParams.bottomMargin = px(9);
             stack.addView(row.root, rowParams);
         }
-        setOnScrollChangeListener((View view, int x, int y, int oldX, int oldY) -> refreshVisible());
+        setOnScrollChangeListener((View view, int x, int y, int oldX, int oldY) -> {
+            refreshVisible();
+            if (scrollMotionListener != null && y != oldY)
+                scrollMotionListener.onScroll(y - oldY);
+        });
+    }
+
+    void setScrollMotionListener(ScrollMotionListener listener) {
+        scrollMotionListener = listener;
+    }
+
+    void setPullRefreshListener(Runnable refresh, Runnable reveal) {
+        pullRefresh = refresh;
+        pullReveal = reveal;
+    }
+
+    @Override public boolean dispatchTouchEvent(MotionEvent event) {
+        if (pullRefresh != null) {
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    pullStartX = event.getX();
+                    pullStartY = event.getY();
+                    pullFromTop = getScrollY() == 0;
+                    break;
+                case MotionEvent.ACTION_MOVE:
+                    if (pullFromTop && event.getY() - pullStartY > px(18)
+                            && Math.abs(event.getX() - pullStartX) < event.getY() - pullStartY
+                            && pullReveal != null) pullReveal.run();
+                    break;
+                case MotionEvent.ACTION_UP:
+                    if (pullFromTop && getScrollY() == 0
+                            && event.getY() - pullStartY > px(110)
+                            && Math.abs(event.getX() - pullStartX) < event.getY() - pullStartY)
+                        post(pullRefresh);
+                    pullFromTop = false;
+                    break;
+                case MotionEvent.ACTION_CANCEL:
+                    pullFromTop = false;
+                    break;
+            }
+        }
+        return super.dispatchTouchEvent(event);
     }
 
     void setRows(Map<String, List<VideoItem>> content, Set<String> loadingSections,
@@ -296,11 +347,11 @@ final class TvHomeRows extends ScrollView {
                     smoothScrollTo(0, root.getTop());
                 }
             });
-            card.setOnClickListener(view -> actions.play(item));
-            card.setOnLongClickListener(view -> { actions.menu(item); return true; });
+            card.setOnClickListener(view -> actions.play(item, items));
+            card.setOnLongClickListener(view -> { actions.menu(item, items); return true; });
             card.setOnKeyListener((view, key, event) -> {
                 if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
-                if (key == KeyEvent.KEYCODE_MENU) { actions.menu(item); return true; }
+                if (key == KeyEvent.KEYCODE_MENU) { actions.menu(item, items); return true; }
                 if (key == KeyEvent.KEYCODE_DPAD_LEFT) {
                     if (index == 0) actions.navigation(); else focus(index - 1);
                     return true;

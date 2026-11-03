@@ -21,6 +21,11 @@ final class VideoActions {
 
     static void show(Activity activity, VideoItem item, Runnable openChannel,
                      Runnable onFilmsChanged) {
+        show(activity, item, openChannel, onFilmsChanged, null);
+    }
+
+    static void show(Activity activity, VideoItem item, Runnable openChannel,
+                     Runnable onFilmsChanged, java.util.List<VideoItem> section) {
         boolean subscribed = SubscriptionStore.contains(activity, item);
         String name = item.channelName.isEmpty() ? "Канал " + item.channelId : item.channelName;
         boolean hasChannel = !item.channelId.isEmpty();
@@ -39,7 +44,7 @@ final class VideoActions {
         panel.addView(title);
         java.util.List<String> labels = new java.util.ArrayList<>();
         java.util.List<Runnable> actions = new java.util.ArrayList<>();
-        labels.add("Смотреть"); actions.add(() -> play(activity, item));
+        labels.add("Смотреть"); actions.add(() -> play(activity, item, section));
         if (BuildConfig.MOBILE_VARIANT) {
             labels.add("Смотреть на телевизоре");
             actions.add(() -> openOnTv(activity, item));
@@ -187,6 +192,10 @@ final class VideoActions {
     }
 
     static void play(Activity activity, VideoItem item) {
+        play(activity, item, null);
+    }
+
+    static void play(Activity activity, VideoItem item, java.util.List<VideoItem> section) {
         WatchProgressStore.Progress watched = WatchProgressStore.get(activity, item);
         long duration = watched.durationMs > 0 ? watched.durationMs : item.durationMs;
         long position = item.isLive || (duration > 0 && watched.positionMs >= duration * .95)
@@ -202,6 +211,16 @@ final class VideoActions {
                 .putExtra("channel_id", item.channelId).putExtra("channel_name", item.channelName)
                 .putExtra("channel_url", item.channelUrl).putExtra("live", item.isLive);
         intent.putExtra("views", item.views).putExtra("published_at", item.publishedAtMs);
+        if (BuildConfig.MOBILE_VARIANT && section != null) {
+            org.json.JSONArray related = new org.json.JSONArray();
+            for (VideoItem candidate : section) {
+                if (related.length() >= 20) break;
+                if (candidate.stableKey().equals(item.stableKey())) continue;
+                try { related.put(VideoJson.encode(candidate)); }
+                catch (Exception ignored) { }
+            }
+            intent.putExtra("related_items", related.toString());
+        }
         activity.startActivity(intent);
     }
 
