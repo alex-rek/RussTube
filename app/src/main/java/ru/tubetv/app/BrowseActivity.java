@@ -61,6 +61,7 @@ public final class BrowseActivity extends Activity {
             "Подписки", "Каналы", "История", "Избранное"};
     private static final String[] NAV_ICONS = {"home", "popular", "recommend", "films", "live",
             "subscriptions", "channels", "history", "favorite"};
+    private static final long NAV_FOCUS_DELAY_MS = 150;
     private static final String[] QUALITY_LABELS = {"Любое", "720p+", "1080p+", "1440p+", "4K"};
     private static final int[] QUALITY_WIDTHS = {0, 1280, 1920, 2560, 3840};
     private Page page = Page.HOME;
@@ -114,6 +115,7 @@ public final class BrowseActivity extends Activity {
     private ScrollView menuContainer;
     private LinearLayout content;
     private boolean menuExpanded;
+    private Runnable pendingNavigation;
     private int interfaceScaleStep;
     private int gridScaleStep;
     private int homeRowCount;
@@ -222,12 +224,12 @@ public final class BrowseActivity extends Activity {
                 setMenuExpanded(false);
                 if (page != target) { focusKey = null; focusPosition = 0; focusPending = true; }
                 show(target);
-            });
+            }, target);
             button.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
             rail.addView(button, new LinearLayout.LayoutParams(-1, dp(44)));
             navigation.add(button);
         }
-        settingsNavigation = navigationButton("Настройки", "settings", this::settings);
+        settingsNavigation = navigationButton("Настройки", "settings", this::settings, null);
         settingsNavigation.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
         rail.addView(settingsNavigation, new LinearLayout.LayoutParams(-1, dp(44)));
         menuContainer = new ScrollView(this);
@@ -634,7 +636,7 @@ public final class BrowseActivity extends Activity {
         if (page == Page.LIVE) TvHomeChannels.publishTvCatalogAsync(this);
         else if (page == Page.FILMS && pending == 0 && !items.isEmpty())
             TvHomeChannels.publishAsync(this, TvHomeChannels.FILMS, items);
-        if (page == Page.SEARCH) query.requestFocus();
+        if (page == Page.SEARCH && !menuExpanded) query.requestFocus();
     }
 
     private void discover(String value) { query.setText(value); show(Page.SEARCH); }
@@ -1412,7 +1414,7 @@ public final class BrowseActivity extends Activity {
         return border;
     }
 
-    private Button navigationButton(String text, String icon, Runnable action) {
+    private Button navigationButton(String text, String icon, Runnable action, Page focusTarget) {
         Button button = button(text, action);
         button.setTextSize(16 * TvScalePreferences.get(this, TvScalePreferences.INTERFACE));
         button.setPadding(dp(16), 0, dp(8), 0);
@@ -1420,6 +1422,13 @@ public final class BrowseActivity extends Activity {
         button.setCompoundDrawables(TvIcons.icon(icon, Color.rgb(175, 181, 191), dp(24)),
                 null, null, null);
         button.setBackgroundColor(Color.TRANSPARENT);
+        Runnable openFocusedPage = () -> {
+            if (!menuExpanded || !button.hasFocus()) return;
+            if (focusTarget == null) { action.run(); return; }
+            if (page == focusTarget) return;
+            focusKey = null; focusPosition = 0; focusPending = true;
+            show(focusTarget);
+        };
         button.setOnFocusChangeListener((view, focused) -> {
             GradientDrawable background = new GradientDrawable();
             background.setColor(focused ? TvAppearancePreferences.focus(this) : Color.TRANSPARENT);
@@ -1427,8 +1436,19 @@ public final class BrowseActivity extends Activity {
                     : Color.TRANSPARENT);
             background.setCornerRadius(dp(8));
             view.setBackground(background);
+            if (focused && !menuExpanded) setMenuExpanded(true);
+            if (focused) {
+                cancelPendingNavigation();
+                pendingNavigation = openFocusedPage;
+                timer.postDelayed(openFocusedPage, NAV_FOCUS_DELAY_MS);
+            } else if (pendingNavigation == openFocusedPage) cancelPendingNavigation();
         });
         return button;
+    }
+
+    private void cancelPendingNavigation() {
+        if (pendingNavigation != null) timer.removeCallbacks(pendingNavigation);
+        pendingNavigation = null;
     }
 
     private void updateNavigation() {
@@ -1492,6 +1512,7 @@ public final class BrowseActivity extends Activity {
                 android.widget.Toast.LENGTH_SHORT).show();
     }
     private void setMenuExpanded(boolean expanded) {
+        if (!expanded) cancelPendingNavigation();
         menuExpanded = expanded;
         if (!expanded) lastBackAt = 0L;
         menuContainer.setVisibility(View.VISIBLE);
@@ -1514,7 +1535,8 @@ public final class BrowseActivity extends Activity {
             setMenuExpanded(false);
             if (page == Page.HOME && activeChannel == null) homeRows.focusFirst();
             else if (!items.isEmpty()) grid.requestFocus();
-            else query.requestFocus();
+            else if (searchRow.getVisibility() == View.VISIBLE) query.requestFocus();
+            else if (actions.getChildCount() > 0) actions.getChildAt(0).requestFocus();
             return true;
         }
         return super.dispatchKeyEvent(event);
@@ -1587,6 +1609,7 @@ public final class BrowseActivity extends Activity {
     }
 
     @Override protected void onPause() {
+        cancelPendingNavigation();
         updates.onPause();
         super.onPause();
     }
