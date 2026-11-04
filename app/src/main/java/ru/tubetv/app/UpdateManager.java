@@ -2,6 +2,9 @@ package ru.tubetv.app;
 
 import android.content.Context;
 import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.Signature;
+import android.os.Build;
 import android.os.SystemClock;
 
 import org.json.JSONArray;
@@ -150,12 +153,19 @@ final class UpdateManager {
                 }
                 String actual = hex(sha256.digest());
                 if (!expected.equalsIgnoreCase(actual)) throw new Exception("SHA-256 обновления не совпадает");
-                PackageInfo archive = app.getPackageManager().getPackageArchiveInfo(partial.getAbsolutePath(), 0);
+                int signingFlag = Build.VERSION.SDK_INT >= 28
+                        ? PackageManager.GET_SIGNING_CERTIFICATES : PackageManager.GET_SIGNATURES;
+                PackageInfo archive = app.getPackageManager().getPackageArchiveInfo(
+                        partial.getAbsolutePath(), signingFlag);
                 if (archive == null || !app.getPackageName().equals(archive.packageName)
                         || !release.version.equals(cleanVersion(archive.versionName))
                         || archive.versionCode <= BuildConfig.VERSION_CODE) {
                     throw new Exception("Загружен APK другого приложения или версии");
                 }
+                PackageInfo installed = app.getPackageManager().getPackageInfo(
+                        app.getPackageName(), signingFlag);
+                if (!sameSigner(installed, archive))
+                    throw new Exception("Подпись обновления отличается от установленного приложения");
                 if (ready.exists() && !ready.delete()) throw new Exception("Не удалось заменить старое обновление");
                 if (!partial.renameTo(ready)) throw new Exception("Не удалось подготовить APK обновления");
                 callback.onReady(ready);
@@ -170,6 +180,25 @@ final class UpdateManager {
     private static String currentVersion(Context context) throws Exception {
         PackageInfo info = context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
         return cleanVersion(info.versionName);
+    }
+
+    private static boolean sameSigner(PackageInfo installed, PackageInfo archive) {
+        Signature[] current;
+        Signature[] offered;
+        if (Build.VERSION.SDK_INT >= 28) {
+            if (installed.signingInfo == null || archive.signingInfo == null) return false;
+            current = installed.signingInfo.getApkContentsSigners();
+            offered = archive.signingInfo.getApkContentsSigners();
+        } else {
+            current = installed.signatures;
+            offered = archive.signatures;
+        }
+        if (current == null || offered == null || current.length == 0
+                || current.length != offered.length) return false;
+        java.util.List<Signature> remaining = new java.util.ArrayList<>(
+                java.util.Arrays.asList(offered));
+        for (Signature signer : current) if (!remaining.remove(signer)) return false;
+        return remaining.isEmpty();
     }
 
     static Release findUpdate(String json, boolean mobile, String installedVersion) throws Exception {
@@ -190,8 +219,7 @@ final class UpdateManager {
                 JSONObject asset = assets.optJSONObject(j);
                 if (asset == null || !"uploaded".equals(asset.optString("state"))) continue;
                 String name = asset.optString("name", "");
-                if (!name.equals(prefix + version + ".apk")
-                        && !name.equals(prefix + version + "-debug.apk")) continue;
+                if (!name.equals(prefix + version + ".apk")) continue;
                 String url = asset.optString("browser_download_url", "");
                 long size = asset.optLong("size");
                 if (!url.startsWith(DOWNLOAD_PREFIX + tag + "/")

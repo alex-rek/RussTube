@@ -1,0 +1,98 @@
+name: Publish RussTube
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  android:
+    if: ${{ vars.SIGNED_RELEASE_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Check tag and signing configuration
+        env:
+          KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == refs/tags/v* ]] || { echo 'Run from a version tag'; exit 1; }
+          version="${GITHUB_REF_NAME#v}"
+          grep -Fq "versionName '$version'" app/build.gradle || {
+            echo 'Tag does not match app versionName'; exit 1;
+          }
+          [[ -n "$KEYSTORE_BASE64" && -n "$STORE_PASSWORD" && -n "$KEY_ALIAS" && -n "$KEY_PASSWORD" ]] || {
+            echo 'Release signing secrets are missing'; exit 1;
+          }
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/russtube-release.jks"
+          echo "RELEASE_KEYSTORE_PATH=$RUNNER_TEMP/russtube-release.jks" >> "$GITHUB_ENV"
+          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+      - name: Install Android SDK
+        run: |
+          set -euo pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Test and build signed release APKs
+        env:
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:testMobileDebugUnitTest :app:testTvDebugUnitTest :app:lintMobileRelease :app:lintTvRelease :app:assembleMobileRelease :app:assembleTvRelease --no-daemon
+      - name: Verify continuity and prepare assets
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for flavor in Mobile TV; do
+            lower="${flavor,,}"
+            apk="app/build/outputs/apk/$lower/release/app-$lower-release.apk"
+            name="RussTube-$flavor-$RELEASE_VERSION.apk"
+            test -s "$apk"
+            "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -v 4 "$apk"
+            signer=$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --min-sdk-version 23 --print-certs "$apk" \
+              | awk -F': ' '/Signer #1 certificate SHA-256 digest/ {print tolower($2)}')
+            # All published Mobile/TV APKs from 0.6.15–0.6.21 use this certificate.
+            [[ "$signer" == '195c199e4efd02951a001e28a09c77c664f32b28d3c707143ee0aaa3a6e6e1a7' ]] || {
+              echo "Signing certificate mismatch for $flavor; refusing publication"; exit 1;
+            }
+            cp "$apk" "dist/$name"
+            (cd dist && sha256sum "$name" > "$name.sha256")
+          done
+          (cd dist && sha256sum *.apk > SHA256SUMS.txt)
+          cat > dist/RELEASE_NOTES.md <<EOF
+          RussTube $RELEASE_VERSION — подписанные сборки Mobile и TV.
+
+          APK подписаны сертификатом предыдущих выпусков, чтобы обновление сохраняло данные приложения.
+          Контрольные суммы SHA-256 приложены отдельно для каждого APK.
+          EOF
+          rm -f "$RUNNER_TEMP/russtube-release.jks"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RussTube-${{ github.ref_name }}-mapping
+          path: |
+            app/build/outputs/mapping/mobileRelease/mapping.txt
+            app/build/outputs/mapping/tvRelease/mapping.txt
+          if-no-files-found: error
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" dist/*.apk dist/*.sha256 dist/SHA256SUMS.txt \
+            --verify-tag --title "RussTube $RELEASE_VERSION" --notes-file dist/RELEASE_NOTES.md

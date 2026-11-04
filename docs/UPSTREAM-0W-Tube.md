@@ -1,5 +1,7 @@
 # 0W-Tube
 
+> Архивная документация исходного проекта 0W-Tube. Описанные ниже workflow, модули и команды не обязательно присутствуют в RussTube.
+
 **0W-Tube** ("Zero-Wait Tube") is a lightweight Android TV video search and playback client for RUTUBE, public VK Video, Dzen, OK, and public PeerTube content. It is designed for low-memory TV devices and projectors where the official applications are too heavy or slow.
 
 The application uses a native Android interface, the system on-screen keyboard, direct network requests, and hardware-only video decoding. It supports phones as well as TVs, without a WebView or VK user account. On phones, audio-only playback can continue in a foreground service with a playback notification.

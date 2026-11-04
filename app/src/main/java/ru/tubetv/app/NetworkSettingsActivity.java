@@ -144,8 +144,13 @@ public final class NetworkSettingsActivity extends Activity {
         if (!"off".equals(type) && (number < 1 || number > 65535)) {
             port.setError("Порт должен быть от 1 до 65535"); port.requestFocus(); return false;
         }
-        NetworkProxy.save(this, type, address, number,
-                user.getText().toString(), password.getText().toString());
+        try {
+            NetworkProxy.save(this, type, address, number,
+                    user.getText().toString(), password.getText().toString());
+        } catch (IllegalStateException error) {
+            Toast.makeText(this, error.getMessage(), Toast.LENGTH_LONG).show();
+            return false;
+        }
         for (int i = 0; i < sourceChecks.length; i++)
             NetworkProxy.setSourceEnabled(this, NetworkProxy.SOURCES[i],
                     sourceChecks[i].isChecked());

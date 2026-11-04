@@ -590,7 +590,11 @@ public final class TvSettingsActivity extends Activity {
         if (!"off".equals(proxyType) && (port < 1 || port > 65535)) {
             proxyPort.setError("Порт должен быть от 1 до 65535"); proxyPort.requestFocus(); return false;
         }
-        NetworkProxy.save(this, proxyType, draftHost, port, draftUser, draftPassword);
+        try { NetworkProxy.save(this, proxyType, draftHost, port, draftUser, draftPassword); }
+        catch (IllegalStateException error) {
+            Toast.makeText(this, error.getMessage(), Toast.LENGTH_LONG).show();
+            return false;
+        }
         if (notify) Toast.makeText(this, "Настройки сети сохранены", Toast.LENGTH_SHORT).show();
         return true;
     }

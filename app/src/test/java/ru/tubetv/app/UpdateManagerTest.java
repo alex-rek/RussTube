@@ -11,11 +11,11 @@ public class UpdateManagerTest {
 
     @Test public void selectsNewestMatchingFlavorIncludingPrerelease() throws Exception {
         String releases = "[" + release("v0.5.2", false,
-                asset("RussTube-TV-0.5.2-debug.apk", DIGEST)) + ","
+                asset("RussTube-TV-0.5.2.apk", DIGEST)) + ","
                 + release("v0.5.3", true,
-                asset("RussTube-Mobile-0.5.3-debug.apk", DIGEST)) + ","
+                asset("RussTube-Mobile-0.5.3.apk", DIGEST)) + ","
                 + release("v0.5.1", true,
-                asset("RussTube-Mobile-0.5.1-debug.apk", DIGEST)) + "]";
+                asset("RussTube-Mobile-0.5.1.apk", DIGEST)) + "]";
         UpdateManager.Release mobile = UpdateManager.findUpdate(releases, true, "0.5.1");
         UpdateManager.Release tv = UpdateManager.findUpdate(releases, false, "0.5.1");
         assertEquals("0.5.3", mobile.version);
@@ -25,10 +25,26 @@ public class UpdateManagerTest {
 
     @Test public void ignoresUnverifiedOrWrongAssets() throws Exception {
         String releases = "[" + release("v0.5.3", false,
-                asset("RussTube-TV-0.5.3-debug.apk", "")) + ","
+                asset("RussTube-TV-0.5.3.apk", "")) + ","
                 + release("v0.5.2", false,
-                asset("RussTube-Mobile-0.5.2-debug.apk", DIGEST)) + "]";
+                asset("RussTube-Mobile-0.5.2.apk", DIGEST)) + "]";
         assertNull(UpdateManager.findUpdate(releases, false, "0.5.1"));
+        assertNull(UpdateManager.findUpdate(releases, true, "0.5.2"));
+    }
+
+    @Test public void acceptsSignedReleaseAssetWithoutDebugSuffix() throws Exception {
+        String releases = "[" + release("v0.5.3", false,
+                asset("RussTube-Mobile-0.5.3.apk", DIGEST)) + "]";
+        UpdateManager.Release mobile = UpdateManager.findUpdate(releases, true, "0.5.2");
+        assertEquals("0.5.3", mobile.version);
+        assertEquals("https://github.com/alex-rek/RussTube/releases/download/"
+                + "v0.5.3/RussTube-Mobile-0.5.3.apk", mobile.apkUrl);
+        assertNull(UpdateManager.findUpdate(releases, false, "0.5.2"));
+    }
+
+    @Test public void ignoresDebugAsset() throws Exception {
+        String releases = "[" + release("v0.5.3", false,
+                asset("RussTube-Mobile-0.5.3-debug.apk", DIGEST)) + "]";
         assertNull(UpdateManager.findUpdate(releases, true, "0.5.2"));
     }
 

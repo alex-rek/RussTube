@@ -1041,11 +1041,12 @@ public final class MobileBrowseActivity extends Activity {
         navParams.bottomMargin = -Math.round(navigation.getMeasuredHeight() * fraction);
         navigation.setLayoutParams(navParams);
         FrameLayout.LayoutParams contentParams = (FrameLayout.LayoutParams) layoutRoot.getLayoutParams();
-        contentParams.leftMargin = isTabletLandscape()
-                ? Math.round(dp(TabletLayout.RAIL_WIDTH_DP) * (1f - fraction)) : 0;
-        layoutRoot.setLayoutParams(contentParams);
-        tabletRail.setTranslationX(isTabletLandscape()
-                ? -dp(TabletLayout.RAIL_WIDTH_DP) * fraction : 0f);
+        int railMargin = isTabletLandscape() ? dp(TabletLayout.RAIL_WIDTH_DP) : 0;
+        if (contentParams.leftMargin != railMargin) {
+            contentParams.leftMargin = railMargin;
+            layoutRoot.setLayoutParams(contentParams);
+        }
+        if (tabletRail.getTranslationX() != 0f) tabletRail.setTranslationX(0f);
     }
 
     private void resetChrome() {
@@ -1189,7 +1190,8 @@ public final class MobileBrowseActivity extends Activity {
             List<VideoItem> found = latest.get(section);
             if (sourceEnabled && found != null) for (VideoItem item : found)
                 if (!hidden.contains(item.stableKey()) && stable.size() < 30)
-                    stable.putIfAbsent(item.stableKey(), item);
+                    if (!stable.containsKey(item.stableKey()))
+                        stable.put(item.stableKey(), item);
             visible.put(section, new ArrayList<>(stable.values()));
         }
         tabletDisplayedRows.clear();

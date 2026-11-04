@@ -2,6 +2,9 @@ package ru.tubetv.app;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.security.keystore.KeyGenParameterSpec;
+import android.security.keystore.KeyProperties;
+import android.util.Base64;
 
 import java.io.IOException;
 import java.net.Authenticator;
@@ -13,16 +16,28 @@ import java.net.ProxySelector;
 import java.net.SocketAddress;
 import java.net.URI;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.security.KeyStore;
 import java.util.Collections;
 import java.util.List;
+
+import javax.crypto.Cipher;
+import javax.crypto.KeyGenerator;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.GCMParameterSpec;
 
 /** Proxy settings and per-platform routing for catalog, artwork and media requests. */
 final class NetworkProxy {
     private static final String PREFS = "network_proxy";
+    private static final String PASSWORD_KEY = "russtube-proxy-password-v1";
+    private static final String ENCRYPTED_PASSWORD = "password_v1";
+    private static final byte[] PASSWORD_CONTEXT =
+            "RussTube proxy password v1".getBytes(StandardCharsets.UTF_8);
     static final String[] SOURCES = {"RUTUBE", "VK VIDEO", "PEERTUBE", "OK", "ДЗЕН"};
     static final String[] SOURCE_LABELS = {"RuTube", "VK Видео", "PeerTube", "OK", "Дзен"};
     private static volatile boolean installed;
     private static volatile Context appContext;
+    private static volatile PasswordCache passwordCache;
 
     static void install(Context context) {
         if (installed) return;
@@ -129,15 +144,87 @@ final class NetworkProxy {
         int port = prefs.getInt("port", 0);
         if (host.isEmpty() || port < 1 || port > 65535) type = Proxy.Type.DIRECT;
         return new Config(type, host, port,
-                prefs.getString("user", ""), prefs.getString("password", ""));
+                prefs.getString("user", ""), readPassword(prefs));
     }
 
     static void save(Context context, String type, String host, int port,
                      String user, String password) {
+        String protectedPassword;
+        try { protectedPassword = password.isEmpty() ? "" : encryptPassword(password); }
+        catch (Exception error) {
+            throw new IllegalStateException("Не удалось защитить пароль прокси", error);
+        }
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
                 .putString("type", type).putString("host", host.trim())
                 .putInt("port", port).putString("user", user.trim())
-                .putString("password", password).apply();
+                .putString(ENCRYPTED_PASSWORD, protectedPassword).remove("password").apply();
+        passwordCache = new PasswordCache(protectedPassword, password);
+    }
+
+    private static String readPassword(SharedPreferences prefs) {
+        String encrypted = prefs.getString(ENCRYPTED_PASSWORD, null);
+        if (encrypted != null) {
+            if (encrypted.isEmpty()) return "";
+            PasswordCache cache = passwordCache;
+            if (cache != null && encrypted.equals(cache.envelope)) return cache.plaintext;
+            try {
+                String plaintext = decryptPassword(encrypted);
+                passwordCache = new PasswordCache(encrypted, plaintext);
+                return plaintext;
+            }
+            catch (Exception error) { return ""; }
+        }
+        String stored = prefs.getString("password", "");
+        if (stored == null || stored.isEmpty()) return "";
+        try {
+            // Existing installations stored this value unencrypted. Migrate it once.
+            encrypted = encryptPassword(stored);
+            if (!prefs.edit().putString(ENCRYPTED_PASSWORD, encrypted)
+                    .remove("password").commit()) return "";
+            passwordCache = new PasswordCache(encrypted, stored);
+            return stored;
+        } catch (Exception error) {
+            // A missing or invalid Keystore key must not crash proxy selection.
+            return "";
+        }
+    }
+
+    private static synchronized SecretKey passwordKey() throws Exception {
+        KeyStore keys = KeyStore.getInstance("AndroidKeyStore");
+        keys.load(null);
+        SecretKey key = (SecretKey) keys.getKey(PASSWORD_KEY, null);
+        if (key != null) return key;
+        KeyGenerator generator = KeyGenerator.getInstance(
+                KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore");
+        generator.init(new KeyGenParameterSpec.Builder(PASSWORD_KEY,
+                KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256).build());
+        return generator.generateKey();
+    }
+
+    private static String encryptPassword(String password) throws Exception {
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+        cipher.init(Cipher.ENCRYPT_MODE, passwordKey());
+        cipher.updateAAD(PASSWORD_CONTEXT);
+        byte[] iv = cipher.getIV();
+        byte[] encrypted = cipher.doFinal(password.getBytes(StandardCharsets.UTF_8));
+        byte[] envelope = new byte[iv.length + encrypted.length];
+        System.arraycopy(iv, 0, envelope, 0, iv.length);
+        System.arraycopy(encrypted, 0, envelope, iv.length, encrypted.length);
+        return Base64.encodeToString(envelope, Base64.NO_WRAP);
+    }
+
+    private static String decryptPassword(String stored) throws Exception {
+        byte[] envelope = Base64.decode(stored, Base64.NO_WRAP);
+        if (envelope.length < 12 + 16) throw new IllegalArgumentException("Invalid password data");
+        byte[] iv = java.util.Arrays.copyOfRange(envelope, 0, 12);
+        byte[] encrypted = java.util.Arrays.copyOfRange(envelope, 12, envelope.length);
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+        cipher.init(Cipher.DECRYPT_MODE, passwordKey(), new GCMParameterSpec(128, iv));
+        cipher.updateAAD(PASSWORD_CONTEXT);
+        return new String(cipher.doFinal(encrypted), StandardCharsets.UTF_8);
     }
 
     static final class Config {
@@ -149,6 +236,15 @@ final class NetworkProxy {
         Config(Proxy.Type type, String host, int port, String user, String password) {
             this.type = type; this.host = host; this.port = port;
             this.user = user; this.password = password;
+        }
+    }
+
+    private static final class PasswordCache {
+        final String envelope;
+        final String plaintext;
+        PasswordCache(String envelope, String plaintext) {
+            this.envelope = envelope;
+            this.plaintext = plaintext;
         }
     }
 

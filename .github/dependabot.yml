@@ -1,0 +1,16 @@
+version: 2
+updates:
+  - package-ecosystem: gradle
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    ignore:
+      # zxing-android-embedded keeps 3.3.0 for minSdk 23 compatibility.
+      - dependency-name: com.google.zxing:core
+        versions: [">=3.4.0"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
