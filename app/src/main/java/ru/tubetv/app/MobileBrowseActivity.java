@@ -1005,7 +1005,10 @@ public final class MobileBrowseActivity extends Activity {
     }
 
     private void onCardScroll(int delta) {
-        if (delta == 0 || page == Page.SETTINGS) return;
+        // Resizing the chrome moves the feed's scroll viewport. That movement is
+        // reported as another scroll event, but it did not come from the user.
+        if (delta == 0 || page == Page.SETTINGS
+                || chromeAnimator != null && chromeAnimator.isRunning()) return;
         if (scrollDistance != 0 && Integer.signum(scrollDistance) != Integer.signum(delta))
             scrollDistance = 0;
         scrollDistance = Math.max(-dp(32), Math.min(dp(32), scrollDistance + delta));
@@ -1035,11 +1038,17 @@ public final class MobileBrowseActivity extends Activity {
     private void applyChromeFraction(float fraction) {
         chromeHiddenFraction = fraction;
         LinearLayout.LayoutParams topParams = (LinearLayout.LayoutParams) topChrome.getLayoutParams();
-        topParams.topMargin = -Math.round(topChrome.getMeasuredHeight() * fraction);
-        topChrome.setLayoutParams(topParams);
+        int topMargin = -Math.round(topChrome.getMeasuredHeight() * fraction);
+        if (topParams.topMargin != topMargin) {
+            topParams.topMargin = topMargin;
+            topChrome.setLayoutParams(topParams);
+        }
         LinearLayout.LayoutParams navParams = (LinearLayout.LayoutParams) navigation.getLayoutParams();
-        navParams.bottomMargin = -Math.round(navigation.getMeasuredHeight() * fraction);
-        navigation.setLayoutParams(navParams);
+        int bottomMargin = -Math.round(navigation.getMeasuredHeight() * fraction);
+        if (navParams.bottomMargin != bottomMargin) {
+            navParams.bottomMargin = bottomMargin;
+            navigation.setLayoutParams(navParams);
+        }
         FrameLayout.LayoutParams contentParams = (FrameLayout.LayoutParams) layoutRoot.getLayoutParams();
         int railMargin = isTabletLandscape() ? dp(TabletLayout.RAIL_WIDTH_DP) : 0;
         if (contentParams.leftMargin != railMargin) {
