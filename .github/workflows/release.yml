@@ -82,7 +82,7 @@ jobs:
           Контрольные суммы SHA-256 приложены отдельно для каждого APK.
           EOF
           rm -f "$RUNNER_TEMP/russtube-release.jks"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: RussTube-${{ github.ref_name }}-mapping
           path: |
