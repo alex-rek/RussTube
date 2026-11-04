@@ -69,10 +69,11 @@ public final class MobileBrowseActivity extends Activity {
     private enum Page { HOME, SEARCH, FILMS, LIVE, SUBSCRIPTIONS, LIBRARY, HISTORY, FAVORITES, CHANNELS, POPULAR, SETTINGS }
     private enum FilmGroup { ALL, RUTUBE, VK, OK }
     private enum LiveGroup { ALL, RUTUBE_TV, VK_TV, OK_TV }
-    private static final int BACKGROUND = MobileAuroraTheme.BACKGROUND;
-    private static final int PANEL = MobileAuroraTheme.SURFACE;
-    private static final int SECONDARY = MobileAuroraTheme.MUTED;
-    private static final int ACCENT = MobileAuroraTheme.TEAL;
+    private int BACKGROUND;
+    private int PANEL;
+    private int SECONDARY;
+    private int ACCENT;
+    private int primary;
     private static final Page[] TABS = {Page.HOME, Page.FILMS, Page.LIVE, Page.SUBSCRIPTIONS, Page.LIBRARY};
     private static final String[] TAB_LABELS = {"Главная", "Фильмы", "В эфире", "Подписки", "Вы"};
     private static final String[] TAB_ICONS = {"home", "films", "live", "subscriptions", "history"};
@@ -133,6 +134,7 @@ public final class MobileBrowseActivity extends Activity {
     private LinearLayout navigation;
     private LinearLayout tabletRail;
     private LinearLayout layoutRoot;
+    private ImageView themeImage;
     private LinearLayout topChrome;
     private ValueAnimator chromeAnimator;
     private float chromeHiddenFraction;
@@ -143,7 +145,13 @@ public final class MobileBrowseActivity extends Activity {
     private int scrollDistance;
 
     @Override protected void onCreate(Bundle state) {
+        if (TvAppearancePreferences.theme(this) == 2) setTheme(R.style.AppThemeLight);
         super.onCreate(state);
+        BACKGROUND = TvAppearancePreferences.background(this);
+        PANEL = TvAppearancePreferences.surface(this);
+        SECONDARY = TvAppearancePreferences.secondary(this);
+        ACCENT = TvAppearancePreferences.accent(this);
+        primary = TvAppearancePreferences.text(this);
         updates = new UpdateCoordinator(this);
         getWindow().setStatusBarColor(BACKGROUND);
         getWindow().setNavigationBarColor(BACKGROUND);
@@ -171,35 +179,26 @@ public final class MobileBrowseActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         layoutRoot = root;
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(BACKGROUND);
+        root.setBackgroundColor(Color.TRANSPARENT);
         topChrome = new LinearLayout(this);
         topChrome.setOrientation(LinearLayout.VERTICAL);
         root.addView(topChrome, size(-1, -2));
 
         header = new LinearLayout(this);
         header.setOrientation(LinearLayout.VERTICAL);
-        header.setBackground(new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-                new int[]{0xf5071426, 0xd0071426, 0x44071426}));
         toolbar = new LinearLayout(this);
         toolbar.setGravity(Gravity.CENTER_VERTICAL);
         toolbar.setPadding(dp(16), 0, dp(12), 0);
         FrameLayout brandFrame = new FrameLayout(this);
-        int logoResource = getResources().getIdentifier("aurora_logo", "drawable", getPackageName());
-        if (logoResource != 0) {
-            ImageView brand = new ImageView(this);
-            brand.setImageResource(logoResource);
-            brand.setScaleType(ImageView.ScaleType.FIT_START);
-            brand.setContentDescription("RussTube — Arctic Fox Apps");
-            brandFrame.addView(brand, new FrameLayout.LayoutParams(-1, -1));
-        } else {
-            TextView brand = label("RussTube", MobileAuroraTheme.BRAND_SP, MobileAuroraTheme.TEXT);
-            brand.setTypeface(Typeface.DEFAULT_BOLD);
-            brandFrame.addView(brand, new FrameLayout.LayoutParams(-1, -1));
-        }
+        ImageView brand = new ImageView(this);
+        brand.setImageResource(R.drawable.mobile_wordmark);
+        brand.setScaleType(ImageView.ScaleType.FIT_START);
+        brand.setContentDescription("RussTube");
+        brandFrame.addView(brand, new FrameLayout.LayoutParams(-1, -1));
         toolbar.addView(brandFrame, new LinearLayout.LayoutParams(0, dp(64), 1));
         TextView search = icon("search", "Поиск", () -> show(Page.SEARCH));
         toolbar.addView(search, size(46, 46));
-        TextView refresh = label("↻", 30, MobileAuroraTheme.CYAN);
+        TextView refresh = label("↻", 30, ACCENT);
         refresh.setGravity(Gravity.CENTER);
         refresh.setContentDescription("Обновить");
         refresh.setOnClickListener(v -> refresh());
@@ -218,7 +217,7 @@ public final class MobileBrowseActivity extends Activity {
         landscapeQuery = new EditText(this);
         landscapeQuery.setSingleLine(true);
         landscapeQuery.setTextSize(14);
-        landscapeQuery.setTextColor(Color.WHITE);
+        landscapeQuery.setTextColor(primary);
         landscapeQuery.setHintTextColor(SECONDARY);
         landscapeQuery.setHint("Поиск видео");
         landscapeQuery.setPadding(dp(10), 0, dp(10), 0);
@@ -258,7 +257,7 @@ public final class MobileBrowseActivity extends Activity {
         query = new EditText(this);
         query.setSingleLine(true);
         query.setTextSize(16);
-        query.setTextColor(Color.WHITE);
+        query.setTextColor(primary);
         query.setHintTextColor(SECONDARY);
         query.setHint("Видео или канал на всех платформах");
         query.setPadding(dp(14), 0, dp(10), 0);
@@ -279,16 +278,13 @@ public final class MobileBrowseActivity extends Activity {
         watchQuery(query, landscapeQuery);
         watchQuery(landscapeQuery, query);
 
-        heading = label("", MobileAuroraTheme.HEADING_SP, MobileAuroraTheme.TEXT);
+        heading = label("", MobileAuroraTheme.HEADING_SP, primary);
         heading.setTypeface(Typeface.DEFAULT_BOLD);
+        if (TvAppearancePreferences.theme(this) != 2)
+            heading.setShadowLayer(dp(4), 0, dp(1), Color.BLACK);
         heading.setPadding(dp(16), 0, dp(16), dp(3));
         header.addView(heading, size(-1, 42));
         headerContainer = new FrameLayout(this);
-        ImageView aurora = new ImageView(this);
-        int auroraResource = getResources().getIdentifier("aurora_header", "drawable", getPackageName());
-        if (auroraResource != 0) aurora.setImageResource(auroraResource);
-        aurora.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        headerContainer.addView(aurora, new FrameLayout.LayoutParams(-1, -1));
         headerContainer.addView(header, new FrameLayout.LayoutParams(-1, -1));
         topChrome.addView(headerContainer, 0, size(-1, 106));
 
@@ -301,11 +297,12 @@ public final class MobileBrowseActivity extends Activity {
         for (int i = 0; i < labels.length; i++) {
             String value = labels[i];
             TextView chip = label(symbols[i] + "  " + value,
-                    MobileAuroraTheme.CHIP_SP, MobileAuroraTheme.TEXT);
+                    MobileAuroraTheme.CHIP_SP, primary);
             chip.setGravity(Gravity.CENTER);
             chip.setPadding(dp(12), 0, dp(12), 0);
-            chip.setBackground(MobileAuroraTheme.stroke(i == 0 ? 0xff082b42 : PANEL,
-                    dp(12), i == 0 ? ACCENT : 0xff31506a, dp(1)));
+            chip.setBackground(MobileAuroraTheme.stroke(i == 0
+                    ? TvAppearancePreferences.focus(this) : PANEL,
+                    dp(12), i == 0 ? ACCENT : SECONDARY, dp(1)));
             LinearLayout.LayoutParams params = size(-2, 38);
             params.rightMargin = dp(8);
             topicRow.addView(chip, params);
@@ -326,10 +323,10 @@ public final class MobileBrowseActivity extends Activity {
         sortRow = new LinearLayout(this);
         sortRow.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
         sortRow.setPadding(dp(16), 0, dp(16), 0);
-        sortButton = label("", 13, MobileAuroraTheme.TEXT);
+        sortButton = label("", 13, primary);
         sortButton.setGravity(Gravity.CENTER);
         sortButton.setPadding(dp(14), 0, dp(14), 0);
-        sortButton.setBackground(round(0xff0c2a43, 12));
+        sortButton.setBackground(round(PANEL, 12));
         sortButton.setOnClickListener(v -> chooseSort());
         sortRow.addView(sortButton, size(-2, 38));
         topChrome.addView(sortRow, size(-1, 48));
@@ -441,19 +438,19 @@ public final class MobileBrowseActivity extends Activity {
         tabletHomeRows.setPullRefreshListener(() -> {
             if (page == Page.HOME && activeChannel == null) refresh();
         }, () -> setChromeHidden(false));
-        tabletHomeRows.setBackgroundColor(BACKGROUND);
+        tabletHomeRows.setBackgroundColor(Color.TRANSPARENT);
         tabletHomeRows.setVisibility(View.GONE);
         feed.addView(tabletHomeRows, new FrameLayout.LayoutParams(-1, -1));
         settingsPanel = new MobileSettingsPanel(this,
                 () -> startActivity(new Intent(this, NetworkSettingsActivity.class)), () -> show(page),
-                this::exportLibrary, this::importLibrary);
+                this::exportLibrary, this::importLibrary, this::recreate);
         settingsPanel.setVisibility(View.GONE);
         feed.addView(settingsPanel, new FrameLayout.LayoutParams(-1, -1));
         root.addView(feed, new LinearLayout.LayoutParams(-1, 0, 1));
 
         navigation = new LinearLayout(this);
-        navigation.setBackground(MobileAuroraTheme.stroke(0xff071a2d,
-                dp(20), 0xff185671, dp(1)));
+        navigation.setBackground(MobileAuroraTheme.stroke(PANEL,
+                dp(20), ACCENT, dp(1)));
         navigation.setPadding(dp(4), dp(3), dp(4), dp(3));
         LinearLayout.LayoutParams navParams = size(-1, 66);
         navParams.leftMargin = dp(2);
@@ -462,9 +459,20 @@ public final class MobileBrowseActivity extends Activity {
         tabletRail = new LinearLayout(this);
         tabletRail.setOrientation(LinearLayout.VERTICAL);
         tabletRail.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-        tabletRail.setBackground(MobileAuroraTheme.stroke(PANEL, dp(16), 0xff315d75, dp(1)));
+        tabletRail.setBackground(MobileAuroraTheme.stroke(PANEL, dp(16), ACCENT, dp(1)));
         FrameLayout shell = new FrameLayout(this);
         shell.setBackgroundColor(BACKGROUND);
+        themeImage = new ImageView(this);
+        themeImage.setImageResource(TvAppearancePreferences.backgroundImage(this));
+        themeImage.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        shell.addView(themeImage, new FrameLayout.LayoutParams(-1, -1));
+        if (TvAppearancePreferences.theme(this) != 2) {
+            View statusScrim = new View(this);
+            statusScrim.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                    new int[]{0x99071426, Color.TRANSPARENT}));
+            shell.addView(statusScrim, new FrameLayout.LayoutParams(
+                    -1, dp(48), Gravity.TOP));
+        }
         shell.addView(root, new FrameLayout.LayoutParams(-1, -1));
         FrameLayout.LayoutParams railParams = new FrameLayout.LayoutParams(
                 dp(TabletLayout.RAIL_WIDTH_DP), -1, Gravity.START);
@@ -993,7 +1001,7 @@ public final class MobileBrowseActivity extends Activity {
     }
 
     private TextView compactAction(LinearLayout row, String title, Runnable action) {
-        TextView button = label(title, 14, Color.WHITE);
+        TextView button = label(title, 14, primary);
         button.setGravity(Gravity.CENTER);
         button.setPadding(dp(12), 0, dp(12), 0);
         button.setBackground(round(PANEL, 9));
@@ -1212,9 +1220,10 @@ public final class MobileBrowseActivity extends Activity {
     private void updateNavigation() {
         navigation.removeAllViews();
         tabletRail.removeAllViews();
-        TextView railBrand = label("RT", 18, ACCENT);
-        railBrand.setTypeface(Typeface.DEFAULT_BOLD);
-        railBrand.setGravity(Gravity.CENTER);
+        ImageView railBrand = new ImageView(this);
+        railBrand.setImageResource(R.mipmap.ic_launcher);
+        railBrand.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        railBrand.setContentDescription("RussTube");
         tabletRail.addView(railBrand, size(-1, 56));
         Page selected = page == Page.SEARCH || page == Page.POPULAR ? Page.HOME
                 : page == Page.HISTORY || page == Page.FAVORITES || page == Page.CHANNELS
@@ -1226,10 +1235,10 @@ public final class MobileBrowseActivity extends Activity {
             tab.setOrientation(LinearLayout.VERTICAL);
             tab.setGravity(Gravity.CENTER);
             ImageView image = new ImageView(this);
-            image.setImageDrawable(TvIcons.icon(TAB_ICONS[i], active ? ACCENT : 0xffa4b9db, dp(25)));
+            image.setImageDrawable(TvIcons.icon(TAB_ICONS[i], active ? ACCENT : SECONDARY, dp(25)));
             tab.addView(image, size(27, 27));
             TextView name = label(TAB_LABELS[i], MobileAuroraTheme.NAV_LABEL_SP,
-                    active ? ACCENT : 0xffa4b9db);
+                    active ? ACCENT : SECONDARY);
             name.setGravity(Gravity.CENTER);
             tab.addView(name, size(-1, 22));
             navigation.addView(tab, new LinearLayout.LayoutParams(0, -1, 1));
@@ -1240,13 +1249,13 @@ public final class MobileBrowseActivity extends Activity {
             railTab.setOrientation(LinearLayout.VERTICAL);
             railTab.setGravity(Gravity.CENTER);
             railTab.setContentDescription(TAB_LABELS[i]);
-            railTab.setBackground(active ? MobileAuroraTheme.stroke(0xff0b5064,
+            railTab.setBackground(active ? MobileAuroraTheme.stroke(TvAppearancePreferences.focus(this),
                     dp(12), ACCENT, dp(2)) : round(PANEL, 12));
             ImageView railIcon = new ImageView(this);
             railIcon.setImageDrawable(TvIcons.icon(TAB_ICONS[i],
-                    active ? ACCENT : 0xffa4b9db, dp(25)));
+                    active ? ACCENT : SECONDARY, dp(25)));
             railTab.addView(railIcon, size(27, 27));
-            TextView railName = label(TAB_LABELS[i], 10, active ? ACCENT : 0xffa4b9db);
+            TextView railName = label(TAB_LABELS[i], 10, active ? ACCENT : SECONDARY);
             railName.setGravity(Gravity.CENTER);
             railTab.addView(railName, size(-1, 20));
             LinearLayout.LayoutParams railItemParams = size(-1, 68);
@@ -1261,7 +1270,7 @@ public final class MobileBrowseActivity extends Activity {
     }
 
     private void action(String title, Runnable callback) {
-        TextView button = label(title, 13, Color.WHITE);
+        TextView button = label(title, 13, primary);
         button.setGravity(Gravity.CENTER);
         button.setPadding(dp(14), 0, dp(14), 0);
         button.setBackground(round(PANEL, 9));
@@ -1272,9 +1281,9 @@ public final class MobileBrowseActivity extends Activity {
     }
 
     private TextView icon(String type, String description, Runnable callback) {
-        TextView button = label("", 20, MobileAuroraTheme.TEXT);
+        TextView button = label("", 20, primary);
         button.setGravity(Gravity.CENTER);
-        button.setCompoundDrawables(null, TvIcons.icon(type, Color.WHITE, dp(23)), null, null);
+        button.setCompoundDrawables(null, TvIcons.icon(type, primary, dp(23)), null, null);
         button.setContentDescription(description);
         button.setOnClickListener(v -> callback.run());
         return button;
@@ -1483,7 +1492,7 @@ public final class MobileBrowseActivity extends Activity {
             if (recycled == null) {
                 LinearLayout layout = new LinearLayout(MobileBrowseActivity.this);
                 layout.setOrientation(LinearLayout.VERTICAL);
-                layout.setBackground(round(MobileAuroraTheme.SURFACE_DARK,
+                layout.setBackground(round(PANEL,
                         MobileAuroraTheme.CARD_RADIUS_DP));
                 FrameLayout artwork = new FrameLayout(MobileBrowseActivity.this) {
                     @Override protected void onMeasure(int widthSpec, int heightSpec) {
@@ -1495,7 +1504,7 @@ public final class MobileBrowseActivity extends Activity {
                 };
                 artwork.setBackground(MobileAuroraTheme.stroke(PANEL,
                         dp(MobileAuroraTheme.ARTWORK_RADIUS_DP),
-                        0xff315d75, dp(1)));
+                        ACCENT, dp(1)));
                 artwork.setClipToOutline(true);
                 ImageView image = new ImageView(MobileBrowseActivity.this);
                 image.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -1505,7 +1514,7 @@ public final class MobileBrowseActivity extends Activity {
                 FrameLayout.LayoutParams sourceParams = new FrameLayout.LayoutParams(
                         dp(30), dp(30), Gravity.TOP | Gravity.START);
                 sourceParams.setMargins(dp(10), dp(10), 0, 0); artwork.addView(source, sourceParams);
-                TextView duration = label("", 11, MobileAuroraTheme.TEXT);
+                TextView duration = label("", 11, Color.WHITE);
                 duration.setTypeface(Typeface.DEFAULT_BOLD);
                 duration.setPadding(dp(6), 0, dp(6), 0); duration.setBackground(round(0xee071426, 6));
                 FrameLayout.LayoutParams durationParams = new FrameLayout.LayoutParams(-2, dp(22), Gravity.BOTTOM | Gravity.END);
@@ -1527,8 +1536,7 @@ public final class MobileBrowseActivity extends Activity {
                 LinearLayout text = new LinearLayout(MobileBrowseActivity.this);
                 text.setOrientation(LinearLayout.VERTICAL);
                 text.setPadding(dp(10), 0, dp(4), 0);
-                TextView title = label("", MobileAuroraTheme.CARD_TITLE_SP,
-                        MobileAuroraTheme.TEXT);
+                TextView title = label("", MobileAuroraTheme.CARD_TITLE_SP, primary);
                 title.setTypeface(Typeface.DEFAULT_BOLD);
                 title.setMaxLines(2); title.setEllipsize(TextUtils.TruncateAt.END);
                 text.addView(title, size(-1, -2));
@@ -1539,7 +1547,7 @@ public final class MobileBrowseActivity extends Activity {
                 meta.setSingleLine(true); meta.setEllipsize(TextUtils.TruncateAt.END);
                 text.addView(meta, size(-1, -2));
                 info.addView(text, new LinearLayout.LayoutParams(0, -2, 1));
-                TextView more = label("⋮", 24, MobileAuroraTheme.TEXT);
+                TextView more = label("⋮", 24, primary);
                 more.setGravity(Gravity.CENTER);
                 more.setContentDescription("Действия с видео");
                 info.addView(more, size(38, 42));

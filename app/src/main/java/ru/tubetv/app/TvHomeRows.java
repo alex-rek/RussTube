@@ -183,8 +183,7 @@ final class TvHomeRows extends ScrollView {
             root = new LinearLayout(activity);
             root.setOrientation(LinearLayout.VERTICAL);
             root.setClipChildren(false);
-            TextView heading = text(title, 15, tabletMode ? MobileAuroraTheme.TEXT
-                    : TvAppearancePreferences.text(activity));
+            TextView heading = text(title, 15, TvAppearancePreferences.text(activity));
             heading.setTypeface(Typeface.DEFAULT_BOLD);
             root.addView(heading, new LinearLayout.LayoutParams(-1, px(25)));
             scroll = new HorizontalScrollView(activity) {
@@ -200,8 +199,7 @@ final class TvHomeRows extends ScrollView {
             strip.setClipChildren(false);
             scroll.addView(strip, new HorizontalScrollView.LayoutParams(-2, -1));
             root.addView(scroll, new LinearLayout.LayoutParams(-1, cardHeight + px(6)));
-            empty = text("", 14, tabletMode ? MobileAuroraTheme.MUTED
-                    : TvAppearancePreferences.secondary(activity));
+            empty = text("", 14, TvAppearancePreferences.secondary(activity));
             root.addView(empty, new LinearLayout.LayoutParams(-1, px(28)));
         }
 
@@ -317,22 +315,19 @@ final class TvHomeRows extends ScrollView {
             artwork.addView(duration, durationParams);
             card.addView(artwork, new LinearLayout.LayoutParams(-1,
                     Math.round(cardWidth * 9f / 16f)));
-            TextView title = text(item.title, 14, tabletMode ? MobileAuroraTheme.TEXT
-                    : TvAppearancePreferences.text(activity));
+            TextView title = text(item.title, 14, TvAppearancePreferences.text(activity));
             title.setMaxLines(2);
             title.setEllipsize(TextUtils.TruncateAt.END);
             title.setPadding(px(10), px(5), px(10), 0);
             card.addView(title, new LinearLayout.LayoutParams(-1, px(48)));
             TextView channel = text(item.source + " · " + VideoPresentation.channel(item),
-                    11, tabletMode ? MobileAuroraTheme.MUTED
-                            : TvAppearancePreferences.secondary(activity));
+                    11, TvAppearancePreferences.secondary(activity));
             channel.setSingleLine(true);
             channel.setEllipsize(TextUtils.TruncateAt.END);
             channel.setPadding(px(10), 0, px(10), 0);
             card.addView(channel, new LinearLayout.LayoutParams(-1, px(23)));
             TextView views = text(VideoPresentation.views(item), 11,
-                    tabletMode ? MobileAuroraTheme.MUTED
-                            : TvAppearancePreferences.secondary(activity));
+                    TvAppearancePreferences.secondary(activity));
             views.setPadding(px(10), 0, px(10), 0);
             card.addView(views, new LinearLayout.LayoutParams(-1, px(23)));
             ((TubeApplication) activity.getApplication()).imageLoader().load(item.source,
@@ -387,14 +382,11 @@ final class TvHomeRows extends ScrollView {
 
     private GradientDrawable border(boolean focused) {
         GradientDrawable shape = new GradientDrawable();
-        shape.setColor(focused ? tabletMode ? 0xff0b5064
-                : TvAppearancePreferences.focus(activity)
-                : tabletMode ? MobileAuroraTheme.SURFACE_DARK
+        shape.setColor(focused ? TvAppearancePreferences.focus(activity)
                 : TvAppearancePreferences.surface(activity));
         shape.setCornerRadius(px(8));
         shape.setStroke(px(focused ? 3 : 1), focused
-                ? tabletMode ? MobileAuroraTheme.TEAL
-                : TvAppearancePreferences.accent(activity) : Color.TRANSPARENT);
+                ? TvAppearancePreferences.accent(activity) : Color.TRANSPARENT);
         return shape;
     }
 

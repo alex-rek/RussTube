@@ -28,9 +28,17 @@ public final class NetworkSettingsActivity extends Activity {
     private CheckBox[] sourceChecks;
 
     @Override protected void onCreate(Bundle state) {
+        if (BuildConfig.MOBILE_VARIANT && TvAppearancePreferences.theme(this) == 2)
+            setTheme(R.style.AppThemeLight);
         super.onCreate(state);
-        int background = BuildConfig.MOBILE_VARIANT ? MobileAuroraTheme.BACKGROUND : 0xff0b0f14;
-        int accent = BuildConfig.MOBILE_VARIANT ? MobileAuroraTheme.TEAL : 0xffe53935;
+        int background = BuildConfig.MOBILE_VARIANT
+                ? TvAppearancePreferences.background(this) : 0xff0b0f14;
+        int accent = BuildConfig.MOBILE_VARIANT
+                ? TvAppearancePreferences.accent(this) : 0xffe53935;
+        int textColor = BuildConfig.MOBILE_VARIANT
+                ? TvAppearancePreferences.text(this) : Color.WHITE;
+        int muted = BuildConfig.MOBILE_VARIANT
+                ? TvAppearancePreferences.secondary(this) : 0xffaeb9cc;
         getWindow().setStatusBarColor(background);
         getWindow().setNavigationBarColor(background);
         NetworkProxy.Config saved = NetworkProxy.load(this);
@@ -41,10 +49,10 @@ public final class NetworkSettingsActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(24), dp(20), dp(24), dp(28));
         scroll.addView(root);
-        TextView title = text("Сеть · Прокси", 26, Color.WHITE);
+        TextView title = text("Сеть · Прокси", 26, textColor);
         root.addView(title);
         TextView note = text("Для поиска, обложек и видеопотоков HTTPS. Поддерживаются HTTP и SOCKS5; UDP-прокси для этих соединений не применяется.",
-                14, 0xffaeb9cc);
+                14, muted);
         note.setPadding(0, dp(10), 0, dp(16));
         root.addView(note);
 
@@ -64,17 +72,17 @@ public final class NetworkSettingsActivity extends Activity {
         user = field(root, "Логин (необязательно)", saved.user, InputType.TYPE_CLASS_TEXT);
         password = field(root, "Пароль (необязательно)", saved.password,
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        TextView sourcesTitle = text("Площадки через прокси", 18, Color.WHITE);
+        TextView sourcesTitle = text("Площадки через прокси", 18, textColor);
         sourcesTitle.setPadding(0, dp(20), 0, dp(6));
         root.addView(sourcesTitle);
         TextView sourcesNote = text("Отмеченные площадки используют прокси для поиска, обложек и видео. Остальные подключаются напрямую.",
-                14, 0xffaeb9cc);
+                14, muted);
         root.addView(sourcesNote);
         sourceChecks = new CheckBox[NetworkProxy.SOURCES.length];
         for (int i = 0; i < sourceChecks.length; i++) {
             CheckBox check = new CheckBox(this);
             check.setText(NetworkProxy.SOURCE_LABELS[i]);
-            check.setTextColor(Color.WHITE);
+            check.setTextColor(textColor);
             check.setButtonTintList(ColorStateList.valueOf(accent));
             check.setChecked(NetworkProxy.isSourceEnabled(this, NetworkProxy.SOURCES[i]));
             root.addView(check, new LinearLayout.LayoutParams(-1, dp(44)));
@@ -83,7 +91,8 @@ public final class NetworkSettingsActivity extends Activity {
         Button save = new Button(this);
         save.setText("Сохранить");
         save.setAllCaps(false);
-        save.setTextColor(BuildConfig.MOBILE_VARIANT ? MobileAuroraTheme.BACKGROUND : Color.WHITE);
+        save.setTextColor(BuildConfig.MOBILE_VARIANT
+                ? TvAppearancePreferences.theme(this) == 2 ? Color.WHITE : background : Color.WHITE);
         save.setBackgroundTintList(ColorStateList.valueOf(accent));
         LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(-1, dp(52));
         saveParams.topMargin = dp(20);
@@ -93,13 +102,13 @@ public final class NetworkSettingsActivity extends Activity {
             Button verify = new Button(this);
             verify.setText("Сохранить и проверить соединение");
             verify.setAllCaps(false);
-            verify.setTextColor(MobileAuroraTheme.TEXT);
-            verify.setBackgroundTintList(ColorStateList.valueOf(MobileAuroraTheme.SURFACE));
+            verify.setTextColor(textColor);
+            verify.setBackgroundTintList(ColorStateList.valueOf(TvAppearancePreferences.surface(this)));
             LinearLayout.LayoutParams verifyParams = new LinearLayout.LayoutParams(-1, dp(52));
             verifyParams.topMargin = dp(8);
             root.addView(verify, verifyParams);
             verify.setOnClickListener(v -> verify(verify));
-            connectionStatus = text("", 14, 0xffaeb9cc);
+            connectionStatus = text("", 14, muted);
             connectionStatus.setPadding(0, dp(10), 0, 0);
             root.addView(connectionStatus);
         }
@@ -110,9 +119,10 @@ public final class NetworkSettingsActivity extends Activity {
         RadioButton button = new RadioButton(this);
         button.setId(id);
         button.setText(label);
-        button.setTextColor(Color.WHITE);
+        button.setTextColor(BuildConfig.MOBILE_VARIANT
+                ? TvAppearancePreferences.text(this) : Color.WHITE);
         button.setButtonTintList(ColorStateList.valueOf(BuildConfig.MOBILE_VARIANT
-                ? MobileAuroraTheme.TEAL : 0xffe53935));
+                ? TvAppearancePreferences.accent(this) : 0xffe53935));
         button.setTextSize(14);
         types.addView(button);
     }
@@ -122,8 +132,10 @@ public final class NetworkSettingsActivity extends Activity {
         input.setSingleLine(true);
         input.setHint(hint);
         input.setText(value);
-        input.setTextColor(Color.WHITE);
-        input.setHintTextColor(0xffaeb9cc);
+        input.setTextColor(BuildConfig.MOBILE_VARIANT
+                ? TvAppearancePreferences.text(this) : Color.WHITE);
+        input.setHintTextColor(BuildConfig.MOBILE_VARIANT
+                ? TvAppearancePreferences.secondary(this) : 0xffaeb9cc);
         input.setInputType(inputType);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(54));
         params.topMargin = dp(8);

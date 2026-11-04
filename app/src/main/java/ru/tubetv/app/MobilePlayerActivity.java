@@ -55,9 +55,11 @@ import java.util.concurrent.Executors;
 
 /** Portrait watch page sharing RussTube's resolver, decoder and local libraries. */
 public final class MobilePlayerActivity extends Activity {
-    private static final int BACKGROUND = MobileAuroraTheme.BACKGROUND;
-    private static final int SECONDARY = MobileAuroraTheme.MUTED;
-    private static final int ACCENT = MobileAuroraTheme.TEAL;
+    private int BACKGROUND;
+    private int SECONDARY;
+    private int ACCENT;
+    private int surfaceColor;
+    private int primary;
     private final ExecutorService resolver = Executors.newSingleThreadExecutor();
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final Runnable hideControls = () -> this.controls.setVisibility(View.GONE);
@@ -118,7 +120,13 @@ public final class MobilePlayerActivity extends Activity {
     private long lastSaved;
 
     @Override protected void onCreate(Bundle state) {
+        if (TvAppearancePreferences.theme(this) == 2) setTheme(R.style.AppThemeLight);
         super.onCreate(state);
+        BACKGROUND = TvAppearancePreferences.background(this);
+        SECONDARY = TvAppearancePreferences.secondary(this);
+        ACCENT = TvAppearancePreferences.accent(this);
+        surfaceColor = TvAppearancePreferences.surface(this);
+        primary = TvAppearancePreferences.text(this);
         landscapeFullscreen = !isTabletLandscape();
         if (state != null) {
             portraitFullscreen = state.getBoolean("portrait_fullscreen", false);
@@ -178,20 +186,22 @@ public final class MobilePlayerActivity extends Activity {
 
         toolbar = new LinearLayout(this);
         toolbar.setGravity(Gravity.CENTER_VERTICAL);
-        TextView back = label("‹", 36, Color.WHITE);
+        TextView back = label("‹", 36, primary);
         back.setGravity(Gravity.CENTER);
         back.setContentDescription("Назад");
         back.setOnClickListener(v -> finish());
         toolbar.addView(back, size(52, 52));
-        TextView brand = label("RussTube", 20, Color.WHITE);
-        brand.setTypeface(Typeface.DEFAULT_BOLD);
+        ImageView brand = new ImageView(this);
+        brand.setImageResource(R.drawable.mobile_wordmark);
+        brand.setScaleType(ImageView.ScaleType.FIT_START);
+        brand.setContentDescription("RussTube");
         toolbar.addView(brand, new LinearLayout.LayoutParams(0, dp(52), 1));
-        TextView official = label("↗", 25, Color.WHITE);
+        TextView official = label("↗", 25, primary);
         official.setGravity(Gravity.CENTER);
         official.setContentDescription("Открыть на платформе");
         official.setOnClickListener(v -> openOfficial());
         toolbar.addView(official, size(48, 52));
-        TextView expand = label("⛶", 26, Color.WHITE);
+        TextView expand = label("⛶", 26, primary);
         expand.setGravity(Gravity.CENTER);
         expand.setContentDescription("На весь экран");
         expand.setOnClickListener(v -> toggleFullscreen());
@@ -306,20 +316,20 @@ public final class MobilePlayerActivity extends Activity {
         LinearLayout related = new LinearLayout(this);
         related.setOrientation(LinearLayout.VERTICAL);
         related.setPadding(dp(10), dp(8), dp(8), dp(12));
-        TextView relatedTitle = label("Ещё видео из раздела", 17, Color.WHITE);
+        TextView relatedTitle = label("Ещё видео из раздела", 17, primary);
         relatedTitle.setTypeface(Typeface.DEFAULT_BOLD);
         related.addView(relatedTitle, size(-1, 38));
         for (VideoItem candidate : relatedVideos) {
             LinearLayout card = new LinearLayout(this);
             card.setOrientation(LinearLayout.VERTICAL);
-            card.setBackground(round(MobileAuroraTheme.SURFACE, 12));
+            card.setBackground(round(surfaceColor, 12));
             ImageView image = new ImageView(this);
             image.setScaleType(ImageView.ScaleType.CENTER_CROP);
             image.setBackgroundColor(0xff17324b);
             card.addView(image, size(-1, 122));
             ((TubeApplication) getApplication()).imageLoader().load(candidate.source,
                     candidate.thumbnail, image, dp(240), dp(122));
-            TextView name = label(candidate.title, 14, Color.WHITE);
+            TextView name = label(candidate.title, 14, primary);
             name.setMaxLines(2);
             name.setEllipsize(TextUtils.TruncateAt.END);
             name.setPadding(dp(9), dp(7), dp(9), dp(3));
@@ -350,7 +360,7 @@ public final class MobilePlayerActivity extends Activity {
         LinearLayout details = new LinearLayout(this);
         details.setOrientation(LinearLayout.VERTICAL);
         details.setPadding(dp(16), dp(17), dp(16), dp(30));
-        TextView title = label(video.title, 20, Color.WHITE);
+        TextView title = label(video.title, 20, primary);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         details.addView(title, size(-1, -2));
         List<String> facts = new ArrayList<>();
@@ -369,11 +379,12 @@ public final class MobilePlayerActivity extends Activity {
         avatar.setGravity(Gravity.CENTER);
         avatar.setBackground(round(0xff315679, 24));
         channelRow.addView(avatar, size(44, 44));
-        TextView channelText = label(channel + "\n" + video.source, 14, Color.WHITE);
+        TextView channelText = label(channel + "\n" + video.source, 14, primary);
         channelText.setPadding(dp(11), 0, dp(4), 0);
         channelRow.addView(channelText, new LinearLayout.LayoutParams(0, dp(50), 1));
         if (!video.channelId.isEmpty()) {
-            subscribeButton = label("", 13, BACKGROUND);
+            subscribeButton = label("", 13, TvAppearancePreferences.theme(this) == 2
+                    ? Color.WHITE : BACKGROUND);
             subscribeButton.setGravity(Gravity.CENTER);
             subscribeButton.setPadding(dp(10), 0, dp(10), 0);
             subscribeButton.setBackground(round(ACCENT, 18));
@@ -395,9 +406,9 @@ public final class MobilePlayerActivity extends Activity {
             description.setPadding(0, dp(12), 0, dp(12));
             details.addView(description, size(-1, -2));
         }
-        TextView channelVideos = label("Видео канала  ›", 15, Color.WHITE);
+        TextView channelVideos = label("Видео канала  ›", 15, primary);
         channelVideos.setPadding(dp(14), 0, dp(14), 0);
-        channelVideos.setBackground(round(MobileAuroraTheme.SURFACE, 10));
+        channelVideos.setBackground(round(surfaceColor, 10));
         channelVideos.setOnClickListener(v -> VideoActions.openChannel(this, video));
         channelVideos.setVisibility(video.channelId.isEmpty() ? View.GONE : View.VISIBLE);
         details.addView(channelVideos, size(-1, 48));
@@ -440,7 +451,9 @@ public final class MobilePlayerActivity extends Activity {
                 ? View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
                     | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
                     | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                : 0);
+                : TvAppearancePreferences.theme(this) == 2
+                        ? View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                                | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR : 0);
         fullscreenButton.setContentDescription(fullscreen
                 ? "Выйти из полноэкранного режима" : "На весь экран");
         fullscreenButton.setText(fullscreen ? "⤢" : "⛶");
@@ -530,9 +543,9 @@ public final class MobilePlayerActivity extends Activity {
     }
 
     private TextView action(LinearLayout row, String text, Runnable callback) {
-        TextView button = label(text, 13, Color.WHITE);
+        TextView button = label(text, 13, primary);
         button.setGravity(Gravity.CENTER);
-        button.setBackground(round(MobileAuroraTheme.SURFACE, 18));
+        button.setBackground(round(surfaceColor, 18));
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(44), 1);
         params.rightMargin = dp(8);
         row.addView(button, params);

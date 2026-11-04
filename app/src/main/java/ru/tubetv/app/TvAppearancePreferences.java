@@ -2,7 +2,7 @@ package ru.tubetv.app;
 
 import android.content.Context;
 
-/** Visual options for the TV shell; stored independently of mobile Aurora UI. */
+/** Shared visual palette for TV and mobile; each application variant keeps its own preferences. */
 final class TvAppearancePreferences {
     static final String[] THEMES = {"Кино", "Триколор", "Светлая"};
 

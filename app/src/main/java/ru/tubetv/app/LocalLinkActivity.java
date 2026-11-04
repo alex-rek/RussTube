@@ -31,12 +31,14 @@ public final class LocalLinkActivity extends Activity implements LocalLinkRuntim
     private AlertDialog pairingDialog;
 
     @Override protected void onCreate(Bundle state) {
+        if (BuildConfig.MOBILE_VARIANT && TvAppearancePreferences.theme(this) == 2)
+            setTheme(R.style.AppThemeLight);
         super.onCreate(state);
         runtime = ((TubeApplication) getApplication()).localLink();
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
         scroll.setBackgroundColor(BuildConfig.MOBILE_VARIANT
-                ? MobileAuroraTheme.BACKGROUND : 0xff071629);
+                ? TvAppearancePreferences.background(this) : 0xff071629);
         content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
         content.setPadding(dp(24), dp(18), dp(24), dp(30));
@@ -278,25 +280,26 @@ public final class LocalLinkActivity extends Activity implements LocalLinkRuntim
 
     private void heading(String value) {
         TextView view = label(value, 22);
-        view.setTextColor(Color.WHITE);
+        view.setTextColor(TvAppearancePreferences.text(this));
         content.addView(view, new LinearLayout.LayoutParams(-1, dp(54)));
     }
 
     private void note(CharSequence value) {
         TextView view = label(value.toString(), 15);
-        view.setTextColor(0xffaeb9cc);
+        view.setTextColor(TvAppearancePreferences.secondary(this));
         view.setPadding(dp(8), dp(4), dp(8), dp(8));
         content.addView(view);
     }
 
     private void action(String value, Runnable runnable) {
         TextView view = label(value, 17);
-        view.setTextColor(Color.WHITE);
+        view.setTextColor(TvAppearancePreferences.text(this));
         view.setPadding(dp(18), 0, dp(18), 0);
-        view.setBackgroundColor(0xff112942);
+        view.setBackgroundColor(TvAppearancePreferences.surface(this));
         view.setFocusable(true);
         view.setOnFocusChangeListener((v, focused) ->
-                view.setBackgroundColor(focused ? 0xff006b80 : 0xff112942));
+                view.setBackgroundColor(focused ? TvAppearancePreferences.focus(this)
+                        : TvAppearancePreferences.surface(this)));
         view.setOnClickListener(v -> runnable.run());
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(52));
         params.bottomMargin = dp(8);

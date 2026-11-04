@@ -22,15 +22,25 @@ final class MobileSettingsPanel extends ScrollView {
     private final LinearLayout content;
 
     MobileSettingsPanel(Activity activity, Runnable openNetwork, Runnable historyChanged,
-                        Runnable saveLibrary, Runnable loadLibrary) {
+                        Runnable saveLibrary, Runnable loadLibrary, Runnable themeChanged) {
         super(activity);
         this.activity = activity;
         setFillViewport(true);
-        setBackgroundColor(MobileAuroraTheme.BACKGROUND);
+        setBackgroundColor(TvAppearancePreferences.background(activity));
         content = new LinearLayout(activity);
         content.setOrientation(LinearLayout.VERTICAL);
         content.setPadding(dp(16), dp(6), dp(16), dp(30));
         addView(content);
+
+        section("Интерфейс");
+        row("Тема: " + TvAppearancePreferences.THEMES[TvAppearancePreferences.theme(activity)],
+                () -> new AlertDialog.Builder(activity).setTitle("Тема оформления")
+                        .setSingleChoiceItems(TvAppearancePreferences.THEMES,
+                                TvAppearancePreferences.theme(activity), (dialog, selected) -> {
+                                    TvAppearancePreferences.setTheme(activity, selected);
+                                    dialog.dismiss();
+                                    themeChanged.run();
+                                }).setNegativeButton("Отмена", null).show());
 
         section("Общий");
         description("Видеоплощадки для поиска и каталога");
@@ -133,7 +143,7 @@ final class MobileSettingsPanel extends ScrollView {
     }
 
     private void section(String title) {
-        TextView label = text(title, 21, MobileAuroraTheme.TEXT);
+        TextView label = text(title, 21, TvAppearancePreferences.text(activity));
         label.setTypeface(Typeface.DEFAULT_BOLD);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(48));
         params.topMargin = dp(12);
@@ -141,7 +151,7 @@ final class MobileSettingsPanel extends ScrollView {
     }
 
     private void description(String value) {
-        TextView label = text(value, 14, MobileAuroraTheme.MUTED);
+        TextView label = text(value, 14, TvAppearancePreferences.secondary(activity));
         label.setPadding(dp(6), 0, dp(6), dp(8));
         content.addView(label);
     }
@@ -150,10 +160,10 @@ final class MobileSettingsPanel extends ScrollView {
         CheckBox box = new CheckBox(activity);
         box.setText(title);
         box.setTextSize(15);
-        box.setTextColor(MobileAuroraTheme.TEXT);
-        box.setButtonTintList(ColorStateList.valueOf(MobileAuroraTheme.TEAL));
+        box.setTextColor(TvAppearancePreferences.text(activity));
+        box.setButtonTintList(ColorStateList.valueOf(TvAppearancePreferences.accent(activity)));
         box.setPadding(dp(10), 0, dp(10), 0);
-        box.setBackground(MobileAuroraTheme.round(MobileAuroraTheme.SURFACE, dp(12)));
+        box.setBackground(MobileAuroraTheme.round(TvAppearancePreferences.surface(activity), dp(12)));
         box.setChecked(enabled);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(52));
         params.bottomMargin = dp(8);
@@ -162,9 +172,9 @@ final class MobileSettingsPanel extends ScrollView {
     }
 
     private void row(String title, Runnable action) {
-        TextView row = text(title, 16, MobileAuroraTheme.TEXT);
+        TextView row = text(title, 16, TvAppearancePreferences.text(activity));
         row.setPadding(dp(16), 0, dp(16), 0);
-        row.setBackground(MobileAuroraTheme.round(MobileAuroraTheme.SURFACE, dp(12)));
+        row.setBackground(MobileAuroraTheme.round(TvAppearancePreferences.surface(activity), dp(12)));
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(52));
         params.bottomMargin = dp(8);
         content.addView(row, params);

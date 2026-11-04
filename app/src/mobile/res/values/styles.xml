@@ -5,14 +5,33 @@
         <item name="android:colorAccent">@color/accent</item>
         <item name="android:navigationBarColor">@color/background</item>
         <item name="android:windowBackground">@color/background</item>
-        <item name="android:alertDialogTheme">@style/AuroraAlertDialog</item>
+        <item name="android:alertDialogTheme">@style/RussTubeDarkDialog</item>
     </style>
 
-    <style name="AuroraAlertDialog" parent="android:style/Theme.Material.Dialog.Alert">
+    <style name="AppThemeLight" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:colorAccent">#007E8D</item>
+        <item name="android:navigationBarColor">#EAF2FA</item>
+        <item name="android:windowBackground">#EAF2FA</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:alertDialogTheme">@style/RussTubeLightDialog</item>
+    </style>
+
+    <style name="RussTubeDarkDialog" parent="android:style/Theme.Material.Dialog.Alert">
         <item name="android:colorAccent">@color/accent</item>
         <item name="android:colorBackground">@color/aurora_surface</item>
         <item name="android:textColorPrimary">@color/aurora_text</item>
         <item name="android:textColorSecondary">@color/aurora_muted</item>
-        <item name="android:windowBackground">@drawable/aurora_dialog_background</item>
+        <item name="android:windowBackground">@color/aurora_surface</item>
+    </style>
+
+    <style name="RussTubeLightDialog" parent="android:style/Theme.Material.Light.Dialog.Alert">
+        <item name="android:colorAccent">#007E8D</item>
+        <item name="android:colorBackground">#D6E5F2</item>
+        <item name="android:textColorPrimary">#10243B</item>
+        <item name="android:textColorSecondary">#46566D</item>
+        <item name="android:windowBackground">#D6E5F2</item>
     </style>
 </resources>

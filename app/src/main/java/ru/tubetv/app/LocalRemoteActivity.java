@@ -32,13 +32,14 @@ public final class LocalRemoteActivity extends Activity implements LocalLinkRunt
     private JSONObject snapshot;
 
     @Override protected void onCreate(Bundle state) {
+        if (TvAppearancePreferences.theme(this) == 2) setTheme(R.style.AppThemeLight);
         super.onCreate(state);
         peerId = getIntent().getStringExtra(PEER_ID);
         if (!LocalTrustedDevices.validId(peerId)
                 || LocalTrustedDevices.find(this, peerId) == null) { finish(); return; }
         runtime = ((TubeApplication) getApplication()).localLink();
         ScrollView scroll = new ScrollView(this);
-        scroll.setBackgroundColor(MobileAuroraTheme.BACKGROUND);
+        scroll.setBackgroundColor(TvAppearancePreferences.background(this));
         LinearLayout root = new LinearLayout(this);
         root.setPadding(dp(18), dp(24), dp(18), dp(24));
         root.setOrientation(LinearLayout.VERTICAL);
@@ -161,7 +162,8 @@ public final class LocalRemoteActivity extends Activity implements LocalLinkRunt
     }
     private TextView label(String text, int size) {
         TextView view = new TextView(this);
-        view.setText(text); view.setTextSize(size); view.setTextColor(Color.WHITE);
+        view.setText(text); view.setTextSize(size);
+        view.setTextColor(TvAppearancePreferences.text(this));
         view.setGravity(Gravity.CENTER_VERTICAL); view.setMinHeight(dp(42));
         return view;
     }
