@@ -116,6 +116,9 @@ public final class BrowseActivity extends Activity {
     private LinearLayout content;
     private boolean menuExpanded;
     private Runnable pendingNavigation;
+    private boolean changingGroup;
+    private Button selectedLiveGroupButton;
+    private Button selectedFilmGroupButton;
     private int interfaceScaleStep;
     private int gridScaleStep;
     private int homeRowCount;
@@ -644,7 +647,12 @@ public final class BrowseActivity extends Activity {
     private void selectLiveGroup(LiveGroup group) {
         liveGroup = group;
         focusKey = null; focusPosition = 0; focusPending = true;
-        show(Page.LIVE);
+        changingGroup = true;
+        try {
+            show(Page.LIVE);
+            if (selectedLiveGroupButton != null && selectedLiveGroupButton.requestFocus())
+                focusPending = false;
+        } finally { changingGroup = false; }
     }
 
     private boolean tvCatalogOpen() { return page == Page.LIVE && liveGroup != LiveGroup.ALL; }
@@ -892,6 +900,7 @@ public final class BrowseActivity extends Activity {
     private void liveGroupAction(String title, LiveGroup group) {
         Button button = addAction(title, () -> selectLiveGroup(group));
         if (group == liveGroup) {
+            selectedLiveGroupButton = button;
             button.setBackground(chipBackground(true));
             button.setTextColor(TvAppearancePreferences.accent(this));
         }
@@ -909,12 +918,18 @@ public final class BrowseActivity extends Activity {
     private void selectFilmGroup(FilmGroup group) {
         filmGroup = group;
         focusKey = null; focusPosition = 0; focusPending = true;
-        show(Page.FILMS);
+        changingGroup = true;
+        try {
+            show(Page.FILMS);
+            if (selectedFilmGroupButton != null && selectedFilmGroupButton.requestFocus())
+                focusPending = false;
+        } finally { changingGroup = false; }
     }
 
     private void filmGroupAction(String title, FilmGroup group) {
         Button button = addAction(title, () -> selectFilmGroup(group));
         if (group == filmGroup) {
+            selectedFilmGroupButton = button;
             button.setBackground(chipBackground(true));
             button.setTextColor(TvAppearancePreferences.accent(this));
         }
@@ -1436,6 +1451,7 @@ public final class BrowseActivity extends Activity {
                     : Color.TRANSPARENT);
             background.setCornerRadius(dp(8));
             view.setBackground(background);
+            if (focused && changingGroup) return;
             if (focused && !menuExpanded) setMenuExpanded(true);
             if (focused) {
                 cancelPendingNavigation();
