@@ -3,7 +3,11 @@ package ru.tubetv.app;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.PictureInPictureParams;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.content.res.ColorStateList;
@@ -16,7 +20,9 @@ import android.os.Bundle;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.text.TextUtils;
+import android.util.Rational;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
@@ -108,6 +114,13 @@ public final class MobilePlayerActivity extends Activity {
     private boolean scrubbing;
     private boolean recorded;
     private boolean backgroundStarted;
+    private boolean pipMode;
+    private boolean screenReceiverRegistered;
+    private final BroadcastReceiver screenOffReceiver = new BroadcastReceiver() {
+        @Override public void onReceive(Context context, Intent intent) {
+            if (Intent.ACTION_SCREEN_OFF.equals(intent.getAction())) handoffToBackgroundAudio();
+        }
+    };
     private boolean autoResume = true;
     private boolean portraitFullscreen;
     private boolean landscapeFullscreen = true;
@@ -161,6 +174,8 @@ public final class MobilePlayerActivity extends Activity {
         }
         recorded = WatchHistoryStore.contains(this, video);
         setContentView(createContent());
+        registerReceiver(screenOffReceiver, new IntentFilter(Intent.ACTION_SCREEN_OFF));
+        screenReceiverRegistered = true;
         headsetControls = new HeadsetMediaControls(this, () -> {
             if (player != null) player.play();
         }, () -> {
@@ -178,7 +193,7 @@ public final class MobilePlayerActivity extends Activity {
         ViewCompat.setOnApplyWindowInsetsListener(root, (view, insets) -> {
             Insets safe = insets.getInsets(WindowInsetsCompat.Type.systemBars()
                     | WindowInsetsCompat.Type.displayCutout());
-            boolean fullscreen = isFullscreen();
+            boolean fullscreen = pipMode || isFullscreen();
             root.setPadding(0, fullscreen ? 0 : safe.top, 0, fullscreen ? 0 : safe.bottom);
             return insets;
         });
@@ -201,16 +216,16 @@ public final class MobilePlayerActivity extends Activity {
         official.setContentDescription("Открыть на платформе");
         official.setOnClickListener(v -> openOfficial());
         toolbar.addView(official, size(48, 52));
-        TextView expand = label("⛶", 26, primary);
-        expand.setGravity(Gravity.CENTER);
-        expand.setContentDescription("На весь экран");
-        expand.setOnClickListener(v -> toggleFullscreen());
-        toolbar.addView(expand, size(48, 52));
+        TextView window = label("▣", 26, primary);
+        window.setGravity(Gravity.CENTER);
+        window.setContentDescription("Оконный режим");
+        window.setOnClickListener(v -> enterWindowMode());
+        toolbar.addView(window, size(48, 52));
         root.addView(toolbar, size(-1, 52));
 
         videoFrame = new FrameLayout(this) {
             @Override protected void onMeasure(int widthSpec, int heightSpec) {
-                if (isFullscreen() || isTabletLandscape()) {
+                if (pipMode || isFullscreen() || isTabletLandscape()) {
                     super.onMeasure(widthSpec, heightSpec);
                     return;
                 }
@@ -419,6 +434,26 @@ public final class MobilePlayerActivity extends Activity {
     }
 
     private void applyOrientation() {
+        if (pipMode) {
+            toolbar.setVisibility(View.GONE);
+            detailsScroll.setVisibility(View.GONE);
+            relatedScroll.setVisibility(View.GONE);
+            mediaBody.setOrientation(LinearLayout.VERTICAL);
+            mediaBody.setPadding(0, 0, 0, 0);
+            playerTop.setOrientation(LinearLayout.VERTICAL);
+            playerTop.setLayoutParams(new LinearLayout.LayoutParams(-1, 0, 1));
+            videoFrame.setLayoutParams(new LinearLayout.LayoutParams(-1, 0, 1));
+            controls.setVisibility(View.GONE);
+            FrameLayout.LayoutParams captionLayout = (FrameLayout.LayoutParams) captionText.getLayoutParams();
+            captionLayout.bottomMargin = dp(8);
+            captionText.setLayoutParams(captionLayout);
+            getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+            ViewCompat.requestApplyInsets(root);
+            videoFrame.post(this::fitSurface);
+            return;
+        }
         boolean fullscreen = isFullscreen();
         boolean split = isTabletLandscape() && !fullscreen;
         toolbar.setVisibility(fullscreen ? View.GONE : View.VISIBLE);
@@ -460,6 +495,9 @@ public final class MobilePlayerActivity extends Activity {
         fullscreenButton.setVisibility(View.VISIBLE);
         fullscreenButton.setTextColor(fullscreen ? ACCENT : Color.WHITE);
         aspectButton.setVisibility(fullscreen ? View.VISIBLE : View.GONE);
+        FrameLayout.LayoutParams captionLayout = (FrameLayout.LayoutParams) captionText.getLayoutParams();
+        captionLayout.bottomMargin = dp(82);
+        captionText.setLayoutParams(captionLayout);
         ViewCompat.requestApplyInsets(root);
         videoFrame.requestLayout();
         videoFrame.post(this::fitSurface);
@@ -482,6 +520,50 @@ public final class MobilePlayerActivity extends Activity {
             landscapeFullscreen = !landscapeFullscreen;
         else portraitFullscreen = !portraitFullscreen;
         applyOrientation();
+    }
+
+    private void enterWindowMode() {
+        if (Build.VERSION.SDK_INT < 26 || !getPackageManager().hasSystemFeature(
+                PackageManager.FEATURE_PICTURE_IN_PICTURE)) {
+            Toast.makeText(this, "Оконный режим недоступен на этом устройстве", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (player == null || streamUrl == null || failed) {
+            Toast.makeText(this, "Дождитесь запуска видео", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        float ratio = videoWidth > 0 && videoHeight > 0
+                ? videoWidth * pixelRatio / videoHeight : 16f / 9f;
+        ratio = Math.max(.45f, Math.min(2.3f, ratio));
+        PictureInPictureParams params = new PictureInPictureParams.Builder()
+                .setAspectRatio(new Rational(Math.round(ratio * 1000), 1000)).build();
+        pipMode = true;
+        try {
+            if (enterPictureInPictureMode(params)) {
+                applyOrientation();
+                updateScreenAwake();
+            } else {
+                pipMode = false;
+                Toast.makeText(this, "Оконный режим недоступен", Toast.LENGTH_SHORT).show();
+            }
+        } catch (RuntimeException error) {
+            pipMode = false;
+            CrashLog.save(this, error);
+            Toast.makeText(this, "Не удалось открыть оконный режим", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private boolean inWindowMode() {
+        return pipMode || Build.VERSION.SDK_INT >= 26 && isInPictureInPictureMode();
+    }
+
+    @Override public void onPictureInPictureModeChanged(boolean inPictureInPictureMode,
+            Configuration configuration) {
+        super.onPictureInPictureModeChanged(inPictureInPictureMode, configuration);
+        pipMode = inPictureInPictureMode;
+        applyOrientation();
+        updateScreenAwake();
+        if (!pipMode && backgroundStarted && isInteractive()) resumeFromBackground();
     }
 
     private void cycleAspect() {
@@ -739,6 +821,7 @@ public final class MobilePlayerActivity extends Activity {
     }
 
     private void showControls() {
+        if (pipMode) return;
         controls.setVisibility(View.VISIBLE);
         updateProgress();
         scheduleHide();
@@ -848,7 +931,7 @@ public final class MobilePlayerActivity extends Activity {
     }
 
     private void updateScreenAwake() {
-        boolean awake = PlaybackScreenPolicy.shouldKeepAwake(started, focused,
+        boolean awake = PlaybackScreenPolicy.shouldKeepAwake(started, focused || pipMode,
                 player != null && player.getPlayWhenReady(),
                 player == null ? Player.STATE_IDLE : player.getPlaybackState(), failed);
         if (awake) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -881,6 +964,33 @@ public final class MobilePlayerActivity extends Activity {
         }
     }
 
+    private boolean isInteractive() {
+        PowerManager power = (PowerManager) getSystemService(POWER_SERVICE);
+        return power == null || power.isInteractive();
+    }
+
+    private void handoffToBackgroundAudio() {
+        if (backgroundStarted || player == null || !player.getPlayWhenReady()
+                || streamUrl == null || failed || isFinishing()) return;
+        saveProgress();
+        startBackgroundAudio();
+        if (backgroundStarted) player.pause();
+    }
+
+    private void resumeFromBackground() {
+        if (!backgroundStarted) return;
+        boolean resumePlaying = AudioPlaybackService.shouldAutoResume();
+        long position = AudioPlaybackService.takePosition(this, video, resumePosition);
+        resumePosition = position;
+        backgroundStarted = false;
+        autoResume = resumePlaying;
+        if (player != null) {
+            player.seekTo(position);
+            if (resumePlaying) player.play(); else player.pause();
+            showControls();
+        } else if (started && streamUrl != null) startPlayer();
+    }
+
     private void requestNotificationPermission() {
         if (Build.VERSION.SDK_INT >= 33
                 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
@@ -891,6 +1001,8 @@ public final class MobilePlayerActivity extends Activity {
 
     @Override protected void onStart() {
         super.onStart(); started = true; updateScreenAwake();
+        if (pipMode && surface != null) surface.onResume();
+        if (pipMode && backgroundStarted && isInteractive()) resumeFromBackground();
         if (headsetControls != null) headsetControls.setActive(true);
         if (streamUrl != null && player == null) startPlayer();
         else if (player != null) ui.post(ticker);
@@ -898,35 +1010,21 @@ public final class MobilePlayerActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume(); if (surface != null) surface.onResume();
-        if (backgroundStarted) {
-            boolean resumePlaying = AudioPlaybackService.shouldAutoResume();
-            long position = AudioPlaybackService.takePosition(this, video, resumePosition);
-            resumePosition = position;
-            backgroundStarted = false;
-            autoResume = resumePlaying;
-            if (player != null) {
-                player.seekTo(position);
-                if (resumePlaying) player.play();
-                else player.pause();
-                showControls();
-            } else if (started && streamUrl != null) startPlayer();
-        }
+        resumeFromBackground();
     }
 
     @Override protected void onPause() {
-        if (player != null && player.getPlayWhenReady() && streamUrl != null
-                && !failed && !isFinishing()) {
-            saveProgress();
-            startBackgroundAudio();
-            player.pause();
-        }
-        if (surface != null) surface.onPause(); super.onPause();
+        if (!inWindowMode() || !isInteractive()) handoffToBackgroundAudio();
+        if (surface != null && !inWindowMode()) surface.onPause();
+        super.onPause();
     }
 
     @Override protected void onStop() {
+        handoffToBackgroundAudio();
         saveProgress(); started = false; updateScreenAwake();
         ui.removeCallbacks(ticker); ui.removeCallbacks(hideControls);
         if (player != null) player.pause();
+        if (surface != null && inWindowMode()) surface.onPause();
         if (headsetControls != null) headsetControls.setActive(false);
         super.onStop();
     }
@@ -972,6 +1070,8 @@ public final class MobilePlayerActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
+        if (screenReceiverRegistered) unregisterReceiver(screenOffReceiver);
+        if (isFinishing() && backgroundStarted) AudioPlaybackService.stopPlayback(this);
         resolver.shutdownNow(); ui.removeCallbacksAndMessages(null);
         if (headsetControls != null) headsetControls.release();
         if (player != null) { player.clearVideoSurface(); player.release(); player = null; }
