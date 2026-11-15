@@ -418,6 +418,8 @@ public final class MobilePlayerActivity extends Activity {
         detailActions.setPadding(0, dp(12), 0, dp(10));
         favoriteButton = action(detailActions, "♡  Избранное", this::toggleFavorite);
         action(detailActions, "↗  Поделиться", this::shareVideo);
+        if (!video.channelId.isEmpty())
+            action(detailActions, "▣  Видео канала", () -> VideoActions.openChannel(this, video));
         if (!video.isLive) action(detailActions, "↓  Скачать", this::downloadVideo);
         action(detailActions, "⚙  Скорость", this::chooseSpeed);
         action(detailActions, "HQ", this::chooseQuality);
@@ -441,12 +443,6 @@ public final class MobilePlayerActivity extends Activity {
             description.setPadding(0, dp(12), 0, dp(12));
             details.addView(description, size(-1, -2));
         }
-        TextView channelVideos = label("Видео канала  ›", 15, primary);
-        channelVideos.setPadding(dp(14), 0, dp(14), 0);
-        channelVideos.setBackground(round(surfaceColor, 10));
-        channelVideos.setOnClickListener(v -> VideoActions.openChannel(this, video));
-        channelVideos.setVisibility(video.channelId.isEmpty() ? View.GONE : View.VISIBLE);
-        details.addView(channelVideos, size(-1, 48));
         portraitRelated = new LinearLayout(this);
         portraitRelated.setOrientation(LinearLayout.VERTICAL);
         portraitRelated.setPadding(0, dp(20), 0, dp(8));
