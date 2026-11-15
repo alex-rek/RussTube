@@ -110,6 +110,9 @@ public final class BrowseActivity extends Activity {
     private Button findButton;
     private GridView grid;
     private TvHomeRows homeRows;
+    private TextView homeLoading;
+    private boolean homePreparing;
+    private int homeRevealVersion;
     private Cards adapter;
     private LinearLayout rail;
     private ScrollView menuContainer;
@@ -408,6 +411,10 @@ public final class BrowseActivity extends Activity {
         });
         homeRows.setVisibility(View.GONE);
         results.addView(homeRows, new FrameLayout.LayoutParams(-1, -1));
+        homeLoading = label("Формируем главную страницу…", 18, Color.rgb(168, 182, 204));
+        homeLoading.setGravity(Gravity.CENTER);
+        homeLoading.setVisibility(View.GONE);
+        results.addView(homeLoading, new FrameLayout.LayoutParams(-1, -1));
         empty = label("", 18, Color.rgb(168, 182, 204));
         empty.setGravity(Gravity.CENTER);
         empty.setPadding(dp(30), dp(20), dp(30), dp(20));
@@ -422,6 +429,8 @@ public final class BrowseActivity extends Activity {
     }
 
     private void show(Page target) {
+        homeRevealVersion++;
+        homePreparing = false;
         if (target == page && !focusPending) rememberFocus();
         if (target == Page.LIVE && page != Page.LIVE) liveGroup = LiveGroup.ALL;
         if (target == Page.FILMS && page != Page.FILMS) filmGroup = FilmGroup.ALL;
@@ -442,17 +451,19 @@ public final class BrowseActivity extends Activity {
             homeDisplayedRows.clear();
             homeCacheSignature = homeCacheSignature();
             TvHomeMemoryCache.Snapshot cached = TvHomeMemoryCache.get(homeCacheSignature);
-            homeHadCache = cached != null;
+            homeHadCache = cached != null && cached.updatedAtMs > 0;
             homeSkipNetwork = cached != null
                     && cached.isFresh(android.os.SystemClock.elapsedRealtime());
-            if (cached != null) {
+            if (homeHadCache) {
                 Set<String> enabled = new HashSet<>();
                 for (String source : FeedRepository.SOURCES)
                     if (MobileBrowsePreferences.sourceEnabled(this, source)) enabled.add(source);
                 homeDisplayedRows.putAll(TvHomeFeed.build(cached.subscriptions,
-                        cached.candidates, history, UnavailableVideoStore.keys(this), enabled,
+                        NotRecommendedChannels.filter(this, cached.candidates), history, UnavailableVideoStore.keys(this), enabled,
                         TvHomePreferences.count(this), getSharedPreferences("browse", 0)
                                 .getBoolean("recommendations", true)));
+                homeDisplayedRows.get(TvHomeFeed.RECOMMENDED).removeIf(
+                        item -> NotRecommendedChannels.contains(this, item));
                 if (homeSkipNetwork) {
                     candidates.addAll(cached.candidates);
                     subscriptionCandidates.addAll(cached.subscriptions);
@@ -463,7 +474,8 @@ public final class BrowseActivity extends Activity {
         heading.setVisibility(home ? View.GONE : View.VISIBLE);
         description.setVisibility(home ? View.GONE : View.VISIBLE);
         grid.setVisibility(home ? View.GONE : View.VISIBLE);
-        homeRows.setVisibility(home ? View.VISIBLE : View.GONE);
+        homeRows.setVisibility(home && homeHadCache ? View.VISIBLE : View.GONE);
+        homeLoading.setVisibility(home && !homeHadCache ? View.VISIBLE : View.GONE);
         if (home) homeRows.setRows(homeDisplayedRows,
                 homeSkipNetwork ? Collections.emptySet() : new HashSet<>(TvHomeFeed.ORDER),
                 Collections.emptySet());
@@ -957,6 +969,27 @@ public final class BrowseActivity extends Activity {
         display("Полнометражные видео пока не найдены.");
     }
 
+    void refreshAfterVideoAction() {
+        history.clear();
+        for (WatchHistoryStore.Entry entry : WatchHistoryStore.load(this)) history.add(entry.item);
+        if (page == Page.HOME) {
+            for (Map.Entry<String, List<VideoItem>> row : homeDisplayedRows.entrySet())
+                row.getValue().removeIf(item -> WatchHistoryStore.contains(this, item)
+                        || !TvHomeFeed.RECENT.equals(row.getKey())
+                        && NotRecommendedChannels.contains(this, item));
+            updateHomeRows();
+            homeRows.post(() -> {
+                if (page == Page.HOME && homeRows.hasVideos()) {
+                    setMenuExpanded(false);
+                    homeRows.focusFirst();
+                }
+            });
+        } else {
+            applySort();
+            display("Видео пока не найдены.");
+        }
+    }
+
     private void submitSearch() {
         String value = query.getText().toString().trim();
         if (value.length() < 2) { query.setError("Введите хотя бы два символа"); return; }
@@ -1150,9 +1183,11 @@ public final class BrowseActivity extends Activity {
             else disabled.add(source);
         }
         Map<String, List<VideoItem>> rows = TvHomeFeed.build(subscriptionCandidates,
-                candidates, history, UnavailableVideoStore.keys(this), enabled,
+                NotRecommendedChannels.filter(this, candidates), history, UnavailableVideoStore.keys(this), enabled,
                 TvHomePreferences.count(this), getSharedPreferences("browse", 0)
                         .getBoolean("recommendations", true));
+        rows.get(TvHomeFeed.RECOMMENDED).removeIf(
+                item -> NotRecommendedChannels.contains(this, item));
         if (pending == 0 && !homeSkipNetwork) for (String source : FeedRepository.SOURCES) {
             int step = homeExtraQueries.containsKey(source) ? homeExtraQueries.get(source) : 0;
             if (enabled.contains(source) && TvHomePreferences.sectionEnabled(this, source)
@@ -1164,6 +1199,8 @@ public final class BrowseActivity extends Activity {
                 enqueue(source, () -> repository.search(source, query));
             }
         }
+        // Publish a complete catalog snapshot; never rebind rows as each source finishes.
+        if (pending > 0) return;
         List<VideoItem> shownRecent = homeDisplayedRows.get(TvHomeFeed.RECENT);
         if (homeSubscriptionsPending > 0 && (shownRecent == null || shownRecent.isEmpty()))
             rows.put(TvHomeFeed.RECENT, Collections.emptyList());
@@ -1190,7 +1227,15 @@ public final class BrowseActivity extends Activity {
             }
         }
         homeRows.setRows(visible, loading, disabled);
-        if (focusPending && !menuExpanded && homeRows.hasVideos()) {
+        if (homeRows.getVisibility() != View.VISIBLE && !homePreparing) {
+            homePreparing = true;
+            int version = homeRevealVersion;
+            Runnable reveal = () -> revealHome(version);
+            homeRows.prepareFirstScreen(visible, reveal);
+            homeRows.postDelayed(reveal, 12_000);
+        }
+        if (focusPending && !menuExpanded && homeRows.getVisibility() == View.VISIBLE
+                && homeRows.hasVideos()) {
             homeRows.post(() -> {
                 if (page == Page.HOME && !menuExpanded) homeRows.focusFirst();
             });
@@ -1206,6 +1251,18 @@ public final class BrowseActivity extends Activity {
         }
         if (pending == 0) TvHomeChannels.publishAsync(this,
                 TvHomeChannels.RECOMMENDATIONS, rows.get(TvHomeFeed.RECOMMENDED));
+    }
+
+    private void revealHome(int version) {
+        if (version != homeRevealVersion || page != Page.HOME
+                || homeRows.getVisibility() == View.VISIBLE) return;
+        homePreparing = false;
+        homeRows.setVisibility(View.VISIBLE);
+        homeLoading.setVisibility(View.GONE);
+        if (focusPending && !menuExpanded && homeRows.hasVideos()) {
+            focusPending = false;
+            homeRows.post(homeRows::focusFirst);
+        }
     }
 
     private String homeCacheSignature() {
@@ -1378,6 +1435,9 @@ public final class BrowseActivity extends Activity {
             for (VideoItem entry : history) watched.add(entry.stableKey());
         for (VideoItem item : baseItems) {
             if (watched.contains(item.stableKey())) continue;
+            if (activeChannel == null && (page == Page.HOME || page == Page.RECOMMENDATIONS
+                    || page == Page.POPULAR || page == Page.FILMS)
+                    && NotRecommendedChannels.contains(this, item)) continue;
             if (page != Page.HISTORY && page != Page.FAVORITES
                     && !(page == Page.CHANNELS && activeChannel == null)
                     && !VideoVisibility.showInDiscovery(item)) continue;

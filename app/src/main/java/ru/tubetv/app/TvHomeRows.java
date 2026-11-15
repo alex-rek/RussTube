@@ -22,6 +22,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /** Horizontally independent rows; only cards near the visible viewport are bound. */
 final class TvHomeRows extends ScrollView {
@@ -138,6 +139,28 @@ final class TvHomeRows extends ScrollView {
                     disabledSources.contains(row.section));
         }
         post(this::refreshVisible);
+    }
+
+    void prepareFirstScreen(Map<String, List<VideoItem>> content, Runnable ready) {
+        Map<String, VideoItem> covers = new LinkedHashMap<>();
+        int visibleRows = 0;
+        for (String section : TvHomeFeed.ORDER) {
+            if (!TvHomePreferences.sectionEnabled(activity, section)) continue;
+            List<VideoItem> videos = content.get(section);
+            if (videos == null || videos.isEmpty()) continue;
+            for (int i = 0; i < Math.min(4, videos.size()); i++) {
+                VideoItem item = videos.get(i);
+                if (item.thumbnail != null && !item.thumbnail.isEmpty())
+                    covers.putIfAbsent(item.thumbnail, item);
+            }
+            if (++visibleRows == 2) break;
+        }
+        if (covers.isEmpty()) { ready.run(); return; }
+        AtomicInteger remaining = new AtomicInteger(covers.size());
+        ImageLoader images = ((TubeApplication) activity.getApplication()).imageLoader();
+        for (VideoItem item : covers.values()) images.prefetchNow(item.source, item.thumbnail,
+                cardWidth, Math.round(cardWidth * 9f / 16f),
+                () -> { if (remaining.decrementAndGet() == 0) ready.run(); });
     }
 
     void focusFirst() {

@@ -22,6 +22,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
 import android.text.TextUtils;
+import android.text.Html;
 import android.util.Rational;
 import android.view.Gravity;
 import android.view.KeyEvent;
@@ -30,6 +31,7 @@ import android.view.Surface;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
@@ -61,6 +63,7 @@ import java.util.concurrent.Executors;
 
 /** Portrait watch page sharing RussTube's resolver, decoder and local libraries. */
 public final class MobilePlayerActivity extends Activity {
+    private static final int CREATE_VIDEO_DOCUMENT = 501;
     private int BACKGROUND;
     private int SECONDARY;
     private int ACCENT;
@@ -81,6 +84,7 @@ public final class MobilePlayerActivity extends Activity {
     private LinearLayout mediaBody;
     private LinearLayout playerTop;
     private ScrollView relatedScroll;
+    private LinearLayout portraitRelated;
     private TextView pageFullscreenButton;
     private LinearLayout toolbar;
     private LinearLayout detailActions;
@@ -98,11 +102,13 @@ public final class MobilePlayerActivity extends Activity {
     private TextView aspectButton;
     private TextView time;
     private TextView favoriteButton;
+    private TextView commentsButton;
     private TextView subscribeButton;
     private SeekBar timeline;
     private VideoItem video;
     private final List<VideoItem> relatedVideos = new ArrayList<>();
     private String streamUrl;
+    private String pendingDownloadUrl;
     private String streamMimeType;
     private List<MediaItem.SubtitleConfiguration> streamSubtitles = java.util.Collections.emptyList();
     private boolean started;
@@ -409,13 +415,27 @@ public final class MobilePlayerActivity extends Activity {
         details.addView(channelRow, size(-1, 52));
 
         detailActions = new LinearLayout(this);
-        detailActions.setPadding(0, dp(18), 0, dp(10));
+        detailActions.setPadding(0, dp(12), 0, dp(10));
         favoriteButton = action(detailActions, "♡  Избранное", this::toggleFavorite);
+        action(detailActions, "↗  Поделиться", this::shareVideo);
+        if (!video.isLive) action(detailActions, "↓  Скачать", this::downloadVideo);
         action(detailActions, "⚙  Скорость", this::chooseSpeed);
         action(detailActions, "HQ", this::chooseQuality);
         action(detailActions, "▣ ТВ", () -> VideoActions.openOnTv(this, video));
         pageFullscreenButton = action(detailActions, "⛶  На весь экран", this::toggleFullscreen);
-        details.addView(detailActions, size(-1, 76));
+        HorizontalScrollView actionScroll = new HorizontalScrollView(this);
+        actionScroll.setHorizontalScrollBarEnabled(false);
+        actionScroll.addView(detailActions, new HorizontalScrollView.LayoutParams(-2, dp(70)));
+        details.addView(actionScroll, size(-1, 70));
+        commentsButton = label("▤  Комментарии  ›", 16, primary);
+        commentsButton.setGravity(Gravity.CENTER_VERTICAL);
+        commentsButton.setPadding(dp(15), 0, dp(15), 0);
+        commentsButton.setBackground(round(surfaceColor, 12));
+        commentsButton.setOnClickListener(v -> showComments());
+        commentsButton.setVisibility(video.isLive ? View.GONE : View.VISIBLE);
+        LinearLayout.LayoutParams commentsParams = size(-1, 56);
+        commentsParams.bottomMargin = dp(14);
+        details.addView(commentsButton, commentsParams);
         if (video.subtitle != null && !video.subtitle.isEmpty()) {
             TextView description = label(video.subtitle, 14, SECONDARY);
             description.setPadding(0, dp(12), 0, dp(12));
@@ -427,6 +447,44 @@ public final class MobilePlayerActivity extends Activity {
         channelVideos.setOnClickListener(v -> VideoActions.openChannel(this, video));
         channelVideos.setVisibility(video.channelId.isEmpty() ? View.GONE : View.VISIBLE);
         details.addView(channelVideos, size(-1, 48));
+        portraitRelated = new LinearLayout(this);
+        portraitRelated.setOrientation(LinearLayout.VERTICAL);
+        portraitRelated.setPadding(0, dp(20), 0, dp(8));
+        TextView nextTitle = label("Далее", 19, primary);
+        nextTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        portraitRelated.addView(nextTitle, size(-1, 42));
+        for (VideoItem candidate : relatedVideos) {
+            LinearLayout card = new LinearLayout(this);
+            card.setGravity(Gravity.CENTER_VERTICAL);
+            ImageView image = new ImageView(this);
+            image.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            image.setBackgroundColor(0xff17324b);
+            card.addView(image, size(128, 76));
+            ((TubeApplication) getApplication()).imageLoader().load(candidate.source,
+                    candidate.thumbnail, image, dp(128), dp(76));
+            LinearLayout description = new LinearLayout(this);
+            description.setOrientation(LinearLayout.VERTICAL);
+            description.setPadding(dp(10), 0, 0, 0);
+            TextView name = label(candidate.title, 15, primary);
+            name.setMaxLines(2);
+            name.setEllipsize(TextUtils.TruncateAt.END);
+            description.addView(name, size(-1, -2));
+            TextView channelName = label(VideoPresentation.channel(candidate), 12, SECONDARY);
+            channelName.setMaxLines(1);
+            channelName.setEllipsize(TextUtils.TruncateAt.END);
+            description.addView(channelName, size(-1, -2));
+            card.addView(description, new LinearLayout.LayoutParams(0, -2, 1));
+            LinearLayout.LayoutParams cardParams = size(-1, 84);
+            cardParams.bottomMargin = dp(8);
+            portraitRelated.addView(card, cardParams);
+            card.setOnClickListener(v -> {
+                if (player != null) player.pause();
+                VideoActions.play(this, candidate, relatedVideos);
+                finish();
+            });
+        }
+        portraitRelated.setVisibility(relatedVideos.isEmpty() ? View.GONE : View.VISIBLE);
+        details.addView(portraitRelated, size(-1, -2));
         detailsScroll.addView(details);
         mediaBody.addView(detailsScroll, new LinearLayout.LayoutParams(-1, 0, 1));
         updateActions();
@@ -464,6 +522,7 @@ public final class MobilePlayerActivity extends Activity {
         playerTop.setLayoutParams(fullscreen || split
                 ? new LinearLayout.LayoutParams(-1, 0, 1) : size(-1, -2));
         relatedScroll.setVisibility(split ? View.VISIBLE : View.GONE);
+        portraitRelated.setVisibility(split || relatedVideos.isEmpty() ? View.GONE : View.VISIBLE);
         videoFrame.setLayoutParams(split
                 ? new LinearLayout.LayoutParams(0, -1, 0.65f)
                 : fullscreen ? new LinearLayout.LayoutParams(-1, 0, 1)
@@ -475,13 +534,7 @@ public final class MobilePlayerActivity extends Activity {
                 : new LinearLayout.LayoutParams(-1, 0, 1));
         channelRow.setVisibility(split ? View.GONE : View.VISIBLE);
         detailActions.setOrientation(LinearLayout.HORIZONTAL);
-        detailActions.setLayoutParams(size(-1, 76));
         pageFullscreenButton.setVisibility(split ? View.VISIBLE : View.GONE);
-        for (int i = 0; i < detailActions.getChildCount(); i++) {
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(44), 1);
-            params.rightMargin = dp(8);
-            detailActions.getChildAt(i).setLayoutParams(params);
-        }
         getWindow().getDecorView().setSystemUiVisibility(fullscreen
                 ? View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
                     | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
@@ -628,7 +681,7 @@ public final class MobilePlayerActivity extends Activity {
         TextView button = label(text, 13, primary);
         button.setGravity(Gravity.CENTER);
         button.setBackground(round(surfaceColor, 18));
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(44), 1);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(144), dp(44));
         params.rightMargin = dp(8);
         row.addView(button, params);
         button.setOnClickListener(v -> callback.run());
@@ -915,6 +968,97 @@ public final class MobilePlayerActivity extends Activity {
         favoriteButton.setText(FavoriteStore.contains(this, video) ? "♥  Сохранено" : "♡  Избранное");
         if (subscribeButton != null) subscribeButton.setText(
                 SubscriptionStore.contains(this, video) ? "Вы подписаны" : "Подписаться");
+    }
+
+    private void shareVideo() {
+        Intent share = new Intent(Intent.ACTION_SEND).setType("text/plain")
+                .putExtra(Intent.EXTRA_TEXT, video.pageUrl);
+        startActivity(Intent.createChooser(share, "Поделиться видео"));
+    }
+
+    private void downloadVideo() {
+        Toast.makeText(this, "Проверяю доступный файл…", Toast.LENGTH_SHORT).show();
+        resolver.execute(() -> {
+            try {
+                String address = VideoDownload.resolve(video);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    pendingDownloadUrl = address;
+                    Intent document = new Intent(Intent.ACTION_CREATE_DOCUMENT)
+                            .addCategory(Intent.CATEGORY_OPENABLE)
+                            .setType("video/mp4")
+                            .putExtra(Intent.EXTRA_TITLE, video.title.replaceAll(
+                                    "[\\\\/:*?\"<>|]", "_") + ".mp4");
+                    startActivityForResult(document, CREATE_VIDEO_DOCUMENT);
+                });
+            } catch (Exception error) {
+                runOnUiThread(() -> Toast.makeText(this, error.getMessage(), Toast.LENGTH_LONG).show());
+            }
+        });
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != CREATE_VIDEO_DOCUMENT) return;
+        String address = pendingDownloadUrl;
+        pendingDownloadUrl = null;
+        if (resultCode == RESULT_OK && data != null && data.getData() != null && address != null) {
+            Toast.makeText(this, "Скачивание началось", Toast.LENGTH_SHORT).show();
+            VideoDownload.save(this, video.source, video.pageUrl, address, data.getData());
+        }
+    }
+
+    private void showComments() {
+        if (!VideoComments.supported(video)) {
+            new AlertDialog.Builder(this).setTitle("Комментарии")
+                    .setMessage("Комментарии этого видео можно посмотреть на площадке.")
+                    .setPositiveButton("Открыть", (dialog, which) -> openOfficial())
+                    .setNegativeButton("Закрыть", null).show();
+            return;
+        }
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        list.setPadding(dp(16), dp(12), dp(16), dp(12));
+        TextView loadingComments = label("Загрузка комментариев…", 15, primary);
+        list.addView(loadingComments, size(-1, -2));
+        scroll.addView(list);
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Комментарии")
+                .setView(scroll).setNegativeButton("Закрыть", null).create();
+        dialog.show();
+        resolver.execute(() -> {
+            try {
+                VideoComments.Page page = VideoComments.load(video);
+                runOnUiThread(() -> {
+                    if (!dialog.isShowing()) return;
+                    dialog.setTitle("Комментарии · " + page.total);
+                    commentsButton.setText("▤  Комментарии · " + page.total + "  ›");
+                    list.removeAllViews();
+                    if (page.entries.isEmpty()) list.addView(
+                            label("Комментариев пока нет", 15, SECONDARY), size(-1, -2));
+                    for (VideoComments.Entry entry : page.entries) {
+                        TextView author = label(entry.author, 15, primary);
+                        author.setTypeface(Typeface.DEFAULT_BOLD);
+                        list.addView(author, size(-1, -2));
+                        TextView body = label(Html.fromHtml(entry.text).toString().trim(), 14, SECONDARY);
+                        LinearLayout.LayoutParams params = size(-1, -2);
+                        params.bottomMargin = dp(18);
+                        list.addView(body, params);
+                    }
+                    if (page.total > page.entries.size()) {
+                        TextView more = label("Остальные комментарии на площадке  ›", 14, ACCENT);
+                        more.setPadding(0, dp(8), 0, dp(8));
+                        more.setOnClickListener(v -> openOfficial());
+                        list.addView(more, size(-1, -2));
+                    }
+                });
+            } catch (Exception error) {
+                runOnUiThread(() -> {
+                    if (dialog.isShowing()) loadingComments.setText(
+                            "Не удалось загрузить комментарии. Попробуйте открыть видео на площадке.");
+                });
+            }
+        });
     }
 
     private void saveProgress() {

@@ -112,6 +112,22 @@ final class ImageLoader {
         ui.postDelayed(() -> runPrefetch(platform, url, key, width, height, 0), 350);
     }
 
+    /** Prepare a visible cover before revealing a newly assembled TV home page. */
+    void prefetchNow(String platform, String url, int width, int height, Runnable completed) {
+        if (url == null || url.isEmpty()) { completed.run(); return; }
+        String key = platform + ":" + key(url, width, height);
+        if (cache.get(key) != null) { completed.run(); return; }
+        Request request = pending.get(key);
+        if (request == null) {
+            request = new Request(platform, url, key, width, height, true);
+            makeRoom();
+            pending.put(key, request);
+            executor.execute(request);
+        }
+        request.callbacks.add(completed);
+        if (queue.remove(request)) queue.offerFirst(request);
+    }
+
     private void runPrefetch(String platform, String url, String key,
                              int width, int height, int attempt) {
         if (cache.get(key) != null || pending.containsKey(key)) {
@@ -162,6 +178,7 @@ final class ImageLoader {
         volatile boolean cancelled;
         volatile HttpURLConnection connection;
         final List<WeakReference<ImageView>> targets = new ArrayList<>();
+        final List<Runnable> callbacks = new ArrayList<>();
         final long queuedAt = SystemClock.elapsedRealtime();
         Request(String platform, String url, String key, int width, int height, boolean prefetch) {
             this.platform = platform; this.url = url; this.key = key;
@@ -233,6 +250,7 @@ final class ImageLoader {
                         if (bitmap != null && !cancelled && target != null && key.equals(target.getTag()))
                             target.setImageBitmap(bitmap);
                     }
+                    for (Runnable callback : callbacks) callback.run();
                     if (BuildConfig.DEBUG) Log.i("RussTubeImagePerf", "source=" + origin
                             + " host=" + host(url) + " queueMs=" + (started - queuedAt)
                             + " readMs=" + readMs

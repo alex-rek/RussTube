@@ -1150,11 +1150,25 @@ public final class MobileBrowseActivity extends Activity {
             if ((page == Page.HISTORY || page == Page.FAVORITES
                     || (page == Page.CHANNELS && activeChannel == null)
                     || VideoVisibility.showInDiscovery(item))
+                    && (activeChannel != null || page == Page.SEARCH || page == Page.HISTORY
+                    || page == Page.FAVORITES || page == Page.CHANNELS || page == Page.SUBSCRIPTIONS
+                    || !NotRecommendedChannels.contains(this, item))
                     && !watched.contains(item.stableKey())
                     && (page != Page.HOME
                     || !unavailable.contains(item.stableKey()))) items.add(item);
         if (page != Page.HISTORY && (page != Page.CHANNELS || activeChannel != null))
             VideoSort.apply(items, sortMode);
+    }
+
+    void refreshAfterVideoAction() {
+        history.clear();
+        for (WatchHistoryStore.Entry entry : WatchHistoryStore.load(this)) history.add(entry.item);
+        for (Map.Entry<String, List<VideoItem>> row : tabletDisplayedRows.entrySet())
+            row.getValue().removeIf(item -> WatchHistoryStore.contains(this, item)
+                    || !TvHomeFeed.RECENT.equals(row.getKey())
+                    && NotRecommendedChannels.contains(this, item));
+        applySort();
+        render();
     }
 
     private void render() {
@@ -1192,8 +1206,10 @@ public final class MobileBrowseActivity extends Activity {
         Set<String> hidden = new HashSet<>(UnavailableVideoStore.keys(this));
         for (VideoItem item : history) hidden.add(item.stableKey());
         Map<String, List<VideoItem>> latest = TvHomeFeed.build(subscriptionCandidates,
-                candidates, history, UnavailableVideoStore.keys(this), enabled, 30,
+                NotRecommendedChannels.filter(this, candidates), history, UnavailableVideoStore.keys(this), enabled, 30,
                 MobileBrowsePreferences.recommendHistory(this));
+        latest.get(TvHomeFeed.RECOMMENDED).removeIf(
+                item -> NotRecommendedChannels.contains(this, item));
         Map<String, List<VideoItem>> visible = new LinkedHashMap<>();
         for (String section : TvHomeFeed.ORDER) {
             LinkedHashMap<String, VideoItem> stable = new LinkedHashMap<>();
@@ -1202,7 +1218,9 @@ public final class MobileBrowseActivity extends Activity {
             if (sourceEnabled && pending > 0) {
                 List<VideoItem> existing = tabletDisplayedRows.get(section);
                 if (existing != null) for (VideoItem item : existing)
-                    if (!hidden.contains(item.stableKey())) stable.put(item.stableKey(), item);
+                    if (!hidden.contains(item.stableKey())
+                            && (TvHomeFeed.RECENT.equals(section)
+                            || !NotRecommendedChannels.contains(this, item))) stable.put(item.stableKey(), item);
             }
             List<VideoItem> found = latest.get(section);
             if (sourceEnabled && found != null) for (VideoItem item : found)

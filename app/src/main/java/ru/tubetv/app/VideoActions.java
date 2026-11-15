@@ -78,6 +78,26 @@ final class VideoActions {
         } else {
             labels.add("Убрать из избранного"); actions.add(() -> setFavorite(activity, item, false));
         }
+        boolean excluded = NotRecommendedChannels.contains(activity, item);
+        if (NotRecommendedChannels.canExclude(item)) {
+            labels.add(excluded ? "Снова рекомендовать канал" : "Не рекомендовать канал");
+            actions.add(() -> {
+                NotRecommendedChannels.set(activity, item, !excluded);
+                Toast.makeText(activity, excluded ? "Канал вернулся в рекомендации"
+                        : "Канал исключён из рекомендаций", Toast.LENGTH_SHORT).show();
+                refreshAfterAction(activity);
+            });
+        }
+        if (!item.isLive) {
+            labels.add("Просмотрено");
+            actions.add(() -> {
+                WatchHistoryStore.record(activity, item, false, 0, false);
+                WatchProgressStore.save(activity, item.source, item.pageUrl,
+                        Math.max(WatchProgressStore.MIN_POSITION_MS, item.durationMs), item.durationMs);
+                Toast.makeText(activity, "Добавлено в историю", Toast.LENGTH_SHORT).show();
+                refreshAfterAction(activity);
+            });
+        }
         labels.add("Назад"); actions.add(() -> { });
         if (!BuildConfig.MOBILE_VARIANT) {
             String[] menuLabels = new String[labels.size()];
@@ -87,7 +107,9 @@ final class VideoActions {
                         : label.startsWith("Подписаться") || label.startsWith("Отписаться") ? "♙"
                         : label.equals("Видео канала") ? "▣"
                         : label.contains("Фильмов") || label.contains("Фильмы") ? "▤"
-                        : label.contains("избранн") ? "♥" : "←";
+                        : label.contains("избранн") ? "♥"
+                        : label.contains("рекомендовать") ? "⊘"
+                        : label.equals("Просмотрено") ? "✓" : "←";
                 menuLabels[i] = icon + "    " + label;
             }
             SideSelectionPanel choices = new SideSelectionPanel(activity, item.title,
@@ -189,6 +211,12 @@ final class VideoActions {
         catch (Exception error) {
             Toast.makeText(activity, error.getMessage(), Toast.LENGTH_LONG).show();
         }
+    }
+
+    private static void refreshAfterAction(Activity activity) {
+        if (activity instanceof BrowseActivity) ((BrowseActivity) activity).refreshAfterVideoAction();
+        if (activity instanceof MobileBrowseActivity)
+            ((MobileBrowseActivity) activity).refreshAfterVideoAction();
     }
 
     static void play(Activity activity, VideoItem item) {
