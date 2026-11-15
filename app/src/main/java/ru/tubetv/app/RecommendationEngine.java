@@ -37,8 +37,10 @@ final class RecommendationEngine {
         Set<String> watched = new HashSet<>();
         Set<String> topics = new HashSet<>();
         Set<String> channels = new HashSet<>();
-        for (VideoItem item : history) {
-            watched.add(item.stableKey());
+        for (VideoItem item : history) watched.add(item.stableKey());
+        // Recent views provide the useful topic signal; older entries still remain excluded.
+        for (int i = 0; i < Math.min(100, history.size()); i++) {
+            VideoItem item = history.get(i);
             topics.addAll(words(item.title));
             if (!item.channelId.isEmpty()) channels.add(item.channelKey());
         }
@@ -61,8 +63,17 @@ final class RecommendationEngine {
 
     private static Set<String> words(String title) {
         Set<String> result = new LinkedHashSet<>();
-        for (String word : title.toLowerCase(Locale.ROOT).split("[^\\p{L}\\p{N}]+")) {
-            if (word.length() >= 3 && !STOP.contains(word) && !digitsOnly(word)) result.add(word);
+        String lower = title.toLowerCase(Locale.ROOT);
+        int start = -1;
+        for (int i = 0; i <= lower.length(); i++) {
+            boolean wordCharacter = i < lower.length() && Character.isLetterOrDigit(lower.charAt(i));
+            if (wordCharacter) {
+                if (start < 0) start = i;
+            } else if (start >= 0) {
+                String word = lower.substring(start, i);
+                if (word.length() >= 3 && !STOP.contains(word) && !digitsOnly(word)) result.add(word);
+                start = -1;
+            }
         }
         return result;
     }

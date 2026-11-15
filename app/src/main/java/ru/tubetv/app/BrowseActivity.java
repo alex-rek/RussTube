@@ -113,6 +113,7 @@ public final class BrowseActivity extends Activity {
     private TextView homeLoading;
     private boolean homePreparing;
     private int homeRevealVersion;
+    private int homeBuildVersion;
     private Cards adapter;
     private LinearLayout rail;
     private ScrollView menuContainer;
@@ -430,6 +431,7 @@ public final class BrowseActivity extends Activity {
 
     private void show(Page target) {
         homeRevealVersion++;
+        homeBuildVersion++;
         homePreparing = false;
         if (target == page && !focusPending) rememberFocus();
         if (target == Page.LIVE && page != Page.LIVE) liveGroup = LiveGroup.ALL;
@@ -454,29 +456,18 @@ public final class BrowseActivity extends Activity {
             homeHadCache = cached != null && cached.updatedAtMs > 0;
             homeSkipNetwork = cached != null
                     && cached.isFresh(android.os.SystemClock.elapsedRealtime());
-            if (homeHadCache) {
-                Set<String> enabled = new HashSet<>();
-                for (String source : FeedRepository.SOURCES)
-                    if (MobileBrowsePreferences.sourceEnabled(this, source)) enabled.add(source);
-                homeDisplayedRows.putAll(TvHomeFeed.build(cached.subscriptions,
-                        NotRecommendedChannels.filter(this, cached.candidates), history, UnavailableVideoStore.keys(this), enabled,
-                        TvHomePreferences.count(this), getSharedPreferences("browse", 0)
-                                .getBoolean("recommendations", true)));
-                List<VideoItem> recommended = homeDisplayedRows.get(TvHomeFeed.RECOMMENDED);
-                for (int i = recommended.size() - 1; i >= 0; i--)
-                    if (NotRecommendedChannels.contains(this, recommended.get(i))) recommended.remove(i);
-                if (homeSkipNetwork) {
-                    candidates.addAll(cached.candidates);
-                    subscriptionCandidates.addAll(cached.subscriptions);
-                }
+            if (homeSkipNetwork) {
+                candidates.addAll(cached.candidates);
+                subscriptionCandidates.addAll(cached.subscriptions);
             }
         }
         updateNavigation();
         heading.setVisibility(home ? View.GONE : View.VISIBLE);
         description.setVisibility(home ? View.GONE : View.VISIBLE);
         grid.setVisibility(home ? View.GONE : View.VISIBLE);
-        homeRows.setVisibility(home && homeHadCache ? View.VISIBLE : View.GONE);
-        homeLoading.setVisibility(home && !homeHadCache ? View.VISIBLE : View.GONE);
+        homeRows.setVisibility(View.GONE);
+        if (home) homeLoading.setText("Формируем главную страницу…");
+        homeLoading.setVisibility(home ? View.VISIBLE : View.GONE);
         if (home) homeRows.setRows(homeDisplayedRows,
                 homeSkipNetwork ? Collections.emptySet() : new HashSet<>(TvHomeFeed.ORDER),
                 Collections.emptySet());
@@ -1182,20 +1173,51 @@ public final class BrowseActivity extends Activity {
 
     private void updateHomeRows() {
         if (page != Page.HOME || activeChannel != null) return;
+        // A complete snapshot is needed before ranking. Network callbacks may arrive in a burst.
+        if (pending > 0) return;
         Set<String> enabled = new HashSet<>();
         Set<String> disabled = new HashSet<>();
         for (String source : FeedRepository.SOURCES) {
             if (MobileBrowsePreferences.sourceEnabled(this, source)) enabled.add(source);
             else disabled.add(source);
         }
-        Map<String, List<VideoItem>> rows = TvHomeFeed.build(subscriptionCandidates,
-                NotRecommendedChannels.filter(this, candidates), history, UnavailableVideoStore.keys(this), enabled,
-                TvHomePreferences.count(this), getSharedPreferences("browse", 0)
-                        .getBoolean("recommendations", true));
+        List<VideoItem> subscriptions = new ArrayList<>(subscriptionCandidates);
+        List<VideoItem> candidateSnapshot = NotRecommendedChannels.filter(this, candidates);
+        List<VideoItem> historySnapshot = new ArrayList<>(history);
+        Set<String> unavailable = new HashSet<>(UnavailableVideoStore.keys(this));
+        int count = TvHomePreferences.count(this);
+        boolean recommendHistory = getSharedPreferences("browse", 0)
+                .getBoolean("recommendations", true);
+        int currentGeneration = generation;
+        int buildVersion = ++homeBuildVersion;
+        io.execute(() -> {
+            Map<String, List<VideoItem>> rows;
+            try {
+                rows = TvHomeFeed.build(subscriptions, candidateSnapshot,
+                        historySnapshot, unavailable, enabled, count, recommendHistory);
+            } catch (RuntimeException failure) {
+                android.util.Log.e("RussTubeHome", "Could not build TV home rows", failure);
+                runOnUiThread(() -> {
+                    if (generation == currentGeneration && homeBuildVersion == buildVersion
+                            && page == Page.HOME) homeLoading.setText("Не удалось подготовить главную страницу");
+                });
+                return;
+            }
+            runOnUiThread(() -> {
+                if (isFinishing() || page != Page.HOME || activeChannel != null
+                        || generation != currentGeneration || homeBuildVersion != buildVersion
+                        || pending > 0) return;
+                publishHomeRows(rows, enabled, disabled);
+            });
+        });
+    }
+
+    private void publishHomeRows(Map<String, List<VideoItem>> rows,
+            Set<String> enabled, Set<String> disabled) {
         List<VideoItem> recommended = rows.get(TvHomeFeed.RECOMMENDED);
         for (int i = recommended.size() - 1; i >= 0; i--)
             if (NotRecommendedChannels.contains(this, recommended.get(i))) recommended.remove(i);
-        if (pending == 0 && !homeSkipNetwork) for (String source : FeedRepository.SOURCES) {
+        if (!homeSkipNetwork) for (String source : FeedRepository.SOURCES) {
             int step = homeExtraQueries.containsKey(source) ? homeExtraQueries.get(source) : 0;
             if (enabled.contains(source) && TvHomePreferences.sectionEnabled(this, source)
                     && rows.get(source).size() < TvHomePreferences.count(this)
@@ -1206,7 +1228,7 @@ public final class BrowseActivity extends Activity {
                 enqueue(source, () -> repository.search(source, query));
             }
         }
-        // Publish a complete catalog snapshot; never rebind rows as each source finishes.
+        // Wait for fallback searches before publishing another complete snapshot.
         if (pending > 0) return;
         List<VideoItem> shownRecent = homeDisplayedRows.get(TvHomeFeed.RECENT);
         if (homeSubscriptionsPending > 0 && (shownRecent == null || shownRecent.isEmpty()))

@@ -3,6 +3,7 @@ package ru.tubetv.app;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.junit.Test;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -30,6 +31,18 @@ public final class BrowseFeaturesTest {
         List<VideoItem> result = RecommendationEngine.rank(Arrays.asList(unrelated, matching),
                 Collections.singletonList(seen));
         assertEquals(matching, result.get(0));
+    }
+
+    @Test public void oldViewsStayExcludedWithoutDominatingCurrentTopics() {
+        List<VideoItem> history = new ArrayList<>();
+        for (int i = 0; i < 100; i++) history.add(video("OK", "recent-" + i, "Космос"));
+        VideoItem old = video("OK", "old", "Пироги");
+        history.add(old);
+        VideoItem oldTopic = video("OK", "new-pies", "Пироги сегодня");
+        VideoItem currentTopic = video("OK", "new-space", "Космос сегодня");
+        List<VideoItem> ranked = RecommendationEngine.rank(
+                Arrays.asList(old, oldTopic, currentTopic), history);
+        assertEquals(Arrays.asList(currentTopic, oldTopic), ranked);
     }
 
     @Test public void recommendationQueriesDiscardNumbersAndStopWords() {
