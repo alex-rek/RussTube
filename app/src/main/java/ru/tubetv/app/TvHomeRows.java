@@ -151,7 +151,7 @@ final class TvHomeRows extends ScrollView {
             for (int i = 0; i < Math.min(4, videos.size()); i++) {
                 VideoItem item = videos.get(i);
                 if (item.thumbnail != null && !item.thumbnail.isEmpty())
-                    covers.putIfAbsent(item.thumbnail, item);
+                    if (!covers.containsKey(item.thumbnail)) covers.put(item.thumbnail, item);
             }
             if (++visibleRows == 2) break;
         }

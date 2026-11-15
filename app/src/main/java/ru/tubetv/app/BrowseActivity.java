@@ -462,8 +462,9 @@ public final class BrowseActivity extends Activity {
                         NotRecommendedChannels.filter(this, cached.candidates), history, UnavailableVideoStore.keys(this), enabled,
                         TvHomePreferences.count(this), getSharedPreferences("browse", 0)
                                 .getBoolean("recommendations", true)));
-                homeDisplayedRows.get(TvHomeFeed.RECOMMENDED).removeIf(
-                        item -> NotRecommendedChannels.contains(this, item));
+                List<VideoItem> recommended = homeDisplayedRows.get(TvHomeFeed.RECOMMENDED);
+                for (int i = recommended.size() - 1; i >= 0; i--)
+                    if (NotRecommendedChannels.contains(this, recommended.get(i))) recommended.remove(i);
                 if (homeSkipNetwork) {
                     candidates.addAll(cached.candidates);
                     subscriptionCandidates.addAll(cached.subscriptions);
@@ -973,10 +974,15 @@ public final class BrowseActivity extends Activity {
         history.clear();
         for (WatchHistoryStore.Entry entry : WatchHistoryStore.load(this)) history.add(entry.item);
         if (page == Page.HOME) {
-            for (Map.Entry<String, List<VideoItem>> row : homeDisplayedRows.entrySet())
-                row.getValue().removeIf(item -> WatchHistoryStore.contains(this, item)
-                        || !TvHomeFeed.RECENT.equals(row.getKey())
-                        && NotRecommendedChannels.contains(this, item));
+            for (Map.Entry<String, List<VideoItem>> row : homeDisplayedRows.entrySet()) {
+                List<VideoItem> videos = row.getValue();
+                for (int i = videos.size() - 1; i >= 0; i--) {
+                    VideoItem item = videos.get(i);
+                    if (WatchHistoryStore.contains(this, item)
+                            || !TvHomeFeed.RECENT.equals(row.getKey())
+                            && NotRecommendedChannels.contains(this, item)) videos.remove(i);
+                }
+            }
             updateHomeRows();
             homeRows.post(() -> {
                 if (page == Page.HOME && homeRows.hasVideos()) {
@@ -1186,8 +1192,9 @@ public final class BrowseActivity extends Activity {
                 NotRecommendedChannels.filter(this, candidates), history, UnavailableVideoStore.keys(this), enabled,
                 TvHomePreferences.count(this), getSharedPreferences("browse", 0)
                         .getBoolean("recommendations", true));
-        rows.get(TvHomeFeed.RECOMMENDED).removeIf(
-                item -> NotRecommendedChannels.contains(this, item));
+        List<VideoItem> recommended = rows.get(TvHomeFeed.RECOMMENDED);
+        for (int i = recommended.size() - 1; i >= 0; i--)
+            if (NotRecommendedChannels.contains(this, recommended.get(i))) recommended.remove(i);
         if (pending == 0 && !homeSkipNetwork) for (String source : FeedRepository.SOURCES) {
             int step = homeExtraQueries.containsKey(source) ? homeExtraQueries.get(source) : 0;
             if (enabled.contains(source) && TvHomePreferences.sectionEnabled(this, source)
