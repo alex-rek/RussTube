@@ -148,6 +148,8 @@ public final class PlayerActivity extends Activity {
     private boolean activityStarted;
     private boolean windowFocused = true;
     private boolean playbackFailed;
+    private boolean playbackReachedReady;
+    private boolean vodRefreshAttempted;
     private boolean liveRefreshAttempted;
     private boolean tvChannelSuccessRecorded;
     private boolean rutubeAlternativeAttempted;
@@ -655,6 +657,7 @@ public final class PlayerActivity extends Activity {
             @Override public void onPlaybackStateChanged(int state) {
                 updateScreenAwake();
                 if (state == Player.STATE_READY) {
+                    playbackReachedReady = true;
                     loading.setVisibility(View.GONE);
                     message.setVisibility(View.GONE);
                     if (!autoPlay || audioOnly) showControls();
@@ -678,6 +681,8 @@ public final class PlayerActivity extends Activity {
             }
 
             @Override public void onIsPlayingChanged(boolean isPlaying) {
+                if (isPlaying && !historyItem.isLive)
+                    UnavailableVideoStore.remove(PlayerActivity.this, historyItem);
                 if (isPlaying && historyItem.isLive && !tvChannelSuccessRecorded) {
                     tvChannelSuccessRecorded = true;
                     TvChannelStore.playbackStatus(PlayerActivity.this, historyItem,
@@ -733,6 +738,10 @@ public final class PlayerActivity extends Activity {
                 if (historyItem.isLive && !liveRefreshAttempted) {
                     liveRefreshAttempted = true;
                     ui.post(PlayerActivity.this::refreshLiveStream);
+                } else if (PlaybackRecoveryPolicy.shouldRefreshVod(historyItem.isLive,
+                        playbackReachedReady, vodRefreshAttempted, error.errorCode)) {
+                    vodRefreshAttempted = true;
+                    ui.post(PlayerActivity.this::refreshVodStream);
                 } else if ("RUTUBE".equals(videoSource) && !historyItem.isLive
                         && !rutubeAlternativeAttempted
                         && error.errorCode >= 2000 && error.errorCode < 3000) {
@@ -1481,7 +1490,7 @@ public final class PlayerActivity extends Activity {
         if (historyItem.isLive) {
             TvChannelStore.playbackStatus(this, historyItem,
                     TvChannelStore.failureStatus(text));
-        } else UnavailableVideoStore.add(this, historyItem);
+        } else if (!playbackReachedReady) UnavailableVideoStore.add(this, historyItem);
         playbackFailed = true;
         updateScreenAwake();
         loading.setVisibility(View.GONE);
@@ -1532,6 +1541,21 @@ public final class PlayerActivity extends Activity {
         controls.setVisibility(View.GONE);
         message.setVisibility(View.VISIBLE);
         message.setText("Обновляю адрес трансляции…");
+        resolveStream();
+    }
+
+    private void refreshVodStream() {
+        if (destroyed || isFinishing() || player == null) return;
+        resumePosition = Math.max(0, player.getCurrentPosition());
+        player.clearVideoSurface();
+        player.release();
+        player = null;
+        streamUrl = null;
+        playbackFailed = false;
+        loading.setVisibility(View.VISIBLE);
+        controls.setVisibility(View.GONE);
+        message.setVisibility(View.VISIBLE);
+        message.setText("Обновляю адрес видео…");
         resolveStream();
     }
 

@@ -27,6 +27,13 @@ final class UnavailableVideoStore {
         if (keys.add(item.stableKey())) prefs.edit().putStringSet(KEY, keys).apply();
     }
 
+    static void remove(Context context, VideoItem item) {
+        if (item == null) return;
+        SharedPreferences prefs = context.getSharedPreferences(PREFS, 0);
+        Set<String> keys = new HashSet<>(prefs.getStringSet(KEY, new HashSet<>()));
+        if (keys.remove(item.stableKey())) prefs.edit().putStringSet(KEY, keys).apply();
+    }
+
     static int count(Context context) {
         return context.getSharedPreferences(PREFS, 0)
                 .getStringSet(KEY, new HashSet<>()).size();

@@ -114,6 +114,8 @@ public final class MobilePlayerActivity extends Activity {
     private boolean started;
     private boolean focused = true;
     private boolean failed;
+    private boolean playbackReachedReady;
+    private boolean vodRefreshAttempted;
     private int liveRetries;
     private boolean tvChannelSuccessRecorded;
     private boolean captionsDisabled = true;
@@ -714,6 +716,7 @@ public final class MobilePlayerActivity extends Activity {
                 @Override public void onPlaybackStateChanged(int state) {
                     updateScreenAwake();
                     if (state == Player.STATE_READY) {
+                        playbackReachedReady = true;
                         loading.setVisibility(View.GONE);
                         errorText.setVisibility(View.GONE);
                         showControls();
@@ -731,6 +734,8 @@ public final class MobilePlayerActivity extends Activity {
                     }
                 }
                 @Override public void onIsPlayingChanged(boolean playing) {
+                    if (playing && !video.isLive)
+                        UnavailableVideoStore.remove(MobilePlayerActivity.this, video);
                     if (playing && video.isLive && !tvChannelSuccessRecorded) {
                         tvChannelSuccessRecorded = true;
                         TvChannelStore.playbackStatus(MobilePlayerActivity.this, video,
@@ -773,7 +778,11 @@ public final class MobilePlayerActivity extends Activity {
                             "source=" + video.source + " code=" + error.getErrorCodeName(), error);
                     if (video.isLive && error.errorCode >= 2000 && error.errorCode < 3000
                             && liveRetries < liveRetryLimit()) scheduleLiveRetry();
-                    else showError("Ошибка воспроизведения: " + error.getErrorCodeName());
+                    else if (PlaybackRecoveryPolicy.shouldRefreshVod(video.isLive,
+                            playbackReachedReady, vodRefreshAttempted, error.errorCode)) {
+                        vodRefreshAttempted = true;
+                        ui.post(MobilePlayerActivity.this::refreshVodStream);
+                    } else showError("Ошибка воспроизведения: " + error.getErrorCodeName());
                 }
             });
             player.setMediaItem(PlaybackEngineFactory.mediaItem(streamUrl, streamMimeType)
@@ -792,8 +801,9 @@ public final class MobilePlayerActivity extends Activity {
     }
 
     private void showError(String text) {
-        if (!video.isLive) UnavailableVideoStore.add(this, video);
-        else TvChannelStore.playbackStatus(this, video, TvChannelStore.failureStatus(text));
+        if (video.isLive) TvChannelStore.playbackStatus(this, video,
+                TvChannelStore.failureStatus(text));
+        else if (!playbackReachedReady) UnavailableVideoStore.add(this, video);
         failed = true; updateScreenAwake();
         loading.setVisibility(View.GONE);
         errorText.setVisibility(View.VISIBLE);
@@ -818,6 +828,20 @@ public final class MobilePlayerActivity extends Activity {
             resumePosition = 0;
             resolveStream();
         }, 1500L * liveRetries);
+    }
+
+    private void refreshVodStream() {
+        if (!started || isFinishing() || isDestroyed() || player == null) return;
+        resumePosition = Math.max(0, player.getCurrentPosition());
+        player.clearVideoSurface();
+        player.release();
+        player = null;
+        streamUrl = null;
+        failed = false;
+        loading.setVisibility(View.VISIBLE);
+        errorText.setVisibility(View.VISIBLE);
+        errorText.setText("Обновляю адрес видео…");
+        resolveStream();
     }
 
     private int liveRetryLimit() {
