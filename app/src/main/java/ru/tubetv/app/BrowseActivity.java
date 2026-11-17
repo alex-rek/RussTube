@@ -35,6 +35,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -61,7 +62,8 @@ public final class BrowseActivity extends Activity {
             "Подписки", "Каналы", "История", "Избранное"};
     private static final String[] NAV_ICONS = {"home", "popular", "recommend", "films", "live",
             "subscriptions", "channels", "history", "favorite"};
-    private static final long NAV_FOCUS_DELAY_MS = 150;
+    private static final long NAV_FOCUS_DELAY_MS = 220;
+    private static final long SECTION_CACHE_MS = 3 * 60 * 1000L;
     private static final String[] QUALITY_LABELS = {"Любое", "720p+", "1080p+", "1440p+", "4K"};
     private static final int[] QUALITY_WIDTHS = {0, 1280, 1920, 2560, 3840};
     private Page page = Page.HOME;
@@ -74,6 +76,21 @@ public final class BrowseActivity extends Activity {
     private final List<VideoItem> baseItems = new ArrayList<>();
     private final List<VideoItem> candidates = new ArrayList<>();
     private final List<VideoItem> subscriptionCandidates = new ArrayList<>();
+    private final Map<Page, SectionSnapshot> sectionCache = new EnumMap<>(Page.class);
+    private boolean sectionSkipNetwork;
+    private static final class SectionSnapshot {
+        final List<VideoItem> candidates;
+        final List<VideoItem> subscriptions;
+        final String signature;
+        final long savedAt;
+        SectionSnapshot(List<VideoItem> candidates, List<VideoItem> subscriptions,
+                        String signature, long savedAt) {
+            this.candidates = new ArrayList<>(candidates);
+            this.subscriptions = new ArrayList<>(subscriptions);
+            this.signature = signature;
+            this.savedAt = savedAt;
+        }
+    }
     private final Map<String, Integer> homeExtraQueries = new LinkedHashMap<>();
     private final Map<String, Integer> homeSourcePending = new LinkedHashMap<>();
     private final Set<String> homeFallbackStarted = new HashSet<>();
@@ -152,6 +169,9 @@ public final class BrowseActivity extends Activity {
         rebuildBaseItems();
         applySort();
         display(pendingResultsEmptyText);
+        if (pending == 0 && activeChannel == null && cacheableSection(page) && failed.isEmpty())
+            sectionCache.put(page, new SectionSnapshot(candidates, subscriptionCandidates,
+                    sectionSignature(), android.os.SystemClock.elapsedRealtime()));
         if (pending == 0 && activeChannel == null && (!items.isEmpty() || failed.isEmpty())) {
             if (page == Page.HOME || page == Page.RECOMMENDATIONS)
                 TvHomeChannels.publishAsync(this, TvHomeChannels.RECOMMENDATIONS, items);
@@ -206,6 +226,8 @@ public final class BrowseActivity extends Activity {
             if (TvHomeChannels.FILMS.equals(section)) page = Page.FILMS;
             else if (TvHomeChannels.TV.equals(section)) page = Page.LIVE;
             else if (TvHomeChannels.RECOMMENDATIONS.equals(section)) page = Page.RECOMMENDATIONS;
+            else try { page = Page.valueOf(TvNavigationPreferences.startPage(this)); }
+            catch (IllegalArgumentException ignored) { page = Page.HOME; }
         }
         show(page);
         String channel = getIntent().getStringExtra("channel");
@@ -444,11 +466,21 @@ public final class BrowseActivity extends Activity {
         activeChannel = null;
         channelsMode = false;
         candidates.clear(); subscriptionCandidates.clear(); items.clear(); baseItems.clear(); history.clear();
+        sectionSkipNetwork = false;
         homeExtraQueries.clear();
         homeSourcePending.clear();
         homeFallbackStarted.clear();
         homeSubscriptionsPending = 0;
         for (WatchHistoryStore.Entry entry : WatchHistoryStore.load(this)) history.add(entry.item);
+        if (cacheableSection(page)) {
+            SectionSnapshot saved = sectionCache.get(page);
+            if (saved != null && saved.signature.equals(sectionSignature())
+                    && android.os.SystemClock.elapsedRealtime() - saved.savedAt < SECTION_CACHE_MS) {
+                candidates.addAll(saved.candidates);
+                subscriptionCandidates.addAll(saved.subscriptions);
+                sectionSkipNetwork = true;
+            }
+        }
         if (home) {
             homeDisplayedRows.clear();
             homeCacheSignature = homeCacheSignature();
@@ -480,7 +512,8 @@ public final class BrowseActivity extends Activity {
         if (!home) {
             addAction(page == Page.LIVE && liveGroup != LiveGroup.ALL
                     ? "Найти телеканалы" : "Обновить",
-                    () -> { if (tvCatalogOpen()) refreshTvChannels(null); else show(page); });
+                    () -> { if (tvCatalogOpen()) refreshTvChannels(null);
+                    else { sectionCache.remove(page); show(page); } });
             if (page != Page.CHANNELS && page != Page.HISTORY && !tvCatalogOpen()) addSortAction();
         }
         switch (page) {
@@ -497,11 +530,11 @@ public final class BrowseActivity extends Activity {
                         .getBoolean("recommendations", true);
                 boolean bySubscriptions = getSharedPreferences("browse", 0)
                         .getBoolean("recommend_subscriptions", true);
-                if (bySubscriptions && (!home || !homeSkipNetwork)) {
+                if (bySubscriptions && !sectionSkipNetwork && (!home || !homeSkipNetwork)) {
                     for (VideoItem channel : SubscriptionStore.load(this))
                         enqueueSubscription(channel);
                 }
-                if ((byHistory || home) && (!home || !homeSkipNetwork)) {
+                if ((byHistory || home) && !sectionSkipNetwork && (!home || !homeSkipNetwork)) {
                     List<String> queries = byHistory ? RecommendationEngine.queries(history)
                             : new ArrayList<>();
                     if (home && queries.isEmpty()) {
@@ -517,7 +550,10 @@ public final class BrowseActivity extends Activity {
                 }
                 if (pending == 0) {
                     if (home) updateHomeRows();
-                    else display("Подпишитесь на каналы или посмотрите несколько видео — здесь появятся новые видео и рекомендации.");
+                    else {
+                        if (sectionSkipNetwork) { rebuildBaseItems(); applySort(); }
+                        display("Подпишитесь на каналы или посмотрите несколько видео — здесь появятся новые видео и рекомендации.");
+                    }
                     return;
                 }
                 break;
@@ -560,7 +596,7 @@ public final class BrowseActivity extends Activity {
                 addAction("Каналы", this::showChannels);
                 List<VideoItem> channels = SubscriptionStore.load(this);
                 for (VideoItem channel : channels) {
-                    if (MobileBrowsePreferences.sourceEnabled(this, channel.source))
+                    if (!sectionSkipNetwork && MobileBrowsePreferences.sourceEnabled(this, channel.source))
                         enqueue(channel.source, () -> repository.channel(channel));
                 }
                 if (channels.isEmpty()) {
@@ -626,7 +662,7 @@ public final class BrowseActivity extends Activity {
             case POPULAR:
                 heading.setText("Популярное");
                 description.setText("Подборка по числу просмотров на платформах");
-                searchAll("популярное", false);
+                if (!sectionSkipNetwork) searchAll("популярное", false);
                 break;
             case FAVORITES:
                 heading.setText("Избранное");
@@ -1556,9 +1592,30 @@ public final class BrowseActivity extends Activity {
         pendingNavigation = null;
     }
 
+    private boolean cacheableSection(Page target) {
+        return target == Page.RECOMMENDATIONS || target == Page.POPULAR
+                || target == Page.SUBSCRIPTIONS;
+    }
+
+    private String sectionSignature() {
+        StringBuilder value = new StringBuilder();
+        for (String source : FeedRepository.SOURCES)
+            value.append(source).append(':')
+                    .append(MobileBrowsePreferences.sourceEnabled(this, source)).append('|');
+        value.append(getSharedPreferences("browse", 0).getBoolean("recommendations", true));
+        value.append('|').append(getSharedPreferences("browse", 0)
+                .getBoolean("recommend_subscriptions", true));
+        if (page == Page.SUBSCRIPTIONS || page == Page.RECOMMENDATIONS)
+            for (VideoItem channel : SubscriptionStore.load(this))
+                value.append('|').append(channel.stableKey());
+        return value.toString();
+    }
+
     private void updateNavigation() {
         for (int i = 0; i < navigation.size(); i++) {
             Button button = navigation.get(i);
+            button.setVisibility(TvNavigationPreferences.visible(this, NAV_PAGES[i].name())
+                    ? View.VISIBLE : View.GONE);
             boolean selected = NAV_PAGES[i] == page;
             button.setTextSize((selected ? 20 : 16) * TvScalePreferences.get(this, TvScalePreferences.INTERFACE));
             button.setTypeface(selected ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
@@ -1574,7 +1631,9 @@ public final class BrowseActivity extends Activity {
     private void openNavigation() {
         setMenuExpanded(true);
         int selected = 0;
-        for (int i = 0; i < NAV_PAGES.length; i++) if (NAV_PAGES[i] == page) selected = i;
+        for (int i = 0; i < NAV_PAGES.length; i++)
+            if (NAV_PAGES[i] == page && navigation.get(i).getVisibility() == View.VISIBLE)
+                selected = i;
         navigation.get(selected).requestFocus();
     }
 
@@ -1659,6 +1718,7 @@ public final class BrowseActivity extends Activity {
         super.onResume();
         updates.onResume();
         if (firstResume) { firstResume = false; return; }
+        updateNavigation();
         int newInterfaceStep = TvScalePreferences.getStep(this, TvScalePreferences.INTERFACE);
         int newGridStep = TvScalePreferences.getStep(this, TvScalePreferences.GRID);
         int newHomeGridStep = TvScalePreferences.getStep(this, TvScalePreferences.HOME_GRID);

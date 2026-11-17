@@ -29,6 +29,10 @@ import java.util.concurrent.TimeUnit;
 
 /** TV settings with persistent categories and a focused parameter column. */
 public final class TvSettingsActivity extends Activity {
+    private static final String[] NAV_KEYS = {"HOME", "POPULAR", "RECOMMENDATIONS",
+            "FILMS", "LIVE", "SUBSCRIPTIONS", "CHANNELS", "HISTORY", "FAVORITES"};
+    private static final String[] NAV_LABELS = {"Главная", "Популярное", "Рекомендации",
+            "Фильмы", "В эфире", "Подписки", "Каналы", "История", "Избранное"};
     private static final int EXPORT_LIBRARY_REQUEST = 7144;
     private static final int IMPORT_LIBRARY_REQUEST = 7145;
     private static final String[] CATEGORIES = {
@@ -369,6 +373,36 @@ public final class TvSettingsActivity extends Activity {
         row("Разделы главной", visibleSections + " из " + TvHomeFeed.ORDER.size() + "  ›",
                 this::openHomeSections);
         note("Порядок видео выбирается отдельно в каждом разделе каталога.");
+        section("Меню разделов");
+        int start = 0;
+        int shown = 0;
+        for (int i = 0; i < NAV_KEYS.length; i++) {
+            if (NAV_KEYS[i].equals(TvNavigationPreferences.startPage(this))) start = i;
+            if (TvNavigationPreferences.visible(this, NAV_KEYS[i])) shown++;
+        }
+        final int startIndex = start;
+        row("Раздел при запуске", NAV_LABELS[start] + "  ›", () ->
+                openChoices("Раздел при запуске", NAV_LABELS, startIndex, 8,
+                        choice -> TvNavigationPreferences.setStartPage(this, NAV_KEYS[choice])));
+        row("Разделы в боковом меню", shown + " из " + NAV_KEYS.length + "  ›",
+                this::openNavigationSections);
+        note("Главная и стартовый раздел всегда доступны в меню.");
+    }
+
+    private void openNavigationSections() {
+        if (selectionPanel != null) return;
+        boolean[] saved = new boolean[NAV_KEYS.length];
+        for (int i = 0; i < saved.length; i++)
+            saved[i] = TvNavigationPreferences.visible(this, NAV_KEYS[i]);
+        selectionOrigin = getCurrentFocus();
+        selectionPanel = new SideSelectionPanel(this, "Разделы в боковом меню", NAV_LABELS,
+                saved, selected -> {
+                    for (int i = 0; i < selected.length; i++)
+                        TvNavigationPreferences.setVisible(this, NAV_KEYS[i], selected[i]);
+                    closeSelection();
+                    renderPanel(9);
+                }, this::closeSelection);
+        showSelection();
     }
 
     private void openHomeSections() {
