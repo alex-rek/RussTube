@@ -86,6 +86,11 @@ public final class MobileBrowseActivity extends Activity {
     private final List<VideoItem> candidates = new ArrayList<>();
     private final List<VideoItem> subscriptionCandidates = new ArrayList<>();
     private final List<VideoItem> history = new ArrayList<>();
+    private final List<VideoItem> homeDisplayedItems = new ArrayList<>();
+    private String homeCacheSignature;
+    private String homeScrollKey;
+    private boolean homeSkipNetwork;
+    private boolean homeForceNetwork;
     private FilmGroup filmGroup = FilmGroup.ALL;
     private LiveGroup liveGroup = LiveGroup.ALL;
     private final List<String> failed = new ArrayList<>();
@@ -490,6 +495,9 @@ public final class MobileBrowseActivity extends Activity {
     }
 
     private void show(Page target) {
+        if (page == Page.HOME && activeChannel == null && list != null
+                && !items.isEmpty() && list.getFirstVisiblePosition() < items.size())
+            homeScrollKey = items.get(list.getFirstVisiblePosition()).stableKey();
         if (target == Page.FILMS && page != Page.FILMS) filmGroup = FilmGroup.ALL;
         if (target == Page.LIVE && page != Page.LIVE) liveGroup = LiveGroup.ALL;
         cancelQueuedSearch();
@@ -502,6 +510,24 @@ public final class MobileBrowseActivity extends Activity {
         for (WatchHistoryStore.Entry entry : WatchHistoryStore.load(this)) {
             history.add(entry.item);
         }
+        if (target == Page.HOME) {
+            homeCacheSignature = homeCacheSignature();
+            MobileHomeMemoryCache.Snapshot cached = MobileHomeMemoryCache.get(homeCacheSignature);
+            homeSkipNetwork = !homeForceNetwork && cached != null
+                    && cached.isFresh(android.os.SystemClock.elapsedRealtime());
+            homeForceNetwork = false;
+            homeDisplayedItems.clear();
+            tabletDisplayedRows.clear();
+            if (cached != null) {
+                homeDisplayedItems.addAll(cached.visible);
+                for (Map.Entry<String, List<VideoItem>> row : cached.rows.entrySet())
+                    tabletDisplayedRows.put(row.getKey(), new ArrayList<>(row.getValue()));
+                if (homeSkipNetwork) {
+                    candidates.addAll(cached.candidates);
+                    subscriptionCandidates.addAll(cached.subscriptions);
+                }
+            }
+        }
         actions.removeAllViews();
         syncingSearchText = true;
         landscapeQuery.setText(query.getText());
@@ -512,15 +538,15 @@ public final class MobileBrowseActivity extends Activity {
         switch (target) {
             case HOME:
                 heading.setText("Главная");
-                if (MobileBrowsePreferences.recommendHistory(this) && !history.isEmpty()) {
+                if (!homeSkipNetwork && MobileBrowsePreferences.recommendHistory(this) && !history.isEmpty()) {
                     List<String> queries = RecommendationEngine.queries(history);
                     for (String value : queries) searchAll(value, false);
                 }
-                if (MobileBrowsePreferences.recommendSubscriptions(this)) {
+                if (!homeSkipNetwork && MobileBrowsePreferences.recommendSubscriptions(this)) {
                     for (VideoItem channel : SubscriptionStore.load(this))
                         enqueueSubscription(channel);
                 }
-                searchAll("популярное", false);
+                if (!homeSkipNetwork) searchAll("популярное", false);
                 break;
             case SEARCH:
                 heading.setText("Поиск");
@@ -609,7 +635,13 @@ public final class MobileBrowseActivity extends Activity {
         applySort();
         updateNavigation();
         render();
-        if (!items.isEmpty()) list.setSelection(0);
+        if (!items.isEmpty()) {
+            int position = 0;
+            if (target == Page.HOME && homeScrollKey != null)
+                for (int i = 0; i < items.size(); i++)
+                    if (homeScrollKey.equals(items.get(i).stableKey())) { position = i; break; }
+            list.setSelection(position);
+        }
         if (target == Page.SEARCH && searchQuery.isEmpty()
                 && getResources().getConfiguration().orientation == Configuration.ORIENTATION_PORTRAIT) {
             query.requestFocus();
@@ -707,7 +739,25 @@ public final class MobileBrowseActivity extends Activity {
 
     private void refresh() {
         if (activeChannel != null) showChannel(activeChannel);
-        else show(page);
+        else {
+            if (page == Page.HOME) homeForceNetwork = true;
+            if (page == Page.FILMS)
+                for (String source : new String[]{"RUTUBE", "VK VIDEO", "OK"})
+                    TvFilmCatalogCache.invalidate(this, source);
+            show(page);
+        }
+    }
+
+    private String homeCacheSignature() {
+        StringBuilder key = new StringBuilder("mobile|").append(sortMode.name())
+                .append('|').append(MobileBrowsePreferences.recommendHistory(this))
+                .append('|').append(MobileBrowsePreferences.recommendSubscriptions(this));
+        for (String source : FeedRepository.SOURCES)
+            key.append('|').append(source).append(':')
+                    .append(MobileBrowsePreferences.sourceEnabled(this, source));
+        for (VideoItem channel : SubscriptionStore.load(this))
+            key.append('|').append(channel.stableKey());
+        return key.toString();
     }
 
     private void refreshFilmsIfVisible() {
@@ -741,11 +791,31 @@ public final class MobileBrowseActivity extends Activity {
 
     private void loadFilms() {
         if (filmGroup == FilmGroup.ALL || filmGroup == FilmGroup.RUTUBE)
-            enqueue("RUTUBE", RutubeTvCatalog::movies, false, true);
+            loadFilmCatalog("RUTUBE", RutubeTvCatalog::movies, true);
         if (filmGroup == FilmGroup.ALL || filmGroup == FilmGroup.VK)
-            enqueue("VK VIDEO", () -> repository.search("VK VIDEO", "фильмы и сериалы"));
+            loadFilmCatalog("VK VIDEO", () -> repository.search("VK VIDEO", "фильмы и сериалы"), false);
         if (filmGroup == FilmGroup.ALL || filmGroup == FilmGroup.OK)
-            enqueue("OK", () -> OkClient.newFilmsCatalog(), false, true);
+            loadFilmCatalog("OK", OkClient::newFilmsCatalog, true);
+    }
+
+    private void loadFilmCatalog(String source, Load operation, boolean trusted) {
+        if (!MobileBrowsePreferences.sourceEnabled(this, source)) return;
+        TvFilmCatalogCache.Snapshot cached = TvFilmCatalogCache.load(this, source);
+        if (cached != null) {
+            candidates.addAll(cached.items);
+            Set<String> visible = new HashSet<>();
+            for (VideoItem item : baseItems) visible.add(item.stableKey());
+            for (VideoItem item : cached.items)
+                if (visible.add(item.stableKey())) baseItems.add(item);
+        }
+        if (cached != null && cached.isFresh(System.currentTimeMillis())) return;
+        enqueue(source, () -> {
+            List<VideoItem> filtered = new ArrayList<>();
+            for (VideoItem item : operation.run())
+                if (FilmCatalog.includes(item, trusted)) filtered.add(item);
+            TvFilmCatalogCache.save(getApplicationContext(), source, filtered);
+            return filtered;
+        }, false, true);
     }
 
     private void findFilms(String query) {
@@ -977,6 +1047,10 @@ public final class MobileBrowseActivity extends Activity {
                 (a, b) -> Long.compare(b.views, a.views));
         applySort();
         render();
+        if (page == Page.HOME && activeChannel == null && pending == 0 && !homeSkipNetwork)
+            MobileHomeMemoryCache.save(homeCacheSignature, candidates,
+                    subscriptionCandidates, homeDisplayedItems, tabletDisplayedRows,
+                    failed.isEmpty() ? android.os.SystemClock.elapsedRealtime() : 0);
     }
 
     private void chooseSort() {
@@ -988,8 +1062,13 @@ public final class MobileBrowseActivity extends Activity {
                     sortMode = modes[choice];
                     FeedSortPreferences.set(this, page.name(), sortMode);
                     updateSortLabel();
-                    applySort();
-                    render();
+                    if (page == Page.HOME && activeChannel == null) {
+                        homeSkipNetwork = false;
+                        homeCacheSignature = homeCacheSignature();
+                        homeDisplayedItems.clear();
+                        tabletDisplayedRows.clear();
+                        rebuildResults();
+                    } else { applySort(); render(); }
                     if (!items.isEmpty()) list.setSelection(0);
                     dialog.dismiss();
                 }).setNegativeButton("Отмена", null).show();
@@ -1158,6 +1237,21 @@ public final class MobileBrowseActivity extends Activity {
                     || !unavailable.contains(item.stableKey()))) items.add(item);
         if (page != Page.HISTORY && (page != Page.CHANNELS || activeChannel != null))
             VideoSort.apply(items, sortMode);
+        if (page == Page.HOME && activeChannel == null) {
+            Set<String> hidden = new HashSet<>(unavailable);
+            for (VideoItem watchedItem : history) hidden.add(watchedItem.stableKey());
+            for (VideoItem shown : homeDisplayedItems)
+                if (NotRecommendedChannels.contains(this, shown)) hidden.add(shown.stableKey());
+            List<VideoItem> merged = TvHomeFeed.mergeNew(
+                    Collections.singletonMap("mobile", homeDisplayedItems),
+                    Collections.singletonMap("mobile", homeSkipNetwork
+                            ? Collections.emptyList() : new ArrayList<>(items)), hidden,
+                    Collections.singletonList("mobile"), 60).get("mobile");
+            items.clear();
+            items.addAll(merged);
+            homeDisplayedItems.clear();
+            homeDisplayedItems.addAll(merged);
+        }
     }
 
     void refreshAfterVideoAction() {
@@ -1172,8 +1266,8 @@ public final class MobileBrowseActivity extends Activity {
                         && NotRecommendedChannels.contains(this, item)) videos.remove(i);
             }
         }
-        applySort();
-        render();
+        if (page == Page.HOME && activeChannel == null) rebuildResults();
+        else { applySort(); render(); }
     }
 
     private void render() {
@@ -1210,31 +1304,25 @@ public final class MobileBrowseActivity extends Activity {
             if (MobileBrowsePreferences.sourceEnabled(this, source)) enabled.add(source);
         Set<String> hidden = new HashSet<>(UnavailableVideoStore.keys(this));
         for (VideoItem item : history) hidden.add(item.stableKey());
+        for (List<VideoItem> row : tabletDisplayedRows.values()) for (VideoItem item : row)
+            if (NotRecommendedChannels.contains(this, item)) hidden.add(item.stableKey());
+        if (homeSkipNetwork) {
+            Map<String, List<VideoItem>> visible = TvHomeFeed.freezeVisible(
+                    tabletDisplayedRows, Collections.emptyMap(), hidden, TvHomeFeed.ORDER);
+            tabletDisplayedRows.clear();
+            tabletDisplayedRows.putAll(visible);
+            tabletHomeRows.setRows(visible, Collections.emptySet(), Collections.emptySet());
+            empty.setVisibility(tabletHomeRows.hasVideos() ? View.GONE : View.VISIBLE);
+            return;
+        }
         Map<String, List<VideoItem>> latest = TvHomeFeed.build(subscriptionCandidates,
                 NotRecommendedChannels.filter(this, candidates), history, UnavailableVideoStore.keys(this), enabled, 30,
                 MobileBrowsePreferences.recommendHistory(this));
         List<VideoItem> recommended = latest.get(TvHomeFeed.RECOMMENDED);
         for (int i = recommended.size() - 1; i >= 0; i--)
             if (NotRecommendedChannels.contains(this, recommended.get(i))) recommended.remove(i);
-        Map<String, List<VideoItem>> visible = new LinkedHashMap<>();
-        for (String section : TvHomeFeed.ORDER) {
-            LinkedHashMap<String, VideoItem> stable = new LinkedHashMap<>();
-            boolean sourceEnabled = section.equals(TvHomeFeed.RECOMMENDED)
-                    || section.equals(TvHomeFeed.RECENT) || enabled.contains(section);
-            if (sourceEnabled && pending > 0) {
-                List<VideoItem> existing = tabletDisplayedRows.get(section);
-                if (existing != null) for (VideoItem item : existing)
-                    if (!hidden.contains(item.stableKey())
-                            && (TvHomeFeed.RECENT.equals(section)
-                            || !NotRecommendedChannels.contains(this, item))) stable.put(item.stableKey(), item);
-            }
-            List<VideoItem> found = latest.get(section);
-            if (sourceEnabled && found != null) for (VideoItem item : found)
-                if (!hidden.contains(item.stableKey()) && stable.size() < 30)
-                    if (!stable.containsKey(item.stableKey()))
-                        stable.put(item.stableKey(), item);
-            visible.put(section, new ArrayList<>(stable.values()));
-        }
+        Map<String, List<VideoItem>> visible = TvHomeFeed.mergeNew(
+                tabletDisplayedRows, latest, hidden, TvHomeFeed.ORDER, 30);
         tabletDisplayedRows.clear();
         tabletDisplayedRows.putAll(visible);
         tabletHomeRows.setRows(visible, Collections.emptySet(), Collections.emptySet());
@@ -1344,7 +1432,12 @@ public final class MobileBrowseActivity extends Activity {
         if (firstResume) { firstResume = false; return; }
         if (skipResumeReload) {
             skipResumeReload = false;
-            if (tvCatalogOpen()) rebuildResults(); else render();
+            if (page == Page.HOME && activeChannel == null) {
+                history.clear();
+                for (WatchHistoryStore.Entry entry : WatchHistoryStore.load(this))
+                    history.add(entry.item);
+                rebuildResults();
+            } else if (tvCatalogOpen()) rebuildResults(); else render();
             return;
         }
         if (activeChannel != null) showChannel(activeChannel);

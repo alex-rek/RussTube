@@ -30,8 +30,8 @@ android {
         minSdk 23
         targetSdk 35
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
-        versionCode 45
-        versionName '0.6.31'
+        versionCode 46
+        versionName '0.6.32'
         buildConfigField "boolean", "UPDATES_ENABLED", "true"
         resourceConfigurations += ['ru']
     }
