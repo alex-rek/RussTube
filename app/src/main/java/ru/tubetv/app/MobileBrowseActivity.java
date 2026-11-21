@@ -514,7 +514,7 @@ public final class MobileBrowseActivity extends Activity {
             homeCacheSignature = homeCacheSignature();
             MobileHomeMemoryCache.Snapshot cached = MobileHomeMemoryCache.get(homeCacheSignature);
             homeSkipNetwork = !homeForceNetwork && cached != null
-                    && cached.isFresh(android.os.SystemClock.elapsedRealtime());
+                    && cached.isReady();
             homeForceNetwork = false;
             homeDisplayedItems.clear();
             tabletDisplayedRows.clear();
@@ -1025,6 +1025,12 @@ public final class MobileBrowseActivity extends Activity {
     }
 
     private void rebuildResults() {
+        if (page == Page.HOME && activeChannel == null && pending > 0
+                && (isTabletLandscape() ? !tabletDisplayedRows.isEmpty()
+                : !homeDisplayedItems.isEmpty())) {
+            status.setText("Загрузка…  ·  Видео: " + items.size());
+            return;
+        }
         baseItems.clear();
         if (tvCatalogOpen()) {
             for (TvChannelStore.Entry entry : TvChannelStore.visible(this, tvSource()))
@@ -1047,10 +1053,10 @@ public final class MobileBrowseActivity extends Activity {
                 (a, b) -> Long.compare(b.views, a.views));
         applySort();
         render();
-        if (page == Page.HOME && activeChannel == null && pending == 0 && !homeSkipNetwork)
+        if (page == Page.HOME && activeChannel == null && !homeSkipNetwork)
             MobileHomeMemoryCache.save(homeCacheSignature, candidates,
                     subscriptionCandidates, homeDisplayedItems, tabletDisplayedRows,
-                    failed.isEmpty() ? android.os.SystemClock.elapsedRealtime() : 0);
+                    pending == 0 ? android.os.SystemClock.elapsedRealtime() : 0);
     }
 
     private void chooseSort() {

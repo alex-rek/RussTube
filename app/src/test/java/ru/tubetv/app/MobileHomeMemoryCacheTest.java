@@ -19,7 +19,14 @@ public final class MobileHomeMemoryCacheTest {
         visible.clear();
         assertEquals(Collections.singletonList(video), snapshot.visible);
         assertEquals(Collections.singletonList(video), snapshot.rows.get("RUTUBE"));
-        assertTrue(snapshot.isFresh(300_999));
-        assertFalse(snapshot.isFresh(301_000));
+        assertTrue(snapshot.isReady());
+        MobileHomeMemoryCache.save("partial", snapshot.candidates,
+                Collections.emptyList(), snapshot.visible, snapshot.rows, 0);
+        MobileHomeMemoryCache.Snapshot partial = MobileHomeMemoryCache.get("partial");
+        assertEquals(Collections.singletonList(video), partial.visible);
+        assertFalse(partial.isReady());
+        MobileHomeMemoryCache.save("partial", snapshot.candidates,
+                Collections.emptyList(), snapshot.visible, snapshot.rows, 1_000);
+        assertTrue(MobileHomeMemoryCache.get("partial").isReady());
     }
 }

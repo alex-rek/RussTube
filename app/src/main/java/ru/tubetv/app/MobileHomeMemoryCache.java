@@ -7,7 +7,6 @@ import java.util.Map;
 
 /** Keeps the mobile Home selection and tablet rows for the current app process. */
 final class MobileHomeMemoryCache {
-    private static final long FRESH_MS = 5 * 60 * 1000L;
     private static Snapshot snapshot;
 
     static synchronized Snapshot get(String signature) {
@@ -41,10 +40,7 @@ final class MobileHomeMemoryCache {
             this.updatedAtMs = updatedAtMs;
         }
 
-        boolean isFresh(long nowMs) {
-            return updatedAtMs > 0 && nowMs >= updatedAtMs
-                    && nowMs - updatedAtMs < FRESH_MS;
-        }
+        boolean isReady() { return updatedAtMs > 0; }
     }
 
     private MobileHomeMemoryCache() { }
