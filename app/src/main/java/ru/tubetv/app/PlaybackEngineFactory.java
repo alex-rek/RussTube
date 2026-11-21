@@ -118,7 +118,9 @@ final class PlaybackEngineFactory {
         boolean peerTube = PeerTubeClient.SOURCE.equals(source);
         Map<String, String> headers = peerTube ? PeerTubeClient.mediaHeaders(pageUrl) : new HashMap<>();
         if (!dzen && !peerTube) {
-            String referer = vk ? "https://vkvideo.ru/" : ok ? OkClient.REFERER : "https://rutube.ru/";
+            String referer = vk ? (pageUrl != null && pageUrl.startsWith("https://live.vkvideo.ru/")
+                    ? "https://live.vkvideo.ru/" : "https://vkvideo.ru/")
+                    : ok ? OkClient.REFERER : "https://rutube.ru/";
             if (referer != null) headers.put("Referer", referer);
         }
         String userAgent = dzen ? DzenClient.USER_AGENT : vk ? VkWebClient.USER_AGENT

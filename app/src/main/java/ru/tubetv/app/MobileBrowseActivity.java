@@ -548,7 +548,7 @@ public final class MobileBrowseActivity extends Activity {
                 break;
             case LIVE:
                 heading.setText("В эфире");
-                action(liveGroup == LiveGroup.ALL ? "✓ Все эфиры" : "Все эфиры",
+                action(liveGroup == LiveGroup.ALL ? "✓ Трансляции" : "Трансляции",
                         () -> selectLiveGroup(LiveGroup.ALL));
                 action(liveGroup == LiveGroup.RUTUBE_TV ? "✓ ТВ RUTUBE" : "ТВ RUTUBE",
                         () -> selectLiveGroup(LiveGroup.RUTUBE_TV));
@@ -775,13 +775,13 @@ public final class MobileBrowseActivity extends Activity {
         }
         switch (liveGroup) {
             default:
-                enqueue(PeerTubeClient.SOURCE,
-                        () -> repository.live(PeerTubeClient.SOURCE, ""));
-                enqueue("OK", () -> OkClient.liveCatalog("livemusic"));
-                enqueue("OK", () -> OkClient.liveCatalog("livenews"));
-                enqueue("OK", () -> OkClient.liveCatalog("live_entertainment"));
-                searchAll("прямой эфир", true);
-                searchAll("24/7", true);
+                if (MobileBrowsePreferences.sourceEnabled(this, "RUTUBE"))
+                    enqueue("RUTUBE", RutubeTvCatalog::streams);
+                if (MobileBrowsePreferences.sourceEnabled(this, "VK VIDEO"))
+                    enqueue("VK VIDEO", VkLiveCatalog::load);
+                if (MobileBrowsePreferences.sourceEnabled(this, PeerTubeClient.SOURCE))
+                    enqueue(PeerTubeClient.SOURCE,
+                            () -> repository.live(PeerTubeClient.SOURCE, ""));
                 break;
         }
     }

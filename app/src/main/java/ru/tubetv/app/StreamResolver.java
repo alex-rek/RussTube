@@ -50,6 +50,9 @@ final class StreamResolver {
         if (PeerTubeClient.isApiUrl(resolverUrl)) {
             return PeerTubeClient.resolve(resolverUrl, audioOnly, forPlayback);
         }
+        if (VkLiveCatalog.isLivePage(resolverUrl)) {
+            return VkLiveCatalog.resolve(resolverUrl);
+        }
         if (resolverUrl != null && (resolverUrl.contains("dzen.ru/video/")
                 || resolverUrl.contains("zen.yandex.ru/video/"))) {
             return inspectDzen(resolverUrl, forPlayback, audioOnly);

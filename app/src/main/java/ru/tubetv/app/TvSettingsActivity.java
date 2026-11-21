@@ -23,6 +23,8 @@ import java.net.HttpURLConnection;
 import java.net.Proxy;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -370,8 +372,16 @@ public final class TvSettingsActivity extends Activity {
         int visibleSections = 0;
         for (String section : TvHomeFeed.ORDER)
             if (TvHomePreferences.sectionEnabled(this, section)) visibleSections++;
-        row("Разделы главной", visibleSections + " из " + TvHomeFeed.ORDER.size() + "  ›",
+        row("Разделы обычной главной", visibleSections + " из " + TvHomeFeed.ORDER.size() + "  ›",
                 this::openHomeSections);
+        boolean thematicHome = TvHomePreferences.THEMATIC.equals(TvHomePreferences.mode(this));
+        row("Вид главной", (thematicHome ? "Тематическая" : "Обычная") + "  ›", () ->
+                openChoices("Вид главной", new String[]{"Обычная", "Тематическая"},
+                        thematicHome ? 1 : 0, 8,
+                        choice -> TvHomePreferences.setMode(this,
+                                choice == 1 ? TvHomePreferences.THEMATIC : TvHomePreferences.NORMAL)));
+        if (thematicHome) row("Интересующие темы", TvHomePreferences.topics(this).size()
+                + " выбрано  ›", this::openHomeTopics);
         note("Порядок видео выбирается отдельно в каждом разделе каталога.");
         section("Меню разделов");
         int start = 0;
@@ -400,7 +410,8 @@ public final class TvSettingsActivity extends Activity {
                     for (int i = 0; i < selected.length; i++)
                         TvNavigationPreferences.setVisible(this, NAV_KEYS[i], selected[i]);
                     closeSelection();
-                    renderPanel(9);
+                    renderPanel(TvHomePreferences.THEMATIC.equals(TvHomePreferences.mode(this))
+                            ? 11 : 10);
                 }, this::closeSelection);
         showSelection();
     }
@@ -417,6 +428,29 @@ public final class TvSettingsActivity extends Activity {
                         TvHomePreferences.setSectionEnabled(this, TvHomeFeed.ORDER.get(i), selected[i]);
                     closeSelection();
                     renderPanel(7);
+                }, this::closeSelection);
+        showSelection();
+    }
+
+    private void openHomeTopics() {
+        if (selectionPanel != null) return;
+        List<String> available = TvHomePreferences.availableTopics(this);
+        List<String> selectedTopics = TvHomePreferences.topics(this);
+        boolean[] saved = new boolean[available.size()];
+        for (int i = 0; i < saved.length; i++) saved[i] = selectedTopics.contains(available.get(i));
+        selectionOrigin = getCurrentFocus();
+        selectionPanel = new SideSelectionPanel(this, "Темы главной",
+                available.toArray(new String[0]), saved, selected -> {
+                    List<String> chosen = new ArrayList<>();
+                    for (int i = 0; i < selected.length; i++)
+                        if (selected[i]) chosen.add(available.get(i));
+                    if (chosen.isEmpty() || chosen.size() > 5) {
+                        Toast.makeText(this, "Выберите от 1 до 5 тем", Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    TvHomePreferences.setTopics(this, chosen);
+                    closeSelection();
+                    renderPanel(9);
                 }, this::closeSelection);
         showSelection();
     }

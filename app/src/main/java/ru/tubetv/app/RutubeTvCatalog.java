@@ -15,20 +15,26 @@ import java.util.regex.Pattern;
 final class RutubeTvCatalog {
     private static final String ADDRESS = "https://rutube.ru/feeds/live/";
     private static final String FILMS_ADDRESS = "https://rutube.ru/feeds/movies-serials/";
+    private static final String STREAMS_ADDRESS = "https://rutube.ru/feeds/stream/";
     private static final Pattern LIVE_LINK = Pattern.compile(
             "/live/video/([0-9a-f]{32})/", Pattern.CASE_INSENSITIVE);
     private static final Pattern FILM_LINK = Pattern.compile(
             "(?<!/live)/video/([0-9a-f]{32})/", Pattern.CASE_INSENSITIVE);
 
     static List<VideoItem> load() throws Exception {
-        return loadPage(ADDRESS, true);
+        return loadPage(ADDRESS, true, false);
     }
 
     static List<VideoItem> movies() throws Exception {
-        return loadPage(FILMS_ADDRESS, false);
+        return loadPage(FILMS_ADDRESS, false, false);
     }
 
-    private static List<VideoItem> loadPage(String address, boolean live) throws Exception {
+    static List<VideoItem> streams() throws Exception {
+        return loadPage(STREAMS_ADDRESS, false, true);
+    }
+
+    private static List<VideoItem> loadPage(String address, boolean live,
+                                            boolean activeStreamsOnly) throws Exception {
         HttpURLConnection connection = NetworkProxy.openConnection("RUTUBE", address);
         connection.setConnectTimeout(7000);
         connection.setReadTimeout(9000);
@@ -42,7 +48,8 @@ final class RutubeTvCatalog {
         } finally {
             connection.disconnect();
         }
-        List<String> ids = live ? videoIds(html) : filmIds(html);
+        List<String> ids = activeStreamsOnly ? streamIds(html)
+                : live ? videoIds(html) : filmIds(html);
         if (ids.isEmpty()) return new ArrayList<>();
         return ParallelTasks.map(ids, 4, id -> {
             JSONObject root = new JSONObject();
@@ -52,7 +59,9 @@ final class RutubeTvCatalog {
             List<VideoItem> parsed = SearchClient.parseRutube(root);
             if (parsed.isEmpty()) return null;
             VideoItem item = parsed.get(0);
-            return item.withChannel(item.channelId, item.channelName, item.channelUrl, live);
+            if (activeStreamsOnly && !item.isLive) return null;
+            return item.withChannel(item.channelId, item.channelName, item.channelUrl,
+                    live || activeStreamsOnly);
         });
     }
 
@@ -62,6 +71,13 @@ final class RutubeTvCatalog {
 
     static List<String> filmIds(String html) {
         return ids(html, FILM_LINK);
+    }
+
+    static List<String> streamIds(String html) {
+        if (html == null) return new ArrayList<>();
+        int section = html.indexOf("<section aria-label=\"Все трансляции\"");
+        if (section < 0) return new ArrayList<>();
+        return ids(html.substring(section), FILM_LINK);
     }
 
     private static List<String> ids(String html, Pattern pattern) {

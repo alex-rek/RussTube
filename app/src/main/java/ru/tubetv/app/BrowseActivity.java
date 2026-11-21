@@ -92,6 +92,7 @@ public final class BrowseActivity extends Activity {
         }
     }
     private final Map<String, Integer> homeExtraQueries = new LinkedHashMap<>();
+    private final Map<String, List<VideoItem>> homeTopicCandidates = new LinkedHashMap<>();
     private final Map<String, Integer> homeSourcePending = new LinkedHashMap<>();
     private final Set<String> homeFallbackStarted = new HashSet<>();
     private int homeSubscriptionsPending;
@@ -138,6 +139,7 @@ public final class BrowseActivity extends Activity {
     private boolean menuExpanded;
     private Runnable pendingNavigation;
     private boolean changingGroup;
+    private boolean changingPage;
     private Button selectedLiveGroupButton;
     private Button selectedFilmGroupButton;
     private int interfaceScaleStep;
@@ -452,14 +454,39 @@ public final class BrowseActivity extends Activity {
     }
 
     private void show(Page target) {
+        boolean wasChangingPage = changingPage;
+        changingPage = true;
+        try {
+            renderPage(target);
+            // Removing the focused action row may move focus to the navigation rail.
+            // Keep that incidental focus change from opening another section.
+            if (!menuExpanded && navigationHasFocus()) {
+                if (searchRow.getVisibility() == View.VISIBLE) query.requestFocus();
+                else if (!items.isEmpty()) grid.requestFocus();
+                else if (actions.getChildCount() > 0) actions.getChildAt(0).requestFocus();
+                else if (page == Page.HOME && homeRows.hasVideos()) homeRows.focusFirst();
+            }
+        } finally {
+            changingPage = wasChangingPage;
+        }
+    }
+
+    private boolean navigationHasFocus() {
+        for (Button button : navigation) if (button.hasFocus()) return true;
+        return settingsNavigation != null && settingsNavigation.hasFocus();
+    }
+
+    private void renderPage(Page target) {
         homeRevealVersion++;
         homeBuildVersion++;
         homePreparing = false;
         if (target == page && !focusPending) rememberFocus();
-        if (target == Page.LIVE && page != Page.LIVE) liveGroup = LiveGroup.ALL;
+        boolean enteringLive = target == Page.LIVE && page != Page.LIVE;
+        if (enteringLive) liveGroup = LiveGroup.ALL;
         if (target == Page.FILMS && page != Page.FILMS) filmGroup = FilmGroup.ALL;
         cancel();
         page = target;
+        if (enteringLive) query.setText("");
         boolean home = page == Page.HOME;
         if (home) focusPending = true;
         sortMode = FeedSortPreferences.get(this, page.name());
@@ -468,6 +495,7 @@ public final class BrowseActivity extends Activity {
         candidates.clear(); subscriptionCandidates.clear(); items.clear(); baseItems.clear(); history.clear();
         sectionSkipNetwork = false;
         homeExtraQueries.clear();
+        homeTopicCandidates.clear();
         homeSourcePending.clear();
         homeFallbackStarted.clear();
         homeSubscriptionsPending = 0;
@@ -483,14 +511,32 @@ public final class BrowseActivity extends Activity {
         }
         if (home) {
             homeDisplayedRows.clear();
+            if (TvHomePreferences.THEMATIC.equals(TvHomePreferences.mode(this))) {
+                List<String> topics = TvHomePreferences.topics(this);
+                homeRows.configure(TvHomeFeed.topicOrder(topics), topics);
+                for (String topic : topics) homeTopicCandidates.put(topic, new ArrayList<>());
+            } else homeRows.configure(TvHomeFeed.ORDER, java.util.Arrays.asList(TvHomeRows.TITLES));
             homeCacheSignature = homeCacheSignature();
             TvHomeMemoryCache.Snapshot cached = TvHomeMemoryCache.get(homeCacheSignature);
             homeHadCache = cached != null && cached.updatedAtMs > 0;
             homeSkipNetwork = cached != null
                     && cached.isFresh(android.os.SystemClock.elapsedRealtime());
+            if (cached != null && !cached.rows.isEmpty()) {
+                Set<String> hidden = new HashSet<>(UnavailableVideoStore.keys(this));
+                for (VideoItem item : history) hidden.add(item.stableKey());
+                for (List<VideoItem> row : cached.rows.values()) for (VideoItem item : row)
+                    if (NotRecommendedChannels.contains(this, item)) hidden.add(item.stableKey());
+                List<String> order = TvHomePreferences.THEMATIC.equals(TvHomePreferences.mode(this))
+                        ? TvHomeFeed.topicOrder(TvHomePreferences.topics(this)) : TvHomeFeed.ORDER;
+                homeDisplayedRows.putAll(TvHomeFeed.freezeVisible(cached.rows,
+                        cached.rows, hidden, order));
+            }
             if (homeSkipNetwork) {
                 candidates.addAll(cached.candidates);
                 subscriptionCandidates.addAll(cached.subscriptions);
+                for (Map.Entry<String, List<VideoItem>> entry : cached.topics.entrySet())
+                    if (homeTopicCandidates.containsKey(entry.getKey()))
+                        homeTopicCandidates.get(entry.getKey()).addAll(entry.getValue());
             }
         }
         updateNavigation();
@@ -503,6 +549,10 @@ public final class BrowseActivity extends Activity {
         if (home) homeRows.setRows(homeDisplayedRows,
                 homeSkipNetwork ? Collections.emptySet() : new HashSet<>(TvHomeFeed.ORDER),
                 Collections.emptySet());
+        if (home && homeRows.hasVideos()) {
+            homeRows.setVisibility(View.VISIBLE);
+            homeLoading.setVisibility(View.GONE);
+        }
         actionScroller.setVisibility(home ? View.GONE : View.VISIBLE);
         status.setVisibility(home ? View.GONE : View.VISIBLE);
         empty.setVisibility(home ? View.GONE : View.VISIBLE);
@@ -513,7 +563,12 @@ public final class BrowseActivity extends Activity {
             addAction(page == Page.LIVE && liveGroup != LiveGroup.ALL
                     ? "Найти телеканалы" : "Обновить",
                     () -> { if (tvCatalogOpen()) refreshTvChannels(null);
-                    else { sectionCache.remove(page); show(page); } });
+                    else {
+                        sectionCache.remove(page);
+                        if (page == Page.FILMS) for (String source : new String[]{"OK", "VK VIDEO", "RUTUBE"})
+                            TvFilmCatalogCache.invalidate(this, source);
+                        show(page);
+                    } });
             if (page != Page.CHANNELS && page != Page.HISTORY && !tvCatalogOpen()) addSortAction();
         }
         switch (page) {
@@ -521,10 +576,13 @@ public final class BrowseActivity extends Activity {
             case RECOMMENDATIONS:
                 heading.setText(page == Page.HOME ? "Главная" : "Рекомендации");
                 description.setText("Новые видео подписок и рекомендации по вашим интересам");
-                if (!home) {
-                    addAction("Наука", () -> discover("наука"));
-                    addAction("Путешествия", () -> discover("путешествия"));
-                    addAction("Технологии", () -> discover("технологии"));
+                if (!home) addRecommendationActions();
+                if (home && TvHomePreferences.THEMATIC.equals(TvHomePreferences.mode(this))) {
+                    if (!homeSkipNetwork) for (String topic : TvHomePreferences.topics(this))
+                        for (String source : MobileBrowsePreferences.enabledSources(this, false))
+                            enqueueHomeTopic(source, topic);
+                    if (pending == 0) updateHomeRows();
+                    break;
                 }
                 boolean byHistory = getSharedPreferences("browse", 0)
                         .getBoolean("recommendations", true);
@@ -582,13 +640,14 @@ public final class BrowseActivity extends Activity {
                 }
                 if ((filmGroup == FilmGroup.ALL || filmGroup == FilmGroup.OK)
                         && MobileBrowsePreferences.sourceEnabled(this, "OK"))
-                    enqueue("OK", OkClient::newFilmsCatalog, false, true);
+                    loadFilmCatalog("OK", OkClient::newFilmsCatalog, true);
                 if ((filmGroup == FilmGroup.ALL || filmGroup == FilmGroup.VK)
                         && MobileBrowsePreferences.sourceEnabled(this, "VK VIDEO"))
-                    enqueue("VK VIDEO", () -> repository.search("VK VIDEO", "фильмы и сериалы"));
+                    loadFilmCatalog("VK VIDEO", () -> repository.search("VK VIDEO", "фильмы и сериалы"), false);
                 if ((filmGroup == FilmGroup.ALL || filmGroup == FilmGroup.RUTUBE)
                         && MobileBrowsePreferences.sourceEnabled(this, "RUTUBE"))
-                    enqueue("RUTUBE", RutubeTvCatalog::movies, false, true);
+                    loadFilmCatalog("RUTUBE", RutubeTvCatalog::movies, true);
+                rebuildBaseItems();
                 break;
             case SUBSCRIPTIONS:
                 heading.setText("Подписки");
@@ -613,7 +672,7 @@ public final class BrowseActivity extends Activity {
                         ? "Прямые трансляции VK Видео, PeerTube и других площадок"
                         : "Телеканалы · " + (liveGroup == LiveGroup.RUTUBE_TV ? "RUTUBE"
                         : liveGroup == LiveGroup.VK_TV ? "VK Видео" : "OK.ru"));
-                liveGroupAction("Все эфиры", LiveGroup.ALL);
+                liveGroupAction("Трансляции", LiveGroup.ALL);
                 liveGroupAction("ТВ RUTUBE", LiveGroup.RUTUBE_TV);
                 liveGroupAction("ТВ VK Видео", LiveGroup.VK_TV);
                 liveGroupAction("ТВ OK.ru", LiveGroup.OK_TV);
@@ -639,20 +698,16 @@ public final class BrowseActivity extends Activity {
                 addAction("Новости", () -> searchLive("новости"));
                 addAction("Спорт", () -> searchLive("спорт"));
                 addAction("Музыка", () -> searchLive("музыка"));
-                if (MobileBrowsePreferences.enabledSources(this, true).length == 0
-                        && !MobileBrowsePreferences.sourceEnabled(this, "OK")) {
+                if (MobileBrowsePreferences.enabledSources(this, true).length == 0) {
                     display("Выбранные платформы не поддерживают эфиры. Откройте Настройки → Поиск.");
                     return;
                 }
+                if (MobileBrowsePreferences.sourceEnabled(this, "RUTUBE"))
+                    enqueue("RUTUBE", RutubeTvCatalog::streams);
+                if (MobileBrowsePreferences.sourceEnabled(this, "VK VIDEO"))
+                    enqueue("VK VIDEO", VkLiveCatalog::load);
                 if (MobileBrowsePreferences.sourceEnabled(this, PeerTubeClient.SOURCE))
                     enqueue(PeerTubeClient.SOURCE, () -> repository.live(PeerTubeClient.SOURCE, ""));
-                if (MobileBrowsePreferences.sourceEnabled(this, "OK")) {
-                    enqueue("OK", () -> OkClient.liveCatalog("livemusic"));
-                    enqueue("OK", () -> OkClient.liveCatalog("livenews"));
-                    enqueue("OK", () -> OkClient.liveCatalog("live_entertainment"));
-                }
-                searchAll("прямой эфир", true);
-                searchAll("24/7", true);
                 break;
             case HISTORY:
                 heading.setText("История");
@@ -683,6 +738,58 @@ public final class BrowseActivity extends Activity {
     }
 
     private void discover(String value) { query.setText(value); show(Page.SEARCH); }
+
+    private void addRecommendationActions() {
+        addAction("Наука", () -> discover("наука"));
+        addAction("Путешествия", () -> discover("путешествия"));
+        addAction("Технологии", () -> discover("технологии"));
+        List<String> topics = RecommendationTopicsStore.load(this);
+        for (String topic : topics) addAction(topic, () -> discover(topic));
+        addAction("+ Тема", this::showTopicInput);
+        if (!topics.isEmpty()) addAction("Изменить темы", this::showTopicManagement);
+    }
+
+    private void showTopicInput() {
+        showRightInput("Добавить тему рекомендаций", "", null, text -> {
+            RecommendationTopicsStore.add(this, text);
+            refreshRecommendationActions(text.trim());
+        });
+    }
+
+    private void showTopicManagement() {
+        List<String> topics = RecommendationTopicsStore.load(this);
+        String[] labels = new String[topics.size() + 1];
+        for (int i = 0; i < topics.size(); i++) labels[i] = "Удалить: " + topics.get(i);
+        labels[topics.size()] = "Назад";
+        showRightChoices("Пользовательские темы", labels, null, choice -> {
+            if (choice >= topics.size()) return;
+            RecommendationTopicsStore.remove(this, topics.get(choice));
+            refreshRecommendationActions("+ Тема");
+        });
+    }
+
+    private void refreshRecommendationActions(String focusLabel) {
+        if (page != Page.RECOMMENDATIONS) return;
+        boolean wasChangingPage = changingPage;
+        changingPage = true;
+        try {
+            actions.removeAllViews();
+            addAction("Обновить", () -> { sectionCache.remove(page); show(page); });
+            addSortAction();
+            addRecommendationActions();
+        } finally { changingPage = wasChangingPage; }
+        actions.post(() -> {
+            if (page != Page.RECOMMENDATIONS) return;
+            for (int i = 0; i < actions.getChildCount(); i++) {
+                View child = actions.getChildAt(i);
+                if (child instanceof Button && focusLabel.equals(((Button) child).getText())) {
+                    child.requestFocus();
+                    return;
+                }
+            }
+        });
+    }
+
     private void searchLive(String value) { liveGroup = LiveGroup.ALL; query.setText(value); show(Page.LIVE); submitSearch(); }
     private void selectLiveGroup(LiveGroup group) {
         liveGroup = group;
@@ -692,6 +799,10 @@ public final class BrowseActivity extends Activity {
             show(Page.LIVE);
             if (selectedLiveGroupButton != null && selectedLiveGroupButton.requestFocus())
                 focusPending = false;
+            actions.post(() -> {
+                if (page == Page.LIVE && liveGroup == group && selectedLiveGroupButton != null
+                        && selectedLiveGroupButton.requestFocus()) focusPending = false;
+            });
         } finally { changingGroup = false; }
     }
 
@@ -963,6 +1074,10 @@ public final class BrowseActivity extends Activity {
             show(Page.FILMS);
             if (selectedFilmGroupButton != null && selectedFilmGroupButton.requestFocus())
                 focusPending = false;
+            actions.post(() -> {
+                if (page == Page.FILMS && filmGroup == group && selectedFilmGroupButton != null
+                        && selectedFilmGroupButton.requestFocus()) focusPending = false;
+            });
         } finally { changingGroup = false; }
     }
 
@@ -973,6 +1088,19 @@ public final class BrowseActivity extends Activity {
             button.setBackground(chipBackground(true));
             button.setTextColor(TvAppearancePreferences.accent(this));
         }
+    }
+
+    private void loadFilmCatalog(String source, Load operation, boolean trusted) {
+        TvFilmCatalogCache.Snapshot cached = TvFilmCatalogCache.load(this, source);
+        if (cached != null) candidates.addAll(cached.items);
+        if (cached != null && cached.isFresh(System.currentTimeMillis())) return;
+        enqueue(source, () -> {
+            List<VideoItem> filtered = new ArrayList<>();
+            for (VideoItem item : operation.run())
+                if (FilmCatalog.includes(item, trusted)) filtered.add(item);
+            TvFilmCatalogCache.save(getApplicationContext(), source, filtered);
+            return filtered;
+        }, false, true);
     }
 
     private void findFilms(String value) {
@@ -1130,6 +1258,15 @@ public final class BrowseActivity extends Activity {
 
     private void enqueue(String source, Load operation, boolean subscription,
                          boolean trustedFilmCollection) {
+        enqueue(source, operation, subscription, trustedFilmCollection, null);
+    }
+
+    private void enqueueHomeTopic(String source, String topic) {
+        enqueue(source, () -> repository.search(source, topic), false, false, topic);
+    }
+
+    private void enqueue(String source, Load operation, boolean subscription,
+                         boolean trustedFilmCollection, String homeTopic) {
         int current = generation;
         boolean filmMode = page == Page.FILMS && activeChannel == null;
         boolean homeJob = page == Page.HOME && activeChannel == null;
@@ -1168,6 +1305,8 @@ public final class BrowseActivity extends Activity {
                 }
                 if (problem != null && !failed.contains(problem)) failed.add(problem);
                 if (tvCatalogOpen()) TvChannelStore.merge(this, result);
+                else if (homeTopic != null && homeTopicCandidates.containsKey(homeTopic))
+                    homeTopicCandidates.get(homeTopic).addAll(result);
                 else candidates.addAll(result);
                 if (subscription) subscriptionCandidates.addAll(result);
                 scheduleResults(page == Page.FILMS ? "Полнометражные видео пока не найдены. Выберите другую тему."
@@ -1219,6 +1358,9 @@ public final class BrowseActivity extends Activity {
         }
         List<VideoItem> subscriptions = new ArrayList<>(subscriptionCandidates);
         List<VideoItem> candidateSnapshot = NotRecommendedChannels.filter(this, candidates);
+        Map<String, List<VideoItem>> topicSnapshot = new LinkedHashMap<>();
+        for (Map.Entry<String, List<VideoItem>> entry : homeTopicCandidates.entrySet())
+            topicSnapshot.put(entry.getKey(), NotRecommendedChannels.filter(this, entry.getValue()));
         List<VideoItem> historySnapshot = new ArrayList<>(history);
         Set<String> unavailable = new HashSet<>(UnavailableVideoStore.keys(this));
         int count = TvHomePreferences.count(this);
@@ -1226,10 +1368,14 @@ public final class BrowseActivity extends Activity {
                 .getBoolean("recommendations", true);
         int currentGeneration = generation;
         int buildVersion = ++homeBuildVersion;
+        boolean thematic = TvHomePreferences.THEMATIC.equals(TvHomePreferences.mode(this));
+        List<String> topics = thematic ? TvHomePreferences.topics(this) : Collections.emptyList();
         io.execute(() -> {
             Map<String, List<VideoItem>> rows;
             try {
-                rows = TvHomeFeed.build(subscriptions, candidateSnapshot,
+                rows = thematic ? TvHomeFeed.buildThematic(topicSnapshot, topics,
+                        historySnapshot, unavailable, count)
+                        : TvHomeFeed.build(subscriptions, candidateSnapshot,
                         historySnapshot, unavailable, enabled, count, recommendHistory);
             } catch (RuntimeException failure) {
                 android.util.Log.e("RussTubeHome", "Could not build TV home rows", failure);
@@ -1250,10 +1396,11 @@ public final class BrowseActivity extends Activity {
 
     private void publishHomeRows(Map<String, List<VideoItem>> rows,
             Set<String> enabled, Set<String> disabled) {
+        boolean thematic = TvHomePreferences.THEMATIC.equals(TvHomePreferences.mode(this));
         List<VideoItem> recommended = rows.get(TvHomeFeed.RECOMMENDED);
-        for (int i = recommended.size() - 1; i >= 0; i--)
+        if (recommended != null) for (int i = recommended.size() - 1; i >= 0; i--)
             if (NotRecommendedChannels.contains(this, recommended.get(i))) recommended.remove(i);
-        if (!homeSkipNetwork) for (String source : FeedRepository.SOURCES) {
+        if (!thematic && !homeSkipNetwork) for (String source : FeedRepository.SOURCES) {
             int step = homeExtraQueries.containsKey(source) ? homeExtraQueries.get(source) : 0;
             if (enabled.contains(source) && TvHomePreferences.sectionEnabled(this, source)
                     && rows.get(source).size() < TvHomePreferences.count(this)
@@ -1266,20 +1413,26 @@ public final class BrowseActivity extends Activity {
         }
         // Wait for fallback searches before publishing another complete snapshot.
         if (pending > 0) return;
-        List<VideoItem> shownRecent = homeDisplayedRows.get(TvHomeFeed.RECENT);
-        if (homeSubscriptionsPending > 0 && (shownRecent == null || shownRecent.isEmpty()))
-            rows.put(TvHomeFeed.RECENT, Collections.emptyList());
-        for (String source : FeedRepository.SOURCES) {
-            Integer waiting = homeSourcePending.get(source);
-            List<VideoItem> shown = homeDisplayedRows.get(source);
-            if (waiting != null && waiting > 0 && !homeFallbackStarted.contains(source)
-                    && (shown == null || shown.isEmpty()))
-                rows.put(source, Collections.emptyList());
+        if (!thematic) {
+            List<VideoItem> shownRecent = homeDisplayedRows.get(TvHomeFeed.RECENT);
+            if (homeSubscriptionsPending > 0 && (shownRecent == null || shownRecent.isEmpty()))
+                rows.put(TvHomeFeed.RECENT, Collections.emptyList());
+            for (String source : FeedRepository.SOURCES) {
+                Integer waiting = homeSourcePending.get(source);
+                List<VideoItem> shown = homeDisplayedRows.get(source);
+                if (waiting != null && waiting > 0 && !homeFallbackStarted.contains(source)
+                        && (shown == null || shown.isEmpty()))
+                    rows.put(source, Collections.emptyList());
+            }
         }
         Set<String> hidden = new HashSet<>(UnavailableVideoStore.keys(this));
         for (VideoItem item : history) hidden.add(item.stableKey());
-        Map<String, List<VideoItem>> visible = TvHomeFeed.freezeVisible(
-                homeDisplayedRows, rows, hidden);
+        for (List<VideoItem> row : homeDisplayedRows.values()) for (VideoItem item : row)
+            if (NotRecommendedChannels.contains(this, item)) hidden.add(item.stableKey());
+        Map<String, List<VideoItem>> visible = TvHomeFeed.mergeNew(
+                homeDisplayedRows, rows, hidden,
+                thematic ? TvHomeFeed.topicOrder(TvHomePreferences.topics(this)) : TvHomeFeed.ORDER,
+                TvHomePreferences.count(this));
         homeDisplayedRows.clear();
         homeDisplayedRows.putAll(visible);
         Set<String> loading = new HashSet<>();
@@ -1291,7 +1444,7 @@ public final class BrowseActivity extends Activity {
                 if (waiting != null && waiting > 0) loading.add(source);
             }
         }
-        homeRows.setRows(visible, loading, disabled);
+        homeRows.setRows(visible, loading, thematic ? Collections.emptySet() : disabled);
         if (homeRows.getVisibility() != View.VISIBLE && !homePreparing) {
             homePreparing = true;
             int version = homeRevealVersion;
@@ -1312,10 +1465,12 @@ public final class BrowseActivity extends Activity {
         }
         if (!homeSkipNetwork && (pending == 0 || !homeHadCache)) {
             TvHomeMemoryCache.save(homeCacheSignature, candidates, subscriptionCandidates,
+                    homeTopicCandidates, homeDisplayedRows,
                     pending == 0 ? android.os.SystemClock.elapsedRealtime() : 0);
         }
         if (pending == 0) TvHomeChannels.publishAsync(this,
-                TvHomeChannels.RECOMMENDATIONS, rows.get(TvHomeFeed.RECOMMENDED));
+                TvHomeChannels.RECOMMENDATIONS, thematic
+                        ? new ArrayList<>(rows.values().iterator().next()) : recommended);
     }
 
     private void revealHome(int version) {
@@ -1323,6 +1478,7 @@ public final class BrowseActivity extends Activity {
                 || homeRows.getVisibility() == View.VISIBLE) return;
         homePreparing = false;
         homeRows.setVisibility(View.VISIBLE);
+        homeRows.refreshCards();
         homeLoading.setVisibility(View.GONE);
         if (focusPending && !menuExpanded && homeRows.hasVideos()) {
             focusPending = false;
@@ -1333,6 +1489,7 @@ public final class BrowseActivity extends Activity {
     private String homeCacheSignature() {
         StringBuilder key = new StringBuilder();
         key.append(TvHomePreferences.count(this)).append('|')
+                .append(TvHomePreferences.mode(this)).append('|')
                 .append(getSharedPreferences("browse", 0).getBoolean("recommendations", true))
                 .append('|').append(getSharedPreferences("browse", 0)
                         .getBoolean("recommend_subscriptions", true));
@@ -1342,6 +1499,8 @@ public final class BrowseActivity extends Activity {
         for (String section : TvHomeFeed.ORDER)
             key.append('|').append(section).append(':')
                     .append(TvHomePreferences.sectionEnabled(this, section));
+        for (String topic : TvHomePreferences.topics(this))
+            key.append('|').append(TvHomeFeed.topicKey(topic));
         for (VideoItem channel : SubscriptionStore.load(this))
             key.append('|').append(channel.stableKey());
         return key.toString();
@@ -1495,10 +1654,18 @@ public final class BrowseActivity extends Activity {
         int minWidth = page == Page.SEARCH && activeChannel == null
                 ? QUALITY_WIDTHS[qualityFilter] : 0;
         Set<String> unavailable = UnavailableVideoStore.keys(this);
+        Set<String> tvBroadcasts = new java.util.HashSet<>();
+        if (page == Page.LIVE && liveGroup == LiveGroup.ALL)
+            for (TvChannelStore.Entry entry : TvChannelStore.load(this))
+                tvBroadcasts.add(entry.key());
         Set<String> watched = new java.util.HashSet<>();
         if (page == Page.SUBSCRIPTIONS || page == Page.POPULAR)
             for (VideoItem entry : history) watched.add(entry.stableKey());
         for (VideoItem item : baseItems) {
+            if (!tvBroadcasts.isEmpty()) {
+                TvChannelStore.Link link = TvChannelStore.link(item.pageUrl);
+                if (link != null && tvBroadcasts.contains(link.source + "\n" + link.id)) continue;
+            }
             if (watched.contains(item.stableKey())) continue;
             if (activeChannel == null && (page == Page.HOME || page == Page.RECOMMENDATIONS
                     || page == Page.POPULAR || page == Page.FILMS)
@@ -1576,7 +1743,7 @@ public final class BrowseActivity extends Activity {
                     : Color.TRANSPARENT);
             background.setCornerRadius(dp(8));
             view.setBackground(background);
-            if (focused && changingGroup) return;
+            if (focused && (changingGroup || changingPage)) return;
             if (focused && !menuExpanded) setMenuExpanded(true);
             if (focused) {
                 cancelPendingNavigation();
@@ -1901,12 +2068,14 @@ public final class BrowseActivity extends Activity {
                 holder.channel.setText(channelsMode ? item.source
                         : item.source + " · " + VideoPresentation.channel(item));
                 holder.views.setText(channelsMode ? "" : tvEntry == null
-                        ? VideoPresentation.views(item) : tvEntry.status.label);
+                        ? VideoPresentation.viewsAndDate(item) : tvEntry.status.label);
                 holder.date.setText(channelsMode ? "" : tvEntry == null
-                        ? VideoPresentation.published(item)
+                        ? ""
                         : tvEntry.lastSuccessMs == 0 ? ""
                         : "Последний эфир: " + new SimpleDateFormat("d MMM HH:mm", new Locale("ru"))
                                 .format(new Date(tvEntry.lastSuccessMs)));
+                holder.date.setVisibility(tvEntry != null && !channelsMode
+                        && tvEntry.lastSuccessMs != 0 ? View.VISIBLE : View.GONE);
                 holder.platform.setImageResource(SourceIcon.drawable(item));
                 holder.platform.setContentDescription(item.source);
                 holder.duration.setText(item.isLive ? "В ЭФИРЕ" : VideoPresentation.duration(item.durationMs));

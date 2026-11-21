@@ -23,6 +23,12 @@ final class VideoPresentation {
                 new Locale("ru")).format(new Date(item.publishedAtMs));
     }
 
+    static String viewsAndDate(VideoItem item) {
+        String views = views(item);
+        String date = published(item);
+        return views.isEmpty() ? date : date.isEmpty() ? views : views + " · " + date;
+    }
+
     static long timestamp(String value) {
         if (value == null || value.isEmpty()) return 0;
         try {

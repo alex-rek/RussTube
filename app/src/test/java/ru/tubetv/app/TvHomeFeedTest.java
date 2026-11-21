@@ -64,6 +64,41 @@ public final class TvHomeFeedTest {
         assertEquals(older.stableKey(), rows.get(TvHomeFeed.RUTUBE).get(1).stableKey());
     }
 
+    @Test public void thematicRowsFollowSelectedTopicsAndHideWatchedVideos() {
+        VideoItem watched = video("RUTUBE", "watched-science", 30);
+        VideoItem older = video("VK VIDEO", "older-science", 10);
+        VideoItem newer = video("RUTUBE", "newer-science", 20);
+        VideoItem cooking = video("OK", "cooking", 15);
+        Map<String, List<VideoItem>> found = new java.util.LinkedHashMap<>();
+        found.put("Наука", Arrays.asList(watched, older, newer));
+        found.put("Кулинария", Collections.singletonList(cooking));
+        List<String> selected = Arrays.asList("Наука", "Кулинария");
+        Map<String, List<VideoItem>> rows = TvHomeFeed.buildThematic(found, selected,
+                Collections.singletonList(watched), Collections.emptySet(), 10);
+        assertEquals(TvHomeFeed.topicOrder(selected), new ArrayList<>(rows.keySet()));
+        assertEquals(Arrays.asList(newer, older), rows.get(TvHomeFeed.topicKey("Наука")));
+        assertEquals(Collections.singletonList(cooking),
+                rows.get(TvHomeFeed.topicKey("Кулинария")));
+        assertFalse(rows.containsKey(TvHomeFeed.RUTUBE));
+    }
+
+    @Test public void thematicRowLimitsEachChannelToThreeVideos() {
+        List<VideoItem> news = new ArrayList<>();
+        for (int i = 0; i < 5; i++) news.add(video("VK VIDEO", "news" + i, 20 + i)
+                .withChannel("rt", "Новости", "", false));
+        VideoItem another = video("RUTUBE", "another", 10)
+                .withChannel("other", "Другой канал", "", false);
+        news.add(another);
+        Map<String, List<VideoItem>> rows = TvHomeFeed.buildThematic(
+                Collections.singletonMap("Новости", news),
+                Collections.singletonList("Новости"), Collections.emptyList(),
+                Collections.emptySet(), 10);
+        List<VideoItem> selected = rows.get(TvHomeFeed.topicKey("Новости"));
+        assertEquals(4, selected.size());
+        assertEquals("news4", selected.get(0).title);
+        assertEquals(another, selected.get(3));
+    }
+
     @Test public void visibleRowKeepsItsOrderUntilNextVisitAndHidesWatched() {
         VideoItem older = video("RUTUBE", "older", 10);
         VideoItem newer = video("RUTUBE", "newer", 20);
@@ -104,5 +139,21 @@ public final class TvHomeFeedTest {
                 Collections.emptySet());
         assertEquals(Collections.singletonList(rutube), shown.get(TvHomeFeed.RUTUBE));
         assertEquals(Collections.singletonList(vk), shown.get(TvHomeFeed.VK));
+    }
+
+    @Test public void refreshedRowAddsOnlyNewVideosBeforeSessionOrder() {
+        VideoItem first = video("RUTUBE", "first", 10);
+        VideoItem second = video("RUTUBE", "second", 20);
+        VideoItem fresh = video("RUTUBE", "fresh", 30);
+        Map<String, List<VideoItem>> shown = Collections.singletonMap(TvHomeFeed.RUTUBE,
+                Arrays.asList(second, first));
+        Map<String, List<VideoItem>> latest = Collections.singletonMap(TvHomeFeed.RUTUBE,
+                Arrays.asList(fresh, first, second));
+        Map<String, List<VideoItem>> merged = TvHomeFeed.mergeNew(shown, latest,
+                Collections.emptySet(), Collections.singletonList(TvHomeFeed.RUTUBE), 3);
+        assertEquals(Arrays.asList(fresh, second, first), merged.get(TvHomeFeed.RUTUBE));
+        merged = TvHomeFeed.mergeNew(merged, latest, Collections.singleton(second.stableKey()),
+                Collections.singletonList(TvHomeFeed.RUTUBE), 3);
+        assertEquals(Arrays.asList(fresh, first), merged.get(TvHomeFeed.RUTUBE));
     }
 }

@@ -215,7 +215,9 @@ final class ImageLoader {
                             Log.w("RussTubeImages", "HTTP " + code + " for " + host(url));
                             return;
                         }
-                        bytes = BoundedHttpReader.read(connection.getInputStream(), 3 * 1024 * 1024);
+                        int limit = url.startsWith("https://images.live.vkvideo.ru/")
+                                ? 8 * 1024 * 1024 : 3 * 1024 * 1024;
+                        bytes = BoundedHttpReader.read(connection.getInputStream(), limit);
                         networkEnded = SystemClock.elapsedRealtime();
                         storeInMemory = ThumbnailDiskCache.cacheAllowed(connection);
                         if (storeInMemory) downloaded = bytes;

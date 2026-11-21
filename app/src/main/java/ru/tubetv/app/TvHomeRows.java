@@ -43,6 +43,7 @@ final class TvHomeRows extends ScrollView {
     private final Actions actions;
     private final LinearLayout stack;
     private final Map<String, Row> rows = new LinkedHashMap<>();
+    private final List<String> order = new ArrayList<>();
     private final int cardWidth;
     private final int cardHeight;
     private final int gap;
@@ -64,7 +65,7 @@ final class TvHomeRows extends ScrollView {
         this.activity = activity;
         this.actions = actions;
         this.tabletMode = tabletMode;
-        cardWidth = px(tabletMode ? 260 : Math.round(190
+        cardWidth = px(tabletMode ? 260 : Math.round(216
                 * TvScalePreferences.get(activity, TvScalePreferences.HOME_GRID)));
         cardHeight = Math.round(cardWidth * 9f / 16f) + px(112);
         gap = px(14);
@@ -75,19 +76,29 @@ final class TvHomeRows extends ScrollView {
         stack.setOrientation(LinearLayout.VERTICAL);
         stack.setClipChildren(false);
         addView(stack, new ScrollView.LayoutParams(-1, -2));
-        int index = 0;
-        for (String section : TvHomeFeed.ORDER) {
-            Row row = new Row(section, TITLES[index++]);
-            rows.put(section, row);
-            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
-            rowParams.bottomMargin = px(9);
-            stack.addView(row.root, rowParams);
-        }
+        configure(TvHomeFeed.ORDER, java.util.Arrays.asList(TITLES));
         setOnScrollChangeListener((View view, int x, int y, int oldX, int oldY) -> {
             refreshVisible();
             if (scrollMotionListener != null && y != oldY)
                 scrollMotionListener.onScroll(y - oldY);
         });
+    }
+
+    void configure(List<String> sections, List<String> titles) {
+        if (order.equals(sections)) return;
+        stack.removeAllViews();
+        rows.clear();
+        order.clear();
+        order.addAll(sections);
+        if (!order.contains(selectedSection) && !order.isEmpty()) selectedSection = order.get(0);
+        for (int i = 0; i < order.size(); i++) {
+            String section = order.get(i);
+            Row row = new Row(section, titles.get(i));
+            rows.put(section, row);
+            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
+            rowParams.bottomMargin = px(9);
+            stack.addView(row.root, rowParams);
+        }
     }
 
     void setScrollMotionListener(ScrollMotionListener listener) {
@@ -144,7 +155,7 @@ final class TvHomeRows extends ScrollView {
     void prepareFirstScreen(Map<String, List<VideoItem>> content, Runnable ready) {
         Map<String, VideoItem> covers = new LinkedHashMap<>();
         int visibleRows = 0;
-        for (String section : TvHomeFeed.ORDER) {
+        for (String section : order) {
             if (!TvHomePreferences.sectionEnabled(activity, section)) continue;
             List<VideoItem> videos = content.get(section);
             if (videos == null || videos.isEmpty()) continue;
@@ -176,6 +187,8 @@ final class TvHomeRows extends ScrollView {
     }
 
     void restoreSelection() { focusFirst(); }
+
+    void refreshCards() { post(this::refreshVisible); }
 
     boolean hasVideos() {
         for (Row row : rows.values()) if (!row.items.isEmpty()) return true;
@@ -349,8 +362,10 @@ final class TvHomeRows extends ScrollView {
             channel.setEllipsize(TextUtils.TruncateAt.END);
             channel.setPadding(px(10), 0, px(10), 0);
             card.addView(channel, new LinearLayout.LayoutParams(-1, px(23)));
-            TextView views = text(VideoPresentation.views(item), 11,
+            TextView views = text(VideoPresentation.viewsAndDate(item), 11,
                     TvAppearancePreferences.secondary(activity));
+            views.setSingleLine(true);
+            views.setEllipsize(TextUtils.TruncateAt.END);
             views.setPadding(px(10), 0, px(10), 0);
             card.addView(views, new LinearLayout.LayoutParams(-1, px(23)));
             ((TubeApplication) activity.getApplication()).imageLoader().load(item.source,
@@ -380,9 +395,9 @@ final class TvHomeRows extends ScrollView {
                 }
                 if (key == KeyEvent.KEYCODE_DPAD_UP || key == KeyEvent.KEYCODE_DPAD_DOWN) {
                     int direction = key == KeyEvent.KEYCODE_DPAD_UP ? -1 : 1;
-                    int rowIndex = TvHomeFeed.ORDER.indexOf(section) + direction;
-                    while (rowIndex >= 0 && rowIndex < TvHomeFeed.ORDER.size()) {
-                        Row other = rows.get(TvHomeFeed.ORDER.get(rowIndex));
+                    int rowIndex = order.indexOf(section) + direction;
+                    while (rowIndex >= 0 && rowIndex < order.size()) {
+                        Row other = rows.get(order.get(rowIndex));
                         if (other != null && !other.items.isEmpty()) {
                             other.focus(Math.min(index, other.items.size() - 1));
                             return true;

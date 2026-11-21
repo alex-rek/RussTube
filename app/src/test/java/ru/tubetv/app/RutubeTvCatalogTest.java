@@ -23,4 +23,13 @@ public final class RutubeTvCatalogTest {
                 "<a href=\"/video/" + film + "/\">"
                         + "<a href=\"/live/video/" + live + "/\">"));
     }
+
+    @Test public void streamsComeFromBroadcastSection() {
+        String unrelated = "546602986e6a424d74d594876ddb3f04";
+        String stream = "afef67d151b5a607dee1ef0aa299a52c";
+        String page = "<a href=\"/video/" + unrelated + "/\">"
+                + "<section aria-label=\"Все трансляции\">"
+                + "<a href=\"/video/" + stream + "/\">";
+        assertEquals(Arrays.asList(stream), RutubeTvCatalog.streamIds(page));
+    }
 }
