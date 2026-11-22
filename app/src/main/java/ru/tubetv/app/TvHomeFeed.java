@@ -49,11 +49,46 @@ final class TvHomeFeed {
             List<VideoItem> candidates, List<VideoItem> history,
             Set<String> unavailable, Set<String> enabledSources,
             int limit, boolean recommendHistory) {
+        return buildRows(subscriptions, candidates, history, unavailable,
+                enabledSources, Collections.emptySet(), limit, recommendHistory, false);
+    }
+
+    /** TV Home keeps subscribed uploads in "New" and discovery in "Recommended". */
+    static Map<String, List<VideoItem>> buildDistinct(List<VideoItem> subscriptions,
+            List<VideoItem> candidates, List<VideoItem> history,
+            Set<String> unavailable, Set<String> enabledSources,
+            Set<String> subscribedChannels, int limit, boolean recommendHistory) {
+        return buildRows(subscriptions, candidates, history, unavailable,
+                enabledSources, subscribedChannels, limit, recommendHistory, true);
+    }
+
+    private static Map<String, List<VideoItem>> buildRows(List<VideoItem> subscriptions,
+            List<VideoItem> candidates, List<VideoItem> history,
+            Set<String> unavailable, Set<String> enabledSources,
+            Set<String> subscribedChannels, int limit, boolean recommendHistory,
+            boolean distinctRecommendations) {
         Set<String> watched = new HashSet<>();
         for (VideoItem item : history) watched.add(item.stableKey());
         Map<String, List<VideoItem>> rows = new LinkedHashMap<>();
-        rows.put(RECOMMENDED, select(HomeFeed.combine(subscriptions, candidates, history,
-                recommendHistory), watched, unavailable, limit));
+        if (distinctRecommendations) {
+            Set<String> subscriptionKeys = new HashSet<>();
+            for (VideoItem item : subscriptions) subscriptionKeys.add(item.stableKey());
+            List<VideoItem> discovery = new ArrayList<>();
+            for (VideoItem item : candidates) {
+                if (subscriptionKeys.contains(item.stableKey())) continue;
+                if (!item.channelId.isEmpty()
+                        && subscribedChannels.contains(item.channelKey())) continue;
+                if (!item.channelUrl.isEmpty()
+                        && subscribedChannels.contains(item.source + "\n" + item.channelUrl)) continue;
+                discovery.add(item);
+            }
+            List<VideoItem> ranked = recommendHistory
+                    ? RecommendationEngine.rank(discovery, history) : discovery;
+            if (!recommendHistory) Collections.sort(ranked,
+                    (a, b) -> Long.compare(b.publishedAtMs, a.publishedAtMs));
+            rows.put(RECOMMENDED, select(ranked, watched, unavailable, limit));
+        } else rows.put(RECOMMENDED, select(HomeFeed.combine(subscriptions, candidates,
+                history, recommendHistory), watched, unavailable, limit));
         rows.put(RECENT, select(SubscriptionFeed.limit(subscriptions, history),
                 watched, unavailable, limit));
         for (String source : ORDER.subList(2, ORDER.size())) {

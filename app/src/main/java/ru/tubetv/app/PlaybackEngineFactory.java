@@ -113,17 +113,18 @@ final class PlaybackEngineFactory {
 
     private static DataSource.Factory http(Context context, String source, String pageUrl) {
         boolean vk = "VK VIDEO".equals(source);
+        boolean vkLive = vk && VkLiveCatalog.isLivePage(pageUrl);
         boolean dzen = "ДЗЕН".equals(source);
         boolean ok = "OK".equals(source);
         boolean peerTube = PeerTubeClient.SOURCE.equals(source);
         Map<String, String> headers = peerTube ? PeerTubeClient.mediaHeaders(pageUrl) : new HashMap<>();
         if (!dzen && !peerTube) {
-            String referer = vk ? (pageUrl != null && pageUrl.startsWith("https://live.vkvideo.ru/")
-                    ? "https://live.vkvideo.ru/" : "https://vkvideo.ru/")
+            String referer = vk ? (vkLive ? "https://live.vkvideo.ru/" : "https://vkvideo.ru/")
                     : ok ? OkClient.REFERER : "https://rutube.ru/";
             if (referer != null) headers.put("Referer", referer);
         }
-        String userAgent = dzen ? DzenClient.USER_AGENT : vk ? VkWebClient.USER_AGENT
+        String userAgent = dzen ? DzenClient.USER_AGENT
+                : vk ? vkUserAgent(pageUrl)
                 : ok ? OkClient.USER_AGENT
                 : peerTube ? PeerTubeClient.MEDIA_USER_AGENT
                 : "Mozilla/5.0 (Linux; Android 11; Android TV) AppleWebKit/537.36";
@@ -136,6 +137,11 @@ final class PlaybackEngineFactory {
         boolean proxyEnabled = NetworkProxy.load(context).type != Proxy.Type.DIRECT;
         return () -> new CookieDataSource(proxyEnabled
                 ? new ProxyHttpDataSource(headers, userAgent, source) : http.createDataSource(), cookies);
+    }
+
+    static String vkUserAgent(String pageUrl) {
+        return VkLiveCatalog.isLivePage(pageUrl)
+                ? VkLiveCatalog.USER_AGENT : VkWebClient.USER_AGENT;
     }
 
     private static final class CookieDataSource implements DataSource {

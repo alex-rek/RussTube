@@ -171,7 +171,8 @@ public final class BrowseActivity extends Activity {
         rebuildBaseItems();
         applySort();
         display(pendingResultsEmptyText);
-        if (pending == 0 && activeChannel == null && cacheableSection(page) && failed.isEmpty())
+        if (pending == 0 && activeChannel == null && cacheableSection(page)
+                && failed.isEmpty() && !items.isEmpty())
             sectionCache.put(page, new SectionSnapshot(candidates, subscriptionCandidates,
                     sectionSignature(), android.os.SystemClock.elapsedRealtime()));
         if (pending == 0 && activeChannel == null && (!items.isEmpty() || failed.isEmpty())) {
@@ -503,10 +504,11 @@ public final class BrowseActivity extends Activity {
         if (cacheableSection(page)) {
             SectionSnapshot saved = sectionCache.get(page);
             if (saved != null && saved.signature.equals(sectionSignature())
-                    && android.os.SystemClock.elapsedRealtime() - saved.savedAt < SECTION_CACHE_MS) {
+                    && !saved.candidates.isEmpty()) {
                 candidates.addAll(saved.candidates);
                 subscriptionCandidates.addAll(saved.subscriptions);
-                sectionSkipNetwork = true;
+                sectionSkipNetwork = android.os.SystemClock.elapsedRealtime()
+                        - saved.savedAt < SECTION_CACHE_MS;
             }
         }
         if (home) {
@@ -717,6 +719,14 @@ public final class BrowseActivity extends Activity {
             case POPULAR:
                 heading.setText("Популярное");
                 description.setText("Подборка по числу просмотров на платформах");
+                if (sectionSkipNetwork) {
+                    rebuildBaseItems();
+                    applySort();
+                    if (items.isEmpty()) {
+                        sectionSkipNetwork = false;
+                        candidates.clear();
+                    }
+                }
                 if (!sectionSkipNetwork) searchAll("популярное", false);
                 break;
             case FAVORITES:
@@ -1357,6 +1367,12 @@ public final class BrowseActivity extends Activity {
             else disabled.add(source);
         }
         List<VideoItem> subscriptions = new ArrayList<>(subscriptionCandidates);
+        Set<String> subscribedChannels = new HashSet<>();
+        for (VideoItem channel : SubscriptionStore.load(this)) {
+            subscribedChannels.add(channel.channelKey());
+            if (!channel.channelUrl.isEmpty())
+                subscribedChannels.add(channel.source + "\n" + channel.channelUrl);
+        }
         List<VideoItem> candidateSnapshot = NotRecommendedChannels.filter(this, candidates);
         Map<String, List<VideoItem>> topicSnapshot = new LinkedHashMap<>();
         for (Map.Entry<String, List<VideoItem>> entry : homeTopicCandidates.entrySet())
@@ -1375,8 +1391,9 @@ public final class BrowseActivity extends Activity {
             try {
                 rows = thematic ? TvHomeFeed.buildThematic(topicSnapshot, topics,
                         historySnapshot, unavailable, count)
-                        : TvHomeFeed.build(subscriptions, candidateSnapshot,
-                        historySnapshot, unavailable, enabled, count, recommendHistory);
+                        : TvHomeFeed.buildDistinct(subscriptions, candidateSnapshot,
+                        historySnapshot, unavailable, enabled, subscribedChannels,
+                        count, recommendHistory);
             } catch (RuntimeException failure) {
                 android.util.Log.e("RussTubeHome", "Could not build TV home rows", failure);
                 runOnUiThread(() -> {
@@ -1488,7 +1505,8 @@ public final class BrowseActivity extends Activity {
 
     private String homeCacheSignature() {
         StringBuilder key = new StringBuilder();
-        key.append(TvHomePreferences.count(this)).append('|')
+        key.append("distinct-recommendations-v1|")
+                .append(TvHomePreferences.count(this)).append('|')
                 .append(TvHomePreferences.mode(this)).append('|')
                 .append(getSharedPreferences("browse", 0).getBoolean("recommendations", true))
                 .append('|').append(getSharedPreferences("browse", 0)

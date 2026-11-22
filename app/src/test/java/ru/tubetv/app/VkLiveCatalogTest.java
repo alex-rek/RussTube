@@ -34,6 +34,13 @@ public final class VkLiveCatalogTest {
         assertFalse(VkLiveCatalog.isLivePage("https://evil.example/player_one"));
     }
 
+    @Test public void usesLiveUserAgentOnlyForVkLivePages() {
+        assertEquals(VkLiveCatalog.USER_AGENT, PlaybackEngineFactory.vkUserAgent(
+                "https://live.vkvideo.ru/totsamiybabichev"));
+        assertEquals(VkWebClient.USER_AGENT, PlaybackEngineFactory.vkUserAgent(
+                "https://vkvideo.ru/video-1_12345"));
+    }
+
     private static JSONObject entry(String blogUrl, JSONObject stream) throws Exception {
         return new JSONObject().put("stream", stream).put("blog", new JSONObject()
                 .put("blogUrl", blogUrl).put("owner", new JSONObject()

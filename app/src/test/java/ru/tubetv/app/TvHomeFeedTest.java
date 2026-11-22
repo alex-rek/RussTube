@@ -54,6 +54,32 @@ public final class TvHomeFeedTest {
         assertEquals(20, rows.get(TvHomeFeed.RECOMMENDED).size());
     }
 
+    @Test public void tvRecommendedExcludesSubscribedChannelsAndNewUploads() {
+        VideoItem upload = video("VK VIDEO", "upload", 30)
+                .withChannel("subscribed", "Подписка", "https://example.com/subscribed", false);
+        VideoItem anotherUpload = video("VK VIDEO", "another", 20)
+                .withChannel("subscribed", "Подписка", "https://example.com/subscribed", false);
+        VideoItem external = video("RUTUBE", "external", 10)
+                .withChannel("other", "Другой", "", false);
+        Map<String, List<VideoItem>> rows = TvHomeFeed.buildDistinct(
+                Collections.singletonList(upload),
+                Arrays.asList(upload, anotherUpload, external), Collections.emptyList(),
+                Collections.emptySet(), new HashSet<>(Arrays.asList("VK VIDEO", "RUTUBE")),
+                Collections.singleton(upload.channelKey()), 10, true);
+        assertEquals(Collections.singletonList(upload), rows.get(TvHomeFeed.RECENT));
+        assertEquals(Collections.singletonList(external), rows.get(TvHomeFeed.RECOMMENDED));
+    }
+
+    @Test public void tvRecommendedWithoutHistoryRankingUsesNewestExternalVideos() {
+        VideoItem older = video("RUTUBE", "older", 10);
+        VideoItem newer = video("RUTUBE", "newer", 20);
+        Map<String, List<VideoItem>> rows = TvHomeFeed.buildDistinct(
+                Collections.emptyList(), Arrays.asList(older, newer),
+                Collections.emptyList(), Collections.emptySet(),
+                Collections.singleton("RUTUBE"), Collections.emptySet(), 10, false);
+        assertEquals(Arrays.asList(newer, older), rows.get(TvHomeFeed.RECOMMENDED));
+    }
+
     @Test public void newSourceVideosAreOnTheLeftRegardlessOfArrivalOrder() {
         VideoItem older = video("RUTUBE", "older", 10);
         VideoItem newer = video("RUTUBE", "newer", 20);

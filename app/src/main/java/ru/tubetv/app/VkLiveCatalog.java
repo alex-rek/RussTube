@@ -13,6 +13,9 @@ import java.util.regex.Pattern;
 /** Public VK Live listings and fresh playback URLs. Signed media URLs are never stored. */
 final class VkLiveCatalog {
     private static final String API = "https://api.live.vkvideo.ru/v1";
+    // VK Live signs public media URLs for srcAg=UNKNOWN. A browser User-Agent changes
+    // the CDN's client classification and makes those manifests return HTTP 403.
+    static final String USER_AGENT = "RussTube/1.0";
     private static final String RECOMMENDATIONS = API
             + "/catalog/public_video_streams/recommendations/";
     private static final Pattern BLOG = Pattern.compile("[A-Za-z0-9_-]{1,80}");
@@ -119,7 +122,7 @@ final class VkLiveCatalog {
         HttpURLConnection connection = NetworkProxy.openConnection("VK VIDEO", url);
         connection.setConnectTimeout(7000);
         connection.setReadTimeout(9000);
-        connection.setRequestProperty("User-Agent", VkWebClient.USER_AGENT);
+        connection.setRequestProperty("User-Agent", USER_AGENT);
         connection.setRequestProperty("Referer", "https://live.vkvideo.ru/");
         try {
             int code = connection.getResponseCode();
