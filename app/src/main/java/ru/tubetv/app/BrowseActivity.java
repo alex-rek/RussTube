@@ -42,6 +42,8 @@ import java.util.Map;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -71,6 +73,7 @@ public final class BrowseActivity extends Activity {
     private FilmGroup filmGroup = FilmGroup.ALL;
     private final ThreadPoolExecutor io = new ThreadPoolExecutor(4, 4, 0, TimeUnit.SECONDS,
             new ArrayBlockingQueue<>(128));
+    private final ExecutorService homeBuilder = Executors.newSingleThreadExecutor();
     private final List<Future<?>> jobs = new ArrayList<>();
     private final List<VideoItem> items = new ArrayList<>();
     private final List<VideoItem> baseItems = new ArrayList<>();
@@ -517,7 +520,13 @@ public final class BrowseActivity extends Activity {
                 List<String> topics = TvHomePreferences.topics(this);
                 homeRows.configure(TvHomeFeed.topicOrder(topics), topics);
                 for (String topic : topics) homeTopicCandidates.put(topic, new ArrayList<>());
-            } else homeRows.configure(TvHomeFeed.ORDER, java.util.Arrays.asList(TvHomeRows.TITLES));
+            } else {
+                homeRows.configure(TvHomeFeed.TV_ORDER,
+                        java.util.Arrays.asList(TvHomeRows.TV_TITLES));
+                if (TvHomePreferences.sectionEnabled(this, TvHomeFeed.INTERESTS))
+                    for (String topic : TvHomePreferences.topics(this))
+                        homeTopicCandidates.put(topic, new ArrayList<>());
+            }
             homeCacheSignature = homeCacheSignature();
             TvHomeMemoryCache.Snapshot cached = TvHomeMemoryCache.get(homeCacheSignature);
             homeHadCache = cached != null && cached.updatedAtMs > 0;
@@ -529,7 +538,7 @@ public final class BrowseActivity extends Activity {
                 for (List<VideoItem> row : cached.rows.values()) for (VideoItem item : row)
                     if (NotRecommendedChannels.contains(this, item)) hidden.add(item.stableKey());
                 List<String> order = TvHomePreferences.THEMATIC.equals(TvHomePreferences.mode(this))
-                        ? TvHomeFeed.topicOrder(TvHomePreferences.topics(this)) : TvHomeFeed.ORDER;
+                        ? TvHomeFeed.topicOrder(TvHomePreferences.topics(this)) : TvHomeFeed.TV_ORDER;
                 homeDisplayedRows.putAll(TvHomeFeed.freezeVisible(cached.rows,
                         cached.rows, hidden, order));
             }
@@ -549,7 +558,7 @@ public final class BrowseActivity extends Activity {
         if (home) homeLoading.setText("Формируем главную страницу…");
         homeLoading.setVisibility(home ? View.VISIBLE : View.GONE);
         if (home) homeRows.setRows(homeDisplayedRows,
-                homeSkipNetwork ? Collections.emptySet() : new HashSet<>(TvHomeFeed.ORDER),
+                homeSkipNetwork ? Collections.emptySet() : new HashSet<>(TvHomeFeed.TV_ORDER),
                 Collections.emptySet());
         if (home && homeRows.hasVideos()) {
             homeRows.setVisibility(View.VISIBLE);
@@ -586,6 +595,12 @@ public final class BrowseActivity extends Activity {
                     if (pending == 0) updateHomeRows();
                     break;
                 }
+                if (home && !homeSkipNetwork && !homeTopicCandidates.isEmpty()) {
+                    String[] sources = MobileBrowsePreferences.enabledSources(this, false);
+                    List<String> selectedTopics = TvHomePreferences.topics(this);
+                    for (int i = 0; i < sources.length; i++)
+                        enqueueHomeTopic(sources[i], selectedTopics.get(i % selectedTopics.size()));
+                }
                 boolean byHistory = getSharedPreferences("browse", 0)
                         .getBoolean("recommendations", true);
                 boolean bySubscriptions = getSharedPreferences("browse", 0)
@@ -602,6 +617,8 @@ public final class BrowseActivity extends Activity {
                         for (String source : MobileBrowsePreferences.enabledSources(this, false))
                             homeExtraQueries.put(source, 1);
                     }
+                    if (home && queries.size() > 1)
+                        queries = new ArrayList<>(queries.subList(0, 1));
                     if (!queries.isEmpty()) {
                         description.setText("Новые видео подписок и рекомендации · "
                                 + String.join(" · ", queries));
@@ -1358,8 +1375,6 @@ public final class BrowseActivity extends Activity {
 
     private void updateHomeRows() {
         if (page != Page.HOME || activeChannel != null) return;
-        // A complete snapshot is needed before ranking. Network callbacks may arrive in a burst.
-        if (pending > 0) return;
         Set<String> enabled = new HashSet<>();
         Set<String> disabled = new HashSet<>();
         for (String source : FeedRepository.SOURCES) {
@@ -1385,15 +1400,15 @@ public final class BrowseActivity extends Activity {
         int currentGeneration = generation;
         int buildVersion = ++homeBuildVersion;
         boolean thematic = TvHomePreferences.THEMATIC.equals(TvHomePreferences.mode(this));
-        List<String> topics = thematic ? TvHomePreferences.topics(this) : Collections.emptyList();
-        io.execute(() -> {
+        List<String> topics = TvHomePreferences.topics(this);
+        homeBuilder.execute(() -> {
             Map<String, List<VideoItem>> rows;
             try {
                 rows = thematic ? TvHomeFeed.buildThematic(topicSnapshot, topics,
                         historySnapshot, unavailable, count)
-                        : TvHomeFeed.buildDistinct(subscriptions, candidateSnapshot,
-                        historySnapshot, unavailable, enabled, subscribedChannels,
-                        count, recommendHistory);
+                        : TvHomeFeed.buildCompact(subscriptions, candidateSnapshot,
+                        topicSnapshot, topics, historySnapshot, unavailable, enabled,
+                        subscribedChannels, count, recommendHistory);
             } catch (RuntimeException failure) {
                 android.util.Log.e("RussTubeHome", "Could not build TV home rows", failure);
                 runOnUiThread(() -> {
@@ -1404,8 +1419,7 @@ public final class BrowseActivity extends Activity {
             }
             runOnUiThread(() -> {
                 if (isFinishing() || page != Page.HOME || activeChannel != null
-                        || generation != currentGeneration || homeBuildVersion != buildVersion
-                        || pending > 0) return;
+                    || generation != currentGeneration || homeBuildVersion != buildVersion) return;
                 publishHomeRows(rows, enabled, disabled);
             });
         });
@@ -1417,7 +1431,8 @@ public final class BrowseActivity extends Activity {
         List<VideoItem> recommended = rows.get(TvHomeFeed.RECOMMENDED);
         if (recommended != null) for (int i = recommended.size() - 1; i >= 0; i--)
             if (NotRecommendedChannels.contains(this, recommended.get(i))) recommended.remove(i);
-        if (!thematic && !homeSkipNetwork) for (String source : FeedRepository.SOURCES) {
+        if (!thematic && !homeSkipNetwork && pending == 0)
+                for (String source : FeedRepository.SOURCES) {
             int step = homeExtraQueries.containsKey(source) ? homeExtraQueries.get(source) : 0;
             if (enabled.contains(source) && TvHomePreferences.sectionEnabled(this, source)
                     && rows.get(source).size() < TvHomePreferences.count(this)
@@ -1428,8 +1443,6 @@ public final class BrowseActivity extends Activity {
                 enqueue(source, () -> repository.search(source, query));
             }
         }
-        // Wait for fallback searches before publishing another complete snapshot.
-        if (pending > 0) return;
         if (!thematic) {
             List<VideoItem> shownRecent = homeDisplayedRows.get(TvHomeFeed.RECENT);
             if (homeSubscriptionsPending > 0 && (shownRecent == null || shownRecent.isEmpty()))
@@ -1448,7 +1461,7 @@ public final class BrowseActivity extends Activity {
             if (NotRecommendedChannels.contains(this, item)) hidden.add(item.stableKey());
         Map<String, List<VideoItem>> visible = TvHomeFeed.mergeNew(
                 homeDisplayedRows, rows, hidden,
-                thematic ? TvHomeFeed.topicOrder(TvHomePreferences.topics(this)) : TvHomeFeed.ORDER,
+                thematic ? TvHomeFeed.topicOrder(TvHomePreferences.topics(this)) : TvHomeFeed.TV_ORDER,
                 TvHomePreferences.count(this));
         homeDisplayedRows.clear();
         homeDisplayedRows.putAll(visible);
@@ -1456,13 +1469,15 @@ public final class BrowseActivity extends Activity {
         if (pending > 0) {
             loading.add(TvHomeFeed.RECOMMENDED);
             if (homeSubscriptionsPending > 0) loading.add(TvHomeFeed.RECENT);
+            if (!homeTopicCandidates.isEmpty()) loading.add(TvHomeFeed.INTERESTS);
             for (String source : FeedRepository.SOURCES) {
                 Integer waiting = homeSourcePending.get(source);
                 if (waiting != null && waiting > 0) loading.add(source);
             }
         }
         homeRows.setRows(visible, loading, thematic ? Collections.emptySet() : disabled);
-        if (homeRows.getVisibility() != View.VISIBLE && !homePreparing) {
+        if (homeRows.getVisibility() != View.VISIBLE && !homePreparing
+                && (homeRows.hasVideos() || pending == 0)) {
             homePreparing = true;
             int version = homeRevealVersion;
             Runnable reveal = () -> revealHome(version);
@@ -1505,7 +1520,7 @@ public final class BrowseActivity extends Activity {
 
     private String homeCacheSignature() {
         StringBuilder key = new StringBuilder();
-        key.append("distinct-recommendations-v1|")
+        key.append("compact-home-v1|")
                 .append(TvHomePreferences.count(this)).append('|')
                 .append(TvHomePreferences.mode(this)).append('|')
                 .append(getSharedPreferences("browse", 0).getBoolean("recommendations", true))
@@ -1514,7 +1529,7 @@ public final class BrowseActivity extends Activity {
         for (String source : FeedRepository.SOURCES)
             key.append('|').append(source).append(':')
                     .append(MobileBrowsePreferences.sourceEnabled(this, source));
-        for (String section : TvHomeFeed.ORDER)
+        for (String section : TvHomeFeed.TV_ORDER)
             key.append('|').append(section).append(':')
                     .append(TvHomePreferences.sectionEnabled(this, section));
         for (String topic : TvHomePreferences.topics(this))
@@ -1573,7 +1588,8 @@ public final class BrowseActivity extends Activity {
     private void scheduleResults(String emptyText) {
         pendingResultsEmptyText = emptyText;
         timer.removeCallbacks(renderResults);
-        timer.postDelayed(renderResults, items.isEmpty() ? 0 : 100);
+        timer.postDelayed(renderResults, page == Page.HOME ? 120
+                : items.isEmpty() ? 0 : 100);
     }
 
     private void rememberFocus() {
@@ -2007,7 +2023,7 @@ public final class BrowseActivity extends Activity {
     }
     @Override protected void onDestroy() {
         updates.onDestroy(); timer.removeCallbacks(tick); timer.removeCallbacks(autoSearch);
-        cancel(); io.shutdownNow(); super.onDestroy();
+        cancel(); io.shutdownNow(); homeBuilder.shutdownNow(); super.onDestroy();
     }
 
     private final class Cards extends BaseAdapter {

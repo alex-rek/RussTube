@@ -39,6 +39,11 @@ final class TvHomeRows extends ScrollView {
             "Рекомендованные", "Новые", "RUTUBE рекомендует",
             "VK Видео рекомендует", "OK рекомендует", "Дзен рекомендует", "PeerTube"
     };
+    static final String[] TV_TITLES = {
+            "Рекомендованные", "Новые из подписок", "По интересам",
+            "RUTUBE рекомендует", "VK Видео рекомендует", "OK рекомендует",
+            "Дзен рекомендует", "PeerTube"
+    };
     private final Activity activity;
     private final Actions actions;
     private final LinearLayout stack;
@@ -219,6 +224,7 @@ final class TvHomeRows extends ScrollView {
             root = new LinearLayout(activity);
             root.setOrientation(LinearLayout.VERTICAL);
             root.setClipChildren(false);
+            root.setMinimumHeight(px(25) + cardHeight + px(34));
             TextView heading = text(title, 15, TvAppearancePreferences.text(activity));
             heading.setTypeface(Typeface.DEFAULT_BOLD);
             root.addView(heading, new LinearLayout.LayoutParams(-1, px(25)));

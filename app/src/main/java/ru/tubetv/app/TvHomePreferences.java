@@ -81,8 +81,10 @@ final class TvHomePreferences {
     }
 
     static boolean sectionEnabled(Context context, String section) {
+        boolean enabledByDefault = !TvHomeFeed.ORDER.subList(2,
+                TvHomeFeed.ORDER.size()).contains(section);
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .getBoolean(SECTION_PREFIX + section, true);
+                .getBoolean(SECTION_PREFIX + section, enabledByDefault);
     }
 
     static void setSectionEnabled(Context context, String section, boolean enabled) {

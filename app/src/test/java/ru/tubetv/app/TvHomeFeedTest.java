@@ -80,6 +80,27 @@ public final class TvHomeFeedTest {
         assertEquals(Arrays.asList(newer, older), rows.get(TvHomeFeed.RECOMMENDED));
     }
 
+    @Test public void compactHomeBuildsInterestsWithoutViewingHistory() {
+        VideoItem subscribed = video("VK VIDEO", "subscribed", 30)
+                .withChannel("subscription", "Подписка", "", false);
+        VideoItem recommended = video("RUTUBE", "recommended", 25);
+        VideoItem interest = video("OK", "science", 20)
+                .withChannel("science", "Наука", "", false);
+        Map<String, List<VideoItem>> topics = Collections.singletonMap("Наука",
+                Arrays.asList(recommended, interest));
+        Map<String, List<VideoItem>> rows = TvHomeFeed.buildCompact(
+                Collections.singletonList(subscribed),
+                Collections.singletonList(recommended), topics,
+                Collections.singletonList("Наука"), Collections.emptyList(),
+                Collections.emptySet(), new HashSet<>(Arrays.asList("VK VIDEO", "RUTUBE", "OK")),
+                Collections.singleton(subscribed.channelKey()), 10, true);
+        assertEquals(Collections.singletonList(subscribed), rows.get(TvHomeFeed.RECENT));
+        assertEquals(Collections.singletonList(recommended), rows.get(TvHomeFeed.RECOMMENDED));
+        assertEquals(Collections.singletonList(interest), rows.get(TvHomeFeed.INTERESTS));
+        assertEquals(Arrays.asList(TvHomeFeed.RECOMMENDED, TvHomeFeed.RECENT,
+                TvHomeFeed.INTERESTS), TvHomeFeed.TV_ORDER.subList(0, 3));
+    }
+
     @Test public void newSourceVideosAreOnTheLeftRegardlessOfArrivalOrder() {
         VideoItem older = video("RUTUBE", "older", 10);
         VideoItem newer = video("RUTUBE", "newer", 20);

@@ -13,6 +13,7 @@ import java.util.Set;
 final class TvHomeFeed {
     static final String RECOMMENDED = "recommended";
     static final String RECENT = "recent";
+    static final String INTERESTS = "interests";
     static final String RUTUBE = "RUTUBE";
     static final String VK = "VK VIDEO";
     static final String OK = "OK";
@@ -20,6 +21,8 @@ final class TvHomeFeed {
     static final String PEERTUBE = PeerTubeClient.SOURCE;
     static final List<String> ORDER = Arrays.asList(
             RECOMMENDED, RECENT, RUTUBE, VK, OK, DZEN, PEERTUBE);
+    static final List<String> TV_ORDER = Arrays.asList(
+            RECOMMENDED, RECENT, INTERESTS, RUTUBE, VK, OK, DZEN, PEERTUBE);
 
     static String topicKey(String topic) { return "topic:" + topic; }
 
@@ -60,6 +63,30 @@ final class TvHomeFeed {
             Set<String> subscribedChannels, int limit, boolean recommendHistory) {
         return buildRows(subscriptions, candidates, history, unavailable,
                 enabledSources, subscribedChannels, limit, recommendHistory, true);
+    }
+
+    static Map<String, List<VideoItem>> buildCompact(List<VideoItem> subscriptions,
+            List<VideoItem> candidates, Map<String, List<VideoItem>> byTopic,
+            List<String> topics, List<VideoItem> history, Set<String> unavailable,
+            Set<String> enabledSources, Set<String> subscribedChannels,
+            int limit, boolean recommendHistory) {
+        Map<String, List<VideoItem>> rows = buildDistinct(subscriptions, candidates,
+                history, unavailable, enabledSources, subscribedChannels,
+                limit, recommendHistory);
+        Set<String> excluded = new HashSet<>();
+        for (VideoItem item : rows.get(RECOMMENDED)) excluded.add(item.stableKey());
+        for (VideoItem item : rows.get(RECENT)) excluded.add(item.stableKey());
+        List<VideoItem> found = new ArrayList<>();
+        for (String topic : topics) {
+            List<VideoItem> videos = byTopic.get(topic);
+            if (videos != null) found.addAll(videos);
+        }
+        List<VideoItem> ranked = RecommendationEngine.rank(found, history);
+        Collections.sort(ranked, (a, b) -> Long.compare(b.publishedAtMs, a.publishedAtMs));
+        Set<String> watched = new HashSet<>(excluded);
+        for (VideoItem item : history) watched.add(item.stableKey());
+        rows.put(INTERESTS, selectThematic(ranked, watched, unavailable, limit));
+        return rows;
     }
 
     private static Map<String, List<VideoItem>> buildRows(List<VideoItem> subscriptions,

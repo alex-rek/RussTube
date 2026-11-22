@@ -370,9 +370,9 @@ public final class TvSettingsActivity extends Activity {
                         homeCount / 10 - 1, 6,
                         choice -> TvHomePreferences.setCount(this, TvHomePreferences.COUNTS[choice])));
         int visibleSections = 0;
-        for (String section : TvHomeFeed.ORDER)
+        for (String section : TvHomeFeed.TV_ORDER)
             if (TvHomePreferences.sectionEnabled(this, section)) visibleSections++;
-        row("Разделы обычной главной", visibleSections + " из " + TvHomeFeed.ORDER.size() + "  ›",
+        row("Разделы обычной главной", visibleSections + " из " + TvHomeFeed.TV_ORDER.size() + "  ›",
                 this::openHomeSections);
         boolean thematicHome = TvHomePreferences.THEMATIC.equals(TvHomePreferences.mode(this));
         row("Вид главной", (thematicHome ? "Тематическая" : "Обычная") + "  ›", () ->
@@ -380,7 +380,8 @@ public final class TvSettingsActivity extends Activity {
                         thematicHome ? 1 : 0, 8,
                         choice -> TvHomePreferences.setMode(this,
                                 choice == 1 ? TvHomePreferences.THEMATIC : TvHomePreferences.NORMAL)));
-        if (thematicHome) row("Интересующие темы", TvHomePreferences.topics(this).size()
+        if (thematicHome || TvHomePreferences.sectionEnabled(this, TvHomeFeed.INTERESTS))
+            row("Интересующие темы", TvHomePreferences.topics(this).size()
                 + " выбрано  ›", this::openHomeTopics);
         note("Порядок видео выбирается отдельно в каждом разделе каталога.");
         section("Меню разделов");
@@ -418,14 +419,14 @@ public final class TvSettingsActivity extends Activity {
 
     private void openHomeSections() {
         if (selectionPanel != null) return;
-        boolean[] saved = new boolean[TvHomeFeed.ORDER.size()];
+        boolean[] saved = new boolean[TvHomeFeed.TV_ORDER.size()];
         for (int i = 0; i < saved.length; i++)
-            saved[i] = TvHomePreferences.sectionEnabled(this, TvHomeFeed.ORDER.get(i));
+            saved[i] = TvHomePreferences.sectionEnabled(this, TvHomeFeed.TV_ORDER.get(i));
         selectionOrigin = getCurrentFocus();
-        selectionPanel = new SideSelectionPanel(this, "Разделы главной", TvHomeRows.TITLES,
+        selectionPanel = new SideSelectionPanel(this, "Разделы главной", TvHomeRows.TV_TITLES,
                 saved, selected -> {
                     for (int i = 0; i < selected.length; i++)
-                        TvHomePreferences.setSectionEnabled(this, TvHomeFeed.ORDER.get(i), selected[i]);
+                        TvHomePreferences.setSectionEnabled(this, TvHomeFeed.TV_ORDER.get(i), selected[i]);
                     closeSelection();
                     renderPanel(7);
                 }, this::closeSelection);
