@@ -144,9 +144,7 @@ public final class MobileBrowseActivity extends Activity {
     private ValueAnimator chromeAnimator;
     private float chromeHiddenFraction;
     private boolean chromeHidden;
-    private boolean userScrolling;
-    private int lastScrollFirst = -1;
-    private int lastScrollTop;
+    private float lastTouchRawY;
     private int scrollDistance;
 
     @Override protected void onCreate(Bundle state) {
@@ -353,19 +351,10 @@ public final class MobileBrowseActivity extends Activity {
         list.setAdapter(adapter);
         list.setOnScrollListener(new AbsListView.OnScrollListener() {
             @Override public void onScrollStateChanged(AbsListView view, int state) {
-                userScrolling = state != SCROLL_STATE_IDLE;
-                scrollDistance = 0;
+                if (state == SCROLL_STATE_IDLE) scrollDistance = 0;
             }
             @Override public void onScroll(AbsListView view, int first, int count, int total) {
                 if (count <= 0) return;
-                int top = view.getChildAt(0).getTop();
-                if (lastScrollFirst >= 0 && userScrolling && page != Page.SETTINGS) {
-                    int delta = first > lastScrollFirst ? dp(24)
-                            : first < lastScrollFirst ? -dp(24) : lastScrollTop - top;
-                    onCardScroll(delta);
-                }
-                lastScrollFirst = first;
-                lastScrollTop = top;
                 int width = list.getColumnWidth();
                 if (width <= 0) width = Math.max(dp(180), getResources().getDisplayMetrics().widthPixels - dp(28));
                 for (int i = first + count; i < Math.min(items.size(), first + count + 4); i++)
@@ -376,17 +365,24 @@ public final class MobileBrowseActivity extends Activity {
         list.setOnTouchListener((view, event) -> {
             if (page == Page.SETTINGS) return false;
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                lastTouchRawY = event.getRawY();
+                scrollDistance = 0;
                 pullStartY = event.getY();
                 pullFromTop = list.getFirstVisiblePosition() == 0
                         && (list.getChildCount() == 0 || list.getChildAt(0).getTop()
                         >= list.getPaddingTop());
             } else if (event.getActionMasked() == MotionEvent.ACTION_MOVE) {
+                int delta = Math.round(lastTouchRawY - event.getRawY());
+                lastTouchRawY = event.getRawY();
+                onCardScroll(delta);
                 if (pullFromTop && event.getY() - pullStartY > dp(18)) setChromeHidden(false);
             } else if (event.getActionMasked() == MotionEvent.ACTION_UP) {
                 if (pullFromTop && event.getY() - pullStartY > dp(110)) refresh();
                 pullFromTop = false;
+                scrollDistance = 0;
             } else if (event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
                 pullFromTop = false;
+                scrollDistance = 0;
             }
             return false;
         });
@@ -1098,17 +1094,14 @@ public final class MobileBrowseActivity extends Activity {
     }
 
     private void onCardScroll(int delta) {
-        // Resizing the chrome moves the feed's scroll viewport. That movement is
-        // reported as another scroll event, but it did not come from the user.
-        if (delta == 0 || page == Page.SETTINGS
-                || chromeAnimator != null && chromeAnimator.isRunning()) return;
+        if (delta == 0 || page == Page.SETTINGS) return;
         if (scrollDistance != 0 && Integer.signum(scrollDistance) != Integer.signum(delta))
             scrollDistance = 0;
-        scrollDistance = Math.max(-dp(32), Math.min(dp(32), scrollDistance + delta));
-        if (scrollDistance >= dp(16)) {
+        scrollDistance = Math.max(-dp(40), Math.min(dp(40), scrollDistance + delta));
+        if (scrollDistance >= dp(20)) {
             setChromeHidden(true);
             scrollDistance = 0;
-        } else if (scrollDistance <= -dp(16)) {
+        } else if (scrollDistance <= -dp(20)) {
             setChromeHidden(false);
             scrollDistance = 0;
         }
@@ -1154,9 +1147,7 @@ public final class MobileBrowseActivity extends Activity {
     private void resetChrome() {
         if (chromeAnimator != null) chromeAnimator.cancel();
         chromeHidden = false;
-        userScrolling = false;
         scrollDistance = 0;
-        lastScrollFirst = -1;
         applyChromeFraction(0f);
     }
 

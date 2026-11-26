@@ -59,6 +59,8 @@ final class TvHomeRows extends ScrollView {
     private Runnable pullReveal;
     private float pullStartX;
     private float pullStartY;
+    private float lastMotionRawX;
+    private float lastMotionRawY;
     private boolean pullFromTop;
 
     TvHomeRows(Activity activity, Actions actions) {
@@ -84,8 +86,6 @@ final class TvHomeRows extends ScrollView {
         configure(TvHomeFeed.ORDER, java.util.Arrays.asList(TITLES));
         setOnScrollChangeListener((View view, int x, int y, int oldX, int oldY) -> {
             refreshVisible();
-            if (scrollMotionListener != null && y != oldY)
-                scrollMotionListener.onScroll(y - oldY);
         });
     }
 
@@ -121,9 +121,17 @@ final class TvHomeRows extends ScrollView {
                 case MotionEvent.ACTION_DOWN:
                     pullStartX = event.getX();
                     pullStartY = event.getY();
+                    lastMotionRawX = event.getRawX();
+                    lastMotionRawY = event.getRawY();
                     pullFromTop = getScrollY() == 0;
                     break;
                 case MotionEvent.ACTION_MOVE:
+                    float dx = event.getRawX() - lastMotionRawX;
+                    float dy = event.getRawY() - lastMotionRawY;
+                    lastMotionRawX = event.getRawX();
+                    lastMotionRawY = event.getRawY();
+                    if (scrollMotionListener != null && Math.abs(dy) > Math.abs(dx))
+                        scrollMotionListener.onScroll(Math.round(-dy));
                     if (pullFromTop && event.getY() - pullStartY > px(18)
                             && Math.abs(event.getX() - pullStartX) < event.getY() - pullStartY
                             && pullReveal != null) pullReveal.run();
