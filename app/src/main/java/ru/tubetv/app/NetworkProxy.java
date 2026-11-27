@@ -91,14 +91,19 @@ final class NetworkProxy {
         URL url = new URL(address);
         Context context = appContext;
         Config config = context == null ? null : load(context);
+        HttpURLConnection connection;
         if (config == null || config.type == Proxy.Type.DIRECT
-                || (source != null && !isSourceEnabled(context, source)))
-            return (HttpURLConnection) url.openConnection(Proxy.NO_PROXY);
-        if (config.type == Proxy.Type.HTTP && !config.user.isEmpty())
-            return new AuthenticatedHttpProxyConnection(url, config);
-        Proxy proxy = new Proxy(config.type,
-                new InetSocketAddress(config.host, config.port));
-        return (HttpURLConnection) url.openConnection(proxy);
+                || (source != null && !isSourceEnabled(context, source))) {
+            connection = (HttpURLConnection) url.openConnection(Proxy.NO_PROXY);
+        } else if (config.type == Proxy.Type.HTTP && !config.user.isEmpty()) {
+            connection = new AuthenticatedHttpProxyConnection(url, config);
+        } else {
+            Proxy proxy = new Proxy(config.type,
+                    new InetSocketAddress(config.host, config.port));
+            connection = (HttpURLConnection) url.openConnection(proxy);
+        }
+        if (context != null) RutubeAccountSession.applyToApi(context, connection);
+        return connection;
     }
 
     static boolean isSourceEnabled(Context context, String source) {

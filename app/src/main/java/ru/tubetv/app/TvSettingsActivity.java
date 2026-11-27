@@ -228,6 +228,11 @@ public final class TvSettingsActivity extends Activity {
         row("Сохранить в файл", "JSON  ›", this::exportLibrary);
         row("Загрузить из файла", "JSON  ›", this::importLibrary);
         note("Файл совместим с RussTube Mobile. При загрузке новые записи добавляются к сохранённым.");
+        section("Аккаунт RUTUBE");
+        String rutubeName = RutubeAccountSession.savedName(this);
+        row("Вход в RUTUBE", rutubeName.isEmpty() ? "Не выполнен  ›" : rutubeName + "  ›",
+                () -> startActivity(new Intent(this, RutubeAccountActivity.class)));
+        note("Необязательный вход через сайт RUTUBE. Локальные подписки сохраняются отдельно.");
         if (TvHomeChannels.supported()) {
             section("Главный экран Android TV / Google TV");
             row("Добавить Рекомендации", "›", () -> TvHomeChannels.requestVisible(this, TvHomeChannels.RECOMMENDATIONS));
@@ -779,6 +784,17 @@ public final class TvSettingsActivity extends Activity {
     @Override protected void onResume() {
         super.onResume();
         updates.onResume();
+        if (category == 0 && drawerContent != null) {
+            int focusedRow = 0;
+            for (int i = 0; i < drawerContent.getChildCount(); i++) {
+                View child = drawerContent.getChildAt(i);
+                if (child.isFocusable()) {
+                    if (child.hasFocus()) break;
+                    focusedRow++;
+                }
+            }
+            renderPanel(focusedRow);
+        }
     }
 
     @Override protected void onPause() {

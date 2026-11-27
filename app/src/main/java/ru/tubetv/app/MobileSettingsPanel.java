@@ -70,6 +70,11 @@ final class MobileSettingsPanel extends ScrollView {
         row("Загрузить из файла", loadLibrary);
         description("При загрузке новые записи добавляются к сохранённым, повторы пропускаются.");
 
+        section("Аккаунт RUTUBE");
+        row("Войти или проверить вход  ›", () ->
+                activity.startActivity(new Intent(activity, RutubeAccountActivity.class)));
+        description("Вход необязателен. Подписки и избранное RussTube остаются локальными.");
+
         section("Устройства");
         row("Подключённые телевизоры и синхронизация  ›", () ->
                 activity.startActivity(new Intent(activity, LocalLinkActivity.class)));

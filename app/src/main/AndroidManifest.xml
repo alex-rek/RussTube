@@ -42,6 +42,7 @@
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:windowSoftInputMode="adjustResize" />
         <activity android:name=".NetworkSettingsActivity" android:exported="false" />
+        <activity android:name=".RutubeAccountActivity" android:exported="false" />
         <activity android:name=".TvSettingsActivity" android:exported="false" />
         <activity android:name=".LocalLinkActivity" android:exported="false" />
         <activity android:name=".LocalRemoteActivity" android:exported="false" />
