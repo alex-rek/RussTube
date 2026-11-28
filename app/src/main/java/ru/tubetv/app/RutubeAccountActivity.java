@@ -8,7 +8,9 @@ import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
 import android.webkit.CookieManager;
+import android.webkit.HttpAuthHandler;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceError;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -23,6 +25,7 @@ import java.util.concurrent.Executors;
 public final class RutubeAccountActivity extends Activity {
     private static final String ACCOUNT_PAGE = "https://rutube.ru/my/";
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    private final RutubeLoginProxy loginProxy = new RutubeLoginProxy();
     private WebView web;
     private TextView status;
     private TextView site;
@@ -80,6 +83,20 @@ public final class RutubeAccountActivity extends Activity {
             @Override public boolean shouldOverrideUrlLoading(WebView view, String url) {
                 return !url.startsWith("https://");
             }
+            @Override public void onReceivedHttpAuthRequest(WebView view, HttpAuthHandler handler,
+                                                            String host, String realm) {
+                NetworkProxy.Config proxy = NetworkProxy.load(RutubeAccountActivity.this);
+                if (NetworkProxy.isSourceEnabled(RutubeAccountActivity.this, "RUTUBE")
+                        && RutubeLoginProxy.matchesHttpProxyAuth(proxy, host)) {
+                    handler.proceed(proxy.user, proxy.password);
+                } else handler.cancel();
+            }
+            @Override public void onReceivedError(WebView view, WebResourceRequest request,
+                                                  WebResourceError error) {
+                if (!request.isForMainFrame()) return;
+                status.setText("Страница входа не загрузилась: "
+                        + error.getDescription() + ". Проверьте соединение и прокси RUTUBE.");
+            }
         });
         if (!BuildConfig.MOBILE_VARIANT) {
             web.setFocusable(true);
@@ -101,7 +118,9 @@ public final class RutubeAccountActivity extends Activity {
         }
         root.addView(web, new LinearLayout.LayoutParams(-1, 0, 1));
         setContentView(root);
-        web.loadUrl(ACCOUNT_PAGE);
+        loginProxy.prepare(this, () -> {
+            if (!isFinishing() && !isDestroyed() && web != null) web.loadUrl(ACCOUNT_PAGE);
+        }, message -> status.setText(message));
         check.requestFocus();
     }
 
@@ -187,6 +206,7 @@ public final class RutubeAccountActivity extends Activity {
             web.destroy();
             web = null;
         }
+        loginProxy.clear(this);
         super.onDestroy();
     }
 

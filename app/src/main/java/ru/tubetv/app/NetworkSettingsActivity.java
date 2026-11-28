@@ -75,7 +75,7 @@ public final class NetworkSettingsActivity extends Activity {
         TextView sourcesTitle = text("Площадки через прокси", 18, textColor);
         sourcesTitle.setPadding(0, dp(20), 0, dp(6));
         root.addView(sourcesTitle);
-        TextView sourcesNote = text("Отмеченные площадки используют прокси для поиска, обложек и видео. Остальные подключаются напрямую.",
+        TextView sourcesNote = text("Отмеченные площадки используют прокси для поиска, обложек и видео. Для RUTUBE — также вход и проверка аккаунта. Остальные подключаются напрямую.",
                 14, muted);
         root.addView(sourcesNote);
         sourceChecks = new CheckBox[NetworkProxy.SOURCES.length];
