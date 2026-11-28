@@ -13,7 +13,8 @@ import java.util.Locale;
 /** Optional RUTUBE website session. No password or cookie is copied into app preferences. */
 final class RutubeAccountSession {
     private static final String PREFS = "rutube_account";
-    private static final String PROFILE_URL = "https://rutube.ru/api/profile/user?picture_type=ios";
+    // The website uses the visitor endpoint for its active RUTUBE session.
+    private static final String PROFILE_URL = "https://rutube.ru/api/v3/accounts/visitor/";
 
     static String savedName(Context context) {
         return context.getSharedPreferences(PREFS, 0).getString("name", "");
@@ -24,6 +25,7 @@ final class RutubeAccountSession {
     }
 
     static String verify(Context context) throws Exception {
+        CookieManager.getInstance().flush();
         HttpURLConnection connection = NetworkProxy.openConnection("RUTUBE", PROFILE_URL);
         connection.setConnectTimeout(10000);
         connection.setReadTimeout(10000);

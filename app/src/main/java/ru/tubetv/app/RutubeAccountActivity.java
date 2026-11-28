@@ -2,6 +2,7 @@ package ru.tubetv.app;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.res.ColorStateList;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.Gravity;
@@ -14,6 +15,7 @@ import android.webkit.WebResourceError;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.CheckBox;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -31,6 +33,7 @@ public final class RutubeAccountActivity extends Activity {
     private TextView site;
     private TextView check;
     private TextView signOut;
+    private CheckBox proxyToggle;
 
     @Override protected void onCreate(Bundle savedState) {
         super.onCreate(savedState);
@@ -56,6 +59,25 @@ public final class RutubeAccountActivity extends Activity {
         TextView close = action("Закрыть", this::finish);
         actions.addView(close, new LinearLayout.LayoutParams(0, dp(52), 1));
         root.addView(actions);
+        proxyToggle = new CheckBox(this);
+        proxyToggle.setText("Использовать прокси для RUTUBE");
+        proxyToggle.setTextColor(TvAppearancePreferences.text(this));
+        proxyToggle.setButtonTintList(ColorStateList.valueOf(TvAppearancePreferences.accent(this)));
+        proxyToggle.setPadding(dp(8), 0, dp(8), 0);
+        NetworkProxy.Config proxy = NetworkProxy.load(this);
+        proxyToggle.setEnabled(proxy.type != java.net.Proxy.Type.DIRECT);
+        proxyToggle.setChecked(proxy.type != java.net.Proxy.Type.DIRECT
+                && NetworkProxy.isSourceEnabled(this, "RUTUBE"));
+        root.addView(proxyToggle);
+        if (proxy.type == java.net.Proxy.Type.DIRECT) {
+            TextView hint = label("Прокси можно настроить в разделе «Сеть».", 12);
+            hint.setTextColor(TvAppearancePreferences.secondary(this));
+            root.addView(hint);
+        }
+        proxyToggle.setOnCheckedChangeListener((button, enabled) -> {
+            NetworkProxy.setSourceEnabled(this, "RUTUBE", enabled);
+            if (web != null) loadAccountPage();
+        });
         updateStatus();
 
         try { web = new WebView(this); }
@@ -118,10 +140,14 @@ public final class RutubeAccountActivity extends Activity {
         }
         root.addView(web, new LinearLayout.LayoutParams(-1, 0, 1));
         setContentView(root);
+        loadAccountPage();
+        check.requestFocus();
+    }
+
+    private void loadAccountPage() {
         loginProxy.prepare(this, () -> {
             if (!isFinishing() && !isDestroyed() && web != null) web.loadUrl(ACCOUNT_PAGE);
         }, message -> status.setText(message));
-        check.requestFocus();
     }
 
     private void verify(boolean closeOnSuccess) {

@@ -33,6 +33,7 @@ final class RutubeLoginProxy {
         try {
             ProxyController controller = ProxyController.getInstance();
             if (!useProxy) {
+                overrideRequested = false;
                 controller.clearProxyOverride(activity::runOnUiThread, ready);
                 return;
             }
